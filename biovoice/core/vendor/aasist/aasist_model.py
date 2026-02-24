@@ -322,7 +322,7 @@ class AASISTModel(nn.Module):
     Input:  raw waveform tensor of shape (batch, num_samples)
             Expected length: 64600 samples (~4 sec at 16 kHz)
     Output: (last_hidden [batch, 160], logits [batch, 2])
-            logits[:, 0] = bonafide score, logits[:, 1] = spoof score
+            logits[:, 0] = spoof score, logits[:, 1] = bonafide score
     """
 
     def __init__(self, d_args=None):

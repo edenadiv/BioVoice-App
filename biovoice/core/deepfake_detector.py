@@ -78,9 +78,9 @@ class DeepfakeDetector:
         x = waveform.unsqueeze(0).to(self.device)  # [1, 64600]
 
         _, logits = self.model(x)  # logits: [1, 2]
-        # Apply softmax: index 0 = bonafide probability (per trained weights)
+        # Apply softmax: index 1 = bonafide, index 0 = spoof (clovaai/aasist convention)
         probs = F.softmax(logits, dim=-1)
-        genuine_score = probs[0, 0].item()
+        genuine_score = probs[0, 1].item()
 
         return genuine_score
 
