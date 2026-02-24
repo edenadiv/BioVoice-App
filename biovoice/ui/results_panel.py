@@ -69,10 +69,11 @@ class ResultsPanel(QWidget):
         layout = QVBoxLayout(page)
 
         icon = QLabel("\u26a0  DEEPFAKE DETECTED")
-        icon.setObjectName("statusFail")
+        icon.setObjectName("statusWarning")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setStyleSheet(
             "font-size: 18px; font-weight: 700; letter-spacing: 0.1em;"
+            " color: #a8944e;"
         )
         layout.addWidget(icon)
 
@@ -106,6 +107,7 @@ class ResultsPanel(QWidget):
         self._decision_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._decision_label.setStyleSheet(
             "font-size: 18px; font-weight: 700; letter-spacing: 0.1em;"
+            " color: #4ea882;"
         )
         decision_layout.addWidget(self._decision_label)
 
@@ -154,14 +156,20 @@ class ResultsPanel(QWidget):
         if result.decision == DECISION_ACCEPT:
             self._decision_label.setText("IDENTITY VERIFIED")
             self._decision_label.setObjectName("statusPass")
+            self._decision_label.setStyleSheet(
+                "font-size: 18px; font-weight: 700; letter-spacing: 0.1em;"
+                " color: #4ea882;"
+            )
             self._decision_frame.setObjectName("resultPass")
         else:
             self._decision_label.setText("IDENTITY REJECTED")
             self._decision_label.setObjectName("statusFail")
+            self._decision_label.setStyleSheet(
+                "font-size: 18px; font-weight: 700; letter-spacing: 0.1em;"
+                " color: #a84e4e;"
+            )
             self._decision_frame.setObjectName("resultFail")
 
-        self._decision_label.style().unpolish(self._decision_label)
-        self._decision_label.style().polish(self._decision_label)
         self._decision_frame.style().unpolish(self._decision_frame)
         self._decision_frame.style().polish(self._decision_frame)
 

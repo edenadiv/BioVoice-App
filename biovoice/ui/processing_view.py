@@ -40,10 +40,10 @@ class PipelineStage(QFrame):
         self._status = QLabel("PENDING")
         self._status.setFixedWidth(100)
         self._status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._status.setStyleSheet(
-            "font-size: 11px; letter-spacing: 0.06em;"
-        )
         layout.addWidget(self._status)
+
+        # Initialize to proper pending state with Unicode indicator + colors
+        self.set_pending()
 
     def set_pending(self):
         self._progress.setValue(0)

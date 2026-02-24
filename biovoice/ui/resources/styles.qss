@@ -294,6 +294,15 @@ QScrollBar::handle:horizontal {
     min-width: 30px;
 }
 
+QScrollBar::handle:horizontal:hover {
+    background-color: #363a45;
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
 /* Splitter */
 QSplitter::handle {
     background-color: #2a2d36;
