@@ -57,12 +57,18 @@ class DeepfakeDetector:
             waveform = F.pad(waveform, (0, pad_len))
         return waveform
 
+    # Target peak amplitude matching ASVspoof 2019 LA operating range.
+    # AASIST is amplitude-sensitive: at peak ~0.05, real speech scores ~0.93
+    # (genuine) while noise/synthetic scores ~0.02 (spoof). Above peak ~0.10,
+    # even real speech gets misclassified as spoof.
+    _TARGET_PEAK = 0.05
+
     @torch.no_grad()
     def detect(self, waveform: torch.Tensor) -> float:
         """Run deepfake detection on a waveform.
 
         Args:
-            waveform: shape [1, T] — mono audio at 16 kHz
+            waveform: shape [1, T] — mono audio at 16 kHz (any amplitude)
 
         Returns:
             Score in [0, 1]. Higher = more likely genuine.
@@ -75,6 +81,12 @@ class DeepfakeDetector:
             waveform = waveform.squeeze(0)
 
         waveform = self._pad_or_trim(waveform)
+
+        # Scale to target peak amplitude for AASIST's trained operating range.
+        peak = waveform.abs().max()
+        if peak > 1e-8:
+            waveform = waveform * (self._TARGET_PEAK / peak)
+
         x = waveform.unsqueeze(0).to(self.device)  # [1, 64600]
 
         _, logits = self.model(x)  # logits: [1, 2]
