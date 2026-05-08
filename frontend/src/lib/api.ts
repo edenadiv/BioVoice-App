@@ -21,6 +21,7 @@ type StageBreakdownResponse = {
   load_ms: number;
   resample_ms: number;
   normalize_ms: number;
+  vad_ms: number;
   embed_ms: number;
   detect_ms: number;
   total_ms: number;
@@ -114,11 +115,12 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
           loadMs: stage.load_ms,
           resampleMs: stage.resample_ms,
           normalizeMs: stage.normalize_ms,
+          vadMs: stage.vad_ms ?? 0,
           embedMs: stage.embed_ms,
           detectMs: stage.detect_ms,
           totalMs: stage.total_ms,
         }
-      : { loadMs: 0, resampleMs: 0, normalizeMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
+      : { loadMs: 0, resampleMs: 0, normalizeMs: 0, vadMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
     analysisDetails: details ? toAnalysisDetails(details) : null,
     createdAt: response.created_at,
   };

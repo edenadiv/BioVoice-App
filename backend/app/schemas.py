@@ -40,11 +40,15 @@ class StageBreakdown(BaseModel):
     Per Plan §4 architectural decision 5: timings reflect what the server actually
     measures. mel_ms is rolled into embed_ms because ReDimNet handles mel-spec
     extraction internally and we don't separate it.
+
+    F3.2 added `vad_ms` for the Voice Activity Detection trim that runs
+    between normalize and embed.
     """
 
     load_ms: float = 0.0
     resample_ms: float = 0.0
     normalize_ms: float = 0.0
+    vad_ms: float = 0.0
     embed_ms: float = 0.0
     detect_ms: float = 0.0
     total_ms: float = 0.0

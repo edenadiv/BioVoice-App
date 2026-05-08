@@ -102,7 +102,12 @@ class VerificationService:
 
     def enroll(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> EnrollmentResponse:
         payload = self.audio.decode_wav(audio_bytes)
-        embedding = self.encoder.embed(payload.waveform)
+        # F3.2 — trim silence before embedding so the centroid is built on
+        # speech frames, not background noise. ValueError surfaces as 400
+        # at the route layer with the operator-friendly message from
+        # AudioService.trim_to_voice.
+        trimmed, _ = self.audio.trim_to_voice(payload)
+        embedding = self.encoder.embed(trimmed.waveform)
         existing = self.store.get_speaker(user_id)
 
         if existing is None:
@@ -163,12 +168,19 @@ class VerificationService:
 
         payload, audio_timings = self.audio.decode_wav_with_timings(audio_bytes)
 
+        # F3.2 — strip leading/trailing silence so the embedding + spoof
+        # detection both run on speech frames. trim_to_voice raises
+        # ValueError if there's < 1 s of speech; the route layer maps that
+        # to 400 with the user-facing message.
+        trimmed, vad_ms = self.audio.trim_to_voice(payload)
+        audio_timings.vad_ms = vad_ms
+
         t0 = perf_counter()
-        query_embedding = self.encoder.embed(payload.waveform)
+        query_embedding = self.encoder.embed(trimmed.waveform)
         embed_ms = (perf_counter() - t0) * 1000.0
 
         t0 = perf_counter()
-        deepfake_score = self.detector.detect(payload.waveform)
+        deepfake_score = self.detector.detect(trimmed.waveform)
         detect_ms = (perf_counter() - t0) * 1000.0
 
         sample_similarities = [
@@ -186,6 +198,7 @@ class VerificationService:
             load_ms=audio_timings.load_ms,
             resample_ms=audio_timings.resample_ms,
             normalize_ms=audio_timings.normalize_ms,
+            vad_ms=audio_timings.vad_ms,
             embed_ms=embed_ms,
             detect_ms=detect_ms,
             total_ms=total_ms,

@@ -23,6 +23,7 @@ from app.schemas import (
     SpeakerResponse,
     VerificationResponse,
 )
+from app.services.audio import NoSpeechDetectedError
 from app.services.auth import AuthService
 from app.services.rate_limit import LoginRateLimited
 from app.services.spoof import SpoofGenerationService
@@ -110,6 +111,8 @@ async def enroll(
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
         return service.enroll(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+    # NoSpeechDetectedError is a ValueError subclass; the broader handler
+    # below already maps both to 400 with the human-readable message.
     except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -125,6 +128,10 @@ async def verify(
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
         return service.verify(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+    except NoSpeechDetectedError as exc:
+        # F3.2 — VAD found no usable speech. 400, not 404 (not a missing
+        # user), and not 500 (the user didn't speak — recoverable on retry).
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
@@ -157,6 +164,10 @@ async def login(
         )
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except NoSpeechDetectedError as exc:
+        # F3.2 — silent recording is a 400, not a 404. Login attempt is
+        # still recorded as a failure by AuthService for rate-limit accounting.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
@@ -198,6 +209,8 @@ async def verify_current_user(
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
         return service.verify(user_id=session.user_id, audio_bytes=payload, filename=audio.filename)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
