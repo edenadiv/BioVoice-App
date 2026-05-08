@@ -1,21 +1,25 @@
 # Eden — Tasks
 
 > Owner: Eden Adiv. Cross-references `Plan.md` (master plan).
-> **Role on this milestone:** Frontend lead, design system, app shell, and the two highest-visibility screens (Verification Result, Home/Login). Also owns the master `Plan.md`.
+> **Role on this milestone:** **UI lead**. Owns the design system, app shell, the marquee Verification Result screen, the Home/Login flow, and the backend extensions that feed the result screen (verification record fields, view-details endpoint, decision-logic alignment, perf probe). Also owns `Plan.md` upkeep.
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
+
+> **Note:** Idan is not active this milestone. His backend tasks were redistributed — Eden owns the verification-side backend work, Yoav owns the deepfake-side and availability work.
 
 ---
 
 ## Sprint 1 — Foundation
 
-### E-1. Phase 0 audit (frontend) ⬜
+### E-1. Phase 0 audit (frontend + backend boot) ⬜
 
 - Confirm the legacy `.jsx` files (`screens.jsx`, `more-screens.jsx`, `visuals.jsx`, `console.jsx`, `console-ext.jsx`, `audio.jsx`, `app.jsx`) are not referenced from `main.tsx`. If clean, delete them.
-- Grep the frontend for any `tcav|TCAV|concept|"Why This Decision"` and remove. Sync with Idan on backend-side TCAV cleanup.
+- Grep the frontend for any `tcav|TCAV|concept|"Why This Decision"` and remove. Grep the backend for the same — there should be nothing today, but confirm.
+- Sanity-check that the FastAPI app boots (`uvicorn app.main:app --reload` from `backend/`). Document any startup warnings.
+- Confirm `services/speaker_encoder.py` warm-loads ReDimNet on boot so the first verify request stays under the 2 s budget.
 - Run `npm run build` and confirm green.
 
-**Definition of done:** clean `tsc -b && vite build`, no TCAV strings remain in `frontend/`, repo diff is one focused commit.
+**Definition of done:** clean `tsc -b && vite build`, clean `uvicorn` boot, no TCAV strings remain anywhere, repo diff is one focused commit.
 
 ### E-2. Design system — tokens & primitives (Phase 1) ⬜
 
@@ -36,7 +40,7 @@
   - `Waveform.tsx` — accepts either a live `AnalyserNode` (live mode) or a `Float32Array` (static mode); renders 48 bars; spec'd with Yoav so live + replay use the same visual.
 - Add a `?showcase=1` query route in `App.tsx` that renders one of each primitive for review. Keep until end of Phase 2.
 
-**Definition of done:** primitives render under `?showcase=1`; Yoav and Idan approve via screenshot in the PR.
+**Definition of done:** primitives render under `?showcase=1`; Yoav signs off via screenshot in the PR.
 
 ### E-3. App shell + screen state machine (Phase 2) ⬜
 
@@ -86,7 +90,7 @@ This is the marquee screen for the demo. Match Fig. 18 exactly.
 - Continue → routes to home and clears `flowState`.
 - Try Again → routes back to Login (or Enroll if intent was enroll).
 
-**Definition of done:** screen pixel-snaps to Fig. 18 within ~4 px tolerance, View Details modal renders the breakdown returned by Idan's extended `/me/verify` response.
+**Definition of done:** screen pixel-snaps to Fig. 18 within ~4 px tolerance, View Details modal renders the breakdown returned by E-7's extended `/me/verify` response.
 
 ### E-6. Plan.md upkeep ⬜ (continuous)
 
@@ -95,21 +99,98 @@ This is the marquee screen for the demo. Match Fig. 18 exactly.
 
 ---
 
-## Sprint 3 — QA pass
+## Sprint 3 — Backend extensions I own
 
-### E-7. Cross-screen polish ⬜
+These tasks were Idan's; they now belong to Eden because they feed the Verification Result screen Eden owns.
+
+### E-7. Verification record extensions (Phase 8) ⬜
+
+Extend `VerificationResponse` (and `VerifyResult` model) with:
+
+```python
+class VerificationResponse(BaseModel):
+    # ... existing fields ...
+    session_id: str               # "VRF-2026-0508-AB12" formatted
+    stage_breakdown: StageBreakdown
+    decision_reason: Literal["accepted", "mismatch", "synthetic", "not_enrolled"]
+```
+
+```python
+class StageBreakdown(BaseModel):
+    load_ms: float
+    resample_ms: float
+    normalize_ms: float
+    mel_ms: float
+    embed_ms: float
+    detect_ms: float
+    total_ms: float
+```
+
+- Wire timings in `services/verification.py:verify()` using `time.perf_counter()`.
+- `session_id` format: `VRF-{YYYY}-{MMDD}-{XXXX}` where `XXXX = result_id[-4:].upper()`.
+- Persist `stage_breakdown` and `decision_reason` on `VerificationRecord.metadata` so historical queries return them.
+
+**Definition of done:** existing `/verify` and `/me/verify` responses include the new fields without breaking the frontend's existing typed parsers.
+
+### E-8. View-details endpoint (Phase 8) ⬜
+
+```http
+GET /me/verifications/{result_id}  →  VerificationResponse
+```
+
+- Auth required. 404 if `result_id` doesn't belong to the authenticated `user_id`.
+- Returns the full record built by E-7.
+
+**Definition of done:** Eden's "View Details" modal (E-5) wires to this endpoint and renders centroid, per-sample similarities, and stage breakdown.
+
+### E-9. Decision logic alignment with SDD §2.5 ⬜
+
+Current `services/verification.py` returns `DEEPFAKE` if the deepfake score is below threshold. The SDD specifies:
+
+```
+ACCEPT = (similarity ≥ 0.75) ∧ (deepfake_score ≥ 0.5)
+```
+
+- Confirm the order of checks matches the SDD activity diagram (Fig. 13): preprocess → embedding → AASIST → if DF<0.5 reject as fake → similarity → if sim<0.75 reject as mismatch → accept.
+- Tighten the messages so they match the UI copy:
+  - DEEPFAKE → "Audio flagged as synthetic. Access denied."
+  - REJECT → "Speaker did not match the enrolled profile."
+  - ACCEPT → "Identity verified."
+- Surface a `decision_reason` enum (`accepted | mismatch | synthetic | not_enrolled`) on the response.
+
+**Definition of done:** all three decisions have stable, copy-locked messages and machine-readable reasons. Yoav's Deepfake Result screen consumes the same enum.
+
+### E-10. Verification tests ⬜
+
+- `tests/test_verification.py` — happy path (ACCEPT), mismatch (REJECT), deepfake-flagged (DEEPFAKE).
+- Use FastAPI's `TestClient` with the in-memory store fixture.
+
+**Definition of done:** `pytest backend/tests/test_verification.py` is green.
+
+### E-11. Performance probe ⬜
+
+- Add a one-shot script `backend/scripts/bench_verify.py` that posts 10 verifications against the running server and prints p50/p95 timings + the new `stage_breakdown`.
+- Confirm p95 < 2 s on a dev box. Append numbers to `Plan.md` §7 risks table.
+
+---
+
+## Sprint 4 — QA pass
+
+### E-12. Cross-screen polish ⬜
 
 - Audit all 5 screens at 1280×800 and 1024×768. File issues for misalignments, missing focus states, contrast issues.
 - Confirm keyboard-only navigation: Tab order through Enrollment, Verification Result, Test Lab.
 - Verify `<2s` p50 verify latency by manual stopwatch over 10 runs.
 
-### E-8. Demo script ⬜
+### E-13. Demo script ⬜
 
-- Write a 1-page `Demo.md` (NOT in this repo unless asked) — but for now: prepare a 90-second walkthrough script for the client. Topics: enrollment, processing visualization, genuine vs synthetic, verification gauge.
+- Prepare a 90-second walkthrough script for the client. Topics: enrollment, processing visualization, genuine vs synthetic, verification gauge.
 
 ---
 
 ## Files Eden owns
+
+**Frontend:**
 
 - `Plan.md`
 - `frontend/src/App.tsx`
@@ -129,8 +210,18 @@ This is the marquee screen for the demo. Match Fig. 18 exactly.
 - `frontend/src/screens/VerifyResultScreen.tsx`
 - `frontend/src/lib/flowState.ts`
 
+**Backend (taken from Idan's old scope):**
+
+- `backend/app/api/routes.py` (additions: `/me/verifications/{result_id}`)
+- `backend/app/schemas.py` (additions: `StageBreakdown`, extended `VerificationResponse`, `decision_reason`)
+- `backend/app/services/verification.py` (timings, session id, decision messages, decision_reason)
+- `backend/tests/test_verification.py` (new)
+- `backend/scripts/bench_verify.py` (new)
+
 ## Coordination notes
 
 - **Blocks Yoav** on E-2 (primitives must exist before he wires Enroll/Processing/Test Lab screens).
-- **Needs from Idan** before E-5: `/me/verifications/{result_id}` endpoint, `session_id` field, `stage_breakdown` field.
-- Daily 5-min stand-up message in Slack/WhatsApp covering: what shipped yesterday, what's in flight, blockers.
+- **Blocks Yoav** indirectly on E-9 — the `decision_reason` enum is shared between Verification Result and Deepfake Result screens.
+- **Needs from Yoav** before final QA: the audio capture rewrite (Y-1) and the AASIST analysis details (Y-5).
+- Daily 5-min stand-up message covering: what shipped yesterday, what's in flight, blockers.
+- API contract changes go through a 24 h notice; Yoav updates his typed parser in lockstep.
