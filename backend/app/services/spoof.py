@@ -112,7 +112,7 @@ class SpoofGenerationService:
                 from TTS.tts.models.xtts import Xtts
             except ImportError as exc:
                 raise RuntimeError(
-                    "XTTS dependencies are not installed. Install the backend with the TTS package before generating spoof samples."
+                    "XTTS dependencies are not installed. Reinstall the backend with the 'spoof' extra on Python 3.11 or 3.12 before generating spoof samples."
                 ) from exc
 
             config_path = self.model_path / "config.json"
