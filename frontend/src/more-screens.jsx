@@ -5,7 +5,14 @@ import { LivePulse, Waveform } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { useVoiceRecorder } from "./lib/audio";
-import { enrollSpeaker, getAvailability, listSpeakers } from "./lib/api";
+import {
+  enrollSpeaker,
+  generateSpoofSample,
+  getAvailability,
+  listReferenceSamples,
+  listSpeakers,
+  spoofTest,
+} from "./lib/api";
 import { useAppDispatch, useAppState } from "./lib/session";
 
 const ENROLLMENT_TARGET = 3;
@@ -67,61 +74,136 @@ function Sidebar({ page, setPage }) {
 }
 
 // ============================================================================
-// DeepfakeLab — interactive deepfake creation/detection demo.
+// DeepfakeLab — wired (Y-16) to /me/spoof for generation + /me/spoof/test for
+// detection. Requires an active session (the spoof endpoint generates from the
+// authenticated user's saved reference samples). Replay/splice tiles are
+// hidden — only the working clone path ships this milestone (Plan §4).
 // ============================================================================
 function DeepfakeLab({ audio, profiles }) {
-  const [target, setTarget] = useState(profiles[0].id);
+  const { session } = useAppState();
   const [text, setText] = useState("Authorize transfer of two million dollars.");
-  const [model, setModel] = useState('clone-v3');
+  const [referenceSamples, setReferenceSamples] = useState([]);
+  const [referenceSampleId, setReferenceSampleId] = useState(null);
   const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState(null);
-  const [progress, setProgress] = useState(0);
+  const [generationError, setGenerationError] = useState(null);
+  const [generated, setGenerated] = useState(null); // { audioUrl, fileName, sourceDescription, samples (Float32) }
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState(null);
+  const [testResult, setTestResult] = useState(null); // SpoofTestResult
   const [stage, setStage] = useState(0); // 0 idle, 1 cloning, 2 synthesizing, 3 detecting, 4 done
 
-  const targetProfile = profiles.find(p => p.id === target) || profiles[0];
+  // Source profile is just the logged-in user — /me/spoof scopes to session.user_id.
+  const sourceProfile = useMemo(
+    () => profiles.find((p) => p.userId === session?.userId) || null,
+    [profiles, session?.userId],
+  );
 
-  const generate = () => {
-    setGenerating(true); setResult(null); setProgress(0); setStage(1);
-    const stages = [
-      { ms: 1400, next: 2 },
-      { ms: 1600, next: 3 },
-      { ms: 1400, next: 4 },
-    ];
-    let i = 0;
-    const startedAt = performance.now();
-    let raf;
-    const totalMs = stages.reduce((a, b) => a + b.ms, 0);
-    const tick = (now) => {
-      const el = now - startedAt;
-      setProgress(Math.min(1, el / totalMs));
-      let cum = 0; let s = 1;
-      for (const st of stages) { cum += st.ms; if (el < cum) break; s = st.next; }
-      setStage(s);
-      if (el >= totalMs) {
-        setGenerating(false);
-        setResult({
-          dfScore: 0.04 + Math.random() * 0.06,
-          confidence: 0.96 + Math.random() * 0.03,
-          model,
-          time: (totalMs / 1000).toFixed(2),
-          artifacts: [
-            { name: 'Spectral discontinuities', strength: 0.81 + Math.random() * 0.1 },
-            { name: 'Phase coherence loss', strength: 0.74 + Math.random() * 0.1 },
-            { name: 'Vocoder fingerprint', strength: 0.91 + Math.random() * 0.05 },
-            { name: 'Micro-prosody drift', strength: 0.62 + Math.random() * 0.15 },
-          ],
-        });
-        return;
-      }
-      raf = requestAnimationFrame(tick);
+  // Load saved reference samples for the source picker.
+  useEffect(() => {
+    if (!session) {
+      setReferenceSamples([]);
+      setReferenceSampleId(null);
+      return;
+    }
+    let alive = true;
+    listReferenceSamples(session.sessionToken)
+      .then((samples) => {
+        if (!alive) return;
+        setReferenceSamples(samples);
+        setReferenceSampleId(samples[0]?.sampleId ?? null);
+      })
+      .catch(() => {
+        /* leave empty */
+      });
+    return () => {
+      alive = false;
     };
-    raf = requestAnimationFrame(tick);
-  };
+  }, [session]);
+
+  // Revoke any stale blob URL when a new generation lands or on unmount.
+  useEffect(() => {
+    return () => {
+      if (generated?.audioUrl) URL.revokeObjectURL(generated.audioUrl);
+    };
+  }, [generated?.audioUrl]);
+
+  const generate = useCallback(async () => {
+    if (!session) {
+      setGenerationError("Sign in via Run Verification on the console to use the lab.");
+      return;
+    }
+    if (referenceSamples.length === 0) {
+      setGenerationError("This account has no enrolment samples to clone from.");
+      return;
+    }
+    if (!text.trim()) {
+      setGenerationError("Provide some text to synthesize.");
+      return;
+    }
+    if (generated?.audioUrl) URL.revokeObjectURL(generated.audioUrl);
+    setGenerating(true);
+    setGenerationError(null);
+    setTestResult(null);
+    setTestError(null);
+    setGenerated(null);
+    setStage(1);
+    const stageTimer = setTimeout(() => setStage(2), 1200);
+    try {
+      const result = await generateSpoofSample(session.sessionToken, {
+        text: text.trim(),
+        language: "en",
+        referenceSampleId: referenceSampleId ?? undefined,
+      });
+      setStage(3);
+      // Decode the WAV so we can render it in the static waveform.
+      let samples = null;
+      try {
+        const blob = await fetch(result.audioUrl).then((r) => r.blob());
+        const arrayBuffer = await blob.arrayBuffer();
+        const Ctx = window.AudioContext ?? window.webkitAudioContext;
+        if (Ctx) {
+          const decoded = await new Ctx().decodeAudioData(arrayBuffer.slice(0));
+          samples = decoded.getChannelData(0);
+        }
+      } catch {
+        /* render without waveform if decode fails */
+      }
+      setGenerated({ ...result, samples });
+      setStage(4);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err ?? "Generation failed");
+      setGenerationError(
+        /not installed|503|XTTS dependencies/i.test(message)
+          ? "Voice cloning model is offline (XTTS unavailable). Try again or run a fresh enrolment first."
+          : message,
+      );
+      setStage(0);
+    } finally {
+      clearTimeout(stageTimer);
+      setGenerating(false);
+    }
+  }, [session, referenceSamples, text, referenceSampleId, generated]);
+
+  const testDetection = useCallback(async () => {
+    if (!session || !generated?.audioUrl) return;
+    setTesting(true);
+    setTestError(null);
+    try {
+      const blob = await fetch(generated.audioUrl).then((r) => r.blob());
+      const file = new File([blob], generated.fileName || "spoof.wav", { type: "audio/wav" });
+      const result = await spoofTest(session.sessionToken, file);
+      setTestResult(result);
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : String(err ?? "Detection failed"));
+    } finally {
+      setTesting(false);
+    }
+  }, [session, generated]);
 
   const stages = [
-    { label: 'Cloning voice timbre', sub: 'XTTS-v3 embedding from 6s reference' },
-    { label: 'Synthesizing speech', sub: 'Neural vocoder · 24 kHz waveform' },
-    { label: 'Running BioVoice detector', sub: 'AASIST anti-spoof · 192-d fingerprint' },
+    { label: "Cloning voice timbre", sub: "XTTS · embedding from saved reference" },
+    { label: "Synthesizing speech", sub: "Neural vocoder · 24 kHz waveform" },
+    { label: "Running BioVoice detector", sub: "AASIST anti-spoof · 192-d fingerprint" },
   ];
 
   return (
@@ -137,39 +219,73 @@ function DeepfakeLab({ audio, profiles }) {
             <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>RED-TEAM · FORGE</div>
             <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>Create a deepfake</div>
             <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
-              Try to clone an enrolled voice and use it to authenticate. BioVoice catches the fakes — even ones a human ear can't distinguish.
+              Try to clone the logged-in voice and feed it back through AASIST. BioVoice catches the fakes — even ones a human ear can't distinguish.
             </div>
           </div>
 
           <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <Field label="TARGET VOICE">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {profiles.slice(0, 6).map(p => (
-                  <button key={p.id} onClick={() => setTarget(p.id)} className="lift"
-                    style={{
-                      padding: '10px 10px', borderRadius: 10, cursor: 'pointer',
-                      background: target === p.id ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
-                      border: target === p.id ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
-                      color: 'var(--ink)', textAlign: 'left',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      transition: 'all 200ms',
-                    }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: '50%',
-                      background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
-                      display: 'grid', placeItems: 'center', color: '#04070d', fontWeight: 600, fontSize: 10,
-                    }}>{p.initials}</div>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                      <div className="label-mono" style={{ fontSize: 8 }}>{p.id}</div>
+            <Field label="SOURCE VOICE">
+              {!session ? (
+                <div style={{
+                  padding: '14px 16px', borderRadius: 10,
+                  background: 'rgba(255,178,74,0.06)', border: '1px solid rgba(255,178,74,0.25)',
+                  fontSize: 12, color: 'var(--ink-mute)',
+                }}>
+                  Sign in via <strong style={{ color: 'var(--ink)' }}>Run Verification</strong> on the console to use the lab.
+                </div>
+              ) : sourceProfile ? (
+                <div style={{
+                  padding: '12px 14px', borderRadius: 10,
+                  background: 'rgba(255,178,74,0.06)', border: '1px solid rgba(255,178,74,0.4)',
+                  display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${sourceProfile.color1}, ${sourceProfile.color2})`,
+                    display: 'grid', placeItems: 'center', color: '#04070d', fontWeight: 600, fontSize: 12,
+                  }}>{sourceProfile.initials}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13 }}>{sourceProfile.name}</div>
+                    <div className="label-mono" style={{ fontSize: 9 }}>
+                      {referenceSamples.length} reference sample{referenceSamples.length === 1 ? '' : 's'}
                     </div>
-                  </button>
-                ))}
-              </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{
+                  padding: '12px 14px', borderRadius: 10,
+                  background: 'rgba(255,85,119,0.06)', border: '1px solid rgba(255,85,119,0.25)',
+                  fontSize: 12, color: 'var(--bad)',
+                }}>
+                  Active session has no enrolled profile.
+                </div>
+              )}
+              {referenceSamples.length > 1 && (
+                <select
+                  value={referenceSampleId ?? ''}
+                  onChange={(e) => setReferenceSampleId(e.target.value || null)}
+                  style={{
+                    marginTop: 10, width: '100%',
+                    background: 'rgba(125,200,255,0.04)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 10, padding: '10px 12px', color: 'var(--ink)',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                  }}
+                >
+                  {referenceSamples.map((s) => (
+                    <option key={s.sampleId} value={s.sampleId}>
+                      {s.originalFilename} · {new Date(s.createdAt).toLocaleString()}
+                    </option>
+                  ))}
+                </select>
+              )}
             </Field>
 
             <Field label="UTTERANCE TO SYNTHESIZE">
-              <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={2}
                 style={{
                   width: '100%', resize: 'none',
                   background: 'rgba(125,200,255,0.04)',
@@ -178,36 +294,44 @@ function DeepfakeLab({ audio, profiles }) {
                   padding: '12px 14px',
                   fontFamily: 'Sora, sans-serif', fontSize: 14,
                   outline: 'none',
-                }}/>
+                }}
+              />
             </Field>
 
             <Field label="ATTACK MODEL">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {[
-                  { id: 'clone-v3', label: 'Voice clone', sub: 'XTTS-v3' },
-                  { id: 'replay',   label: 'Replay', sub: 'Recorded attack' },
-                  { id: 'splice',   label: 'Splice', sub: 'Concatenative' },
-                ].map(m => (
-                  <button key={m.id} onClick={() => setModel(m.id)} className="lift"
-                    style={{
-                      padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
-                      background: model === m.id ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
-                      border: model === m.id ? '1px solid rgba(255,178,74,0.5)' : '1px solid var(--line)',
-                      color: 'var(--ink)', textAlign: 'left',
-                      transition: 'all 200ms',
-                    }}>
-                    <div style={{ fontSize: 12 }}>{m.label}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2 }}>{m.sub}</div>
-                  </button>
-                ))}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                <div className="lift" style={{
+                  padding: '12px 14px', borderRadius: 10,
+                  background: 'rgba(255,178,74,0.10)', border: '1px solid rgba(255,178,74,0.5)',
+                  color: 'var(--ink)',
+                }}>
+                  <div style={{ fontSize: 13 }}>Voice clone</div>
+                  <div className="label-mono" style={{ fontSize: 9, marginTop: 2, color: 'var(--ink-soft)' }}>
+                    XTTS-v2 · the only attack the lab forges this milestone
+                  </div>
+                </div>
               </div>
             </Field>
 
-            <button onClick={generate} disabled={generating} className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,
-                opacity: generating ? 0.7 : 1, cursor: generating ? 'wait' : 'pointer' }}>
-              {generating ? `Generating · ${(progress * 100).toFixed(0)}%` : <>⚡  Forge & test attack</>}
+            <button
+              onClick={generate}
+              disabled={generating || !session || referenceSamples.length === 0 || !text.trim()}
+              className="btn btn-primary"
+              style={{
+                width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,
+                opacity: generating ? 0.7 : 1, cursor: generating ? 'wait' : 'pointer',
+              }}
+            >
+              {generating ? "Generating…" : <>⚡  Forge & test attack</>}
             </button>
+
+            {generationError && (
+              <div style={{
+                padding: 12, borderRadius: 10,
+                background: 'rgba(255,85,119,0.08)', border: '1px solid rgba(255,85,119,0.4)',
+                color: 'var(--bad)', fontSize: 12, fontFamily: 'JetBrains Mono, monospace',
+              }}>{generationError}</div>
+            )}
           </div>
         </div>
 
@@ -224,7 +348,7 @@ function DeepfakeLab({ audio, profiles }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {stages.map((s, i) => {
                 const active = stage === i + 1;
-                const done = stage > i + 1 || (!generating && stage > 0);
+                const done = stage > i + 1 || (!generating && stage === 4);
                 const pending = stage < i + 1 && !done;
                 const color = done ? '#6affc8' : (active ? '#ffb24a' : 'rgba(125,200,255,0.25)');
                 return (
@@ -257,11 +381,11 @@ function DeepfakeLab({ audio, profiles }) {
 
           {/* Verdict */}
           <div className="panel outline-glow" style={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
-            {!result && !generating && (
+            {!generated && !generating && (
               <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                 <div>
                   <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>◌</div>
-                  <div style={{ fontSize: 14 }}>Run an attack to see how BioVoice catches it.</div>
+                  <div style={{ fontSize: 14 }}>Forge an attack to see how BioVoice catches it.</div>
                   <div className="label-mono" style={{ fontSize: 9, marginTop: 6 }}>WAITING</div>
                 </div>
               </div>
@@ -271,37 +395,48 @@ function DeepfakeLab({ audio, profiles }) {
                 <ScanRings/>
               </div>
             )}
-            {result && (
-              <div style={{ animation: 'fadeIn 600ms ease both' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                  <div style={{
-                    padding: '6px 14px', borderRadius: 999,
-                    border: '1px solid rgba(255,85,119,0.5)',
-                    background: 'rgba(255,85,119,0.10)',
-                    color: '#ff5577', fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
-                  }}>⚠  DEEPFAKE DETECTED</div>
-                  <div className="label-mono" style={{ fontSize: 9 }}>BLOCKED IN {result.time}s</div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                  <div style={{ padding: 14, borderRadius: 10, background: 'rgba(255,85,119,0.06)', border: '1px solid rgba(255,85,119,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>AUTHENTICITY</div>
-                    <div className="num-mono" style={{ fontSize: 30, color: '#ff5577', marginTop: 4, fontWeight: 200 }}>{result.dfScore.toFixed(2)}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--bad)' }}>BELOW 0.50 · SYNTHETIC</div>
-                  </div>
-                  <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>DETECTOR CONFIDENCE</div>
-                    <div className="num-mono" style={{ fontSize: 30, color: '#7ef0ff', marginTop: 4, fontWeight: 200 }}>{(result.confidence * 100).toFixed(1)}%</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--good)' }}>HIGH CONFIDENCE</div>
+            {generated && !testResult && !testing && (
+              <div style={{ animation: 'fadeIn 600ms ease both', display: 'grid', gap: 14 }}>
+                <div className="label-mono" style={{ fontSize: 10 }}>GENERATED DEEPFAKE</div>
+                <div style={{
+                  padding: '14px 18px', borderRadius: 10,
+                  background: 'rgba(255,85,119,0.06)', border: '1px solid rgba(255,85,119,0.18)',
+                }}>
+                  {generated.samples ? (
+                    <Waveform samples={byteSamples(generated.samples)} width={520} height={64} bars={92} mirror={true} color="#ff7aa8"/>
+                  ) : (
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', padding: '10px 0' }}>
+                      Waveform decode unavailable (model output → ready to test)
+                    </div>
+                  )}
+                  <audio controls src={generated.audioUrl} style={{ width: '100%', marginTop: 10, height: 32 }}/>
+                  <div className="label-mono" style={{ fontSize: 9, marginTop: 8, color: 'var(--ink-soft)' }}>
+                    {generated.sourceDescription}
                   </div>
                 </div>
-                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>FORENSIC ARTIFACTS DETECTED</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {result.artifacts.map((a, i) => (
-                    <ArtifactBar key={i} {...a} delay={i * 120}/>
-                  ))}
-                </div>
+                <button
+                  onClick={testDetection}
+                  className="btn btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 13 }}
+                >
+                  ⚠  Test detection
+                </button>
               </div>
+            )}
+            {testing && (
+              <div style={{ display: 'grid', placeItems: 'center', flex: 1, padding: 30 }}>
+                <ScanRings/>
+              </div>
+            )}
+            {testError && (
+              <div style={{
+                padding: 12, borderRadius: 10,
+                background: 'rgba(255,85,119,0.08)', border: '1px solid rgba(255,85,119,0.4)',
+                color: 'var(--bad)', fontSize: 12, fontFamily: 'JetBrains Mono, monospace',
+              }}>{testError}</div>
+            )}
+            {testResult && (
+              <SpoofVerdict result={testResult} generated={generated}/>
             )}
           </div>
         </div>
@@ -310,12 +445,89 @@ function DeepfakeLab({ audio, profiles }) {
   );
 }
 
-function ArtifactBar({ name, strength, delay = 0 }) {
+function SpoofVerdict({ result, generated }) {
+  const flagged = result.decision === "FAKE";
+  const accent = flagged ? '#ff5577' : '#6affc8';
+  const verdictBg = flagged ? 'rgba(255,85,119,0.10)' : 'rgba(106,255,200,0.10)';
+  const verdictBorder = flagged ? 'rgba(255,85,119,0.5)' : 'rgba(106,255,200,0.45)';
+  const verdictLabel = flagged ? '⚠  DEEPFAKE DETECTED' : '✓  AUDIO LOOKS GENUINE';
+  const details = result.analysisDetails;
+  return (
+    <div style={{ animation: 'fadeIn 600ms ease both' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+        <div style={{
+          padding: '6px 14px', borderRadius: 999,
+          border: `1px solid ${verdictBorder}`,
+          background: verdictBg, color: accent,
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
+        }}>{verdictLabel}</div>
+        <div className="label-mono" style={{ fontSize: 9 }}>
+          AASIST · {flagged ? 'BELOW' : 'ABOVE'} 0.50 THRESHOLD
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <div style={{ padding: 14, borderRadius: 10, background: verdictBg, border: `1px solid ${verdictBorder}` }}>
+          <div className="label-mono" style={{ fontSize: 9 }}>AUTHENTICITY</div>
+          <div className="num-mono" style={{ fontSize: 30, color: accent, marginTop: 4, fontWeight: 200 }}>
+            {result.deepfakeScore.toFixed(2)}
+          </div>
+          <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: accent }}>
+            {flagged ? 'BELOW 0.50 · SYNTHETIC' : 'ABOVE 0.50 · GENUINE'}
+          </div>
+        </div>
+        <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
+          <div className="label-mono" style={{ fontSize: 9 }}>SOURCE</div>
+          <div style={{ fontSize: 13, marginTop: 6, color: 'var(--ink)', wordBreak: 'break-word' }}>
+            {generated?.sourceDescription || '—'}
+          </div>
+          <div className="label-mono" style={{ fontSize: 8, marginTop: 4, color: 'var(--ink-soft)' }}>
+            XTTS · {generated?.fileName ?? 'spoof.wav'}
+          </div>
+        </div>
+      </div>
+      <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>
+        {flagged ? 'FORENSIC ARTIFACTS DETECTED' : 'AUDIO MICRO-PATTERNS'}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <ArtifactBar name="Voice naturalness" strength={details.voiceNaturalness} delay={0} flagged={flagged}/>
+        <ArtifactBar name="Spectral consistency" strength={details.spectralConsistency} delay={120} flagged={flagged}/>
+        <ArtifactBar name="Temporal pattern" strength={details.temporalPatterns} delay={240} flagged={flagged}/>
+        <ArtifactBar name="Artifact load" strength={details.artifactDetection} delay={360} flagged={flagged} invert/>
+      </div>
+    </div>
+  );
+}
+
+// Convert Float32 PCM samples (-1..1) into the byte time-domain (0..255, 128
+// = silence) format that the existing <Waveform> visualizer expects.
+function byteSamples(float32) {
+  if (!float32 || float32.length === 0) return new Uint8Array(0);
+  const out = new Uint8Array(float32.length);
+  for (let i = 0; i < float32.length; i += 1) {
+    const v = Math.max(-1, Math.min(1, float32[i]));
+    out[i] = Math.round(128 + v * 127);
+  }
+  return out;
+}
+
+function ArtifactBar({ name, strength, delay = 0, flagged = true, invert = false }) {
   const [w, setW] = useState(0);
   useEffect(() => {
     const id = setTimeout(() => setW(strength), delay + 60);
     return () => clearTimeout(id);
   }, [strength, delay]);
+  // Bar colour communicates whether this metric supports the verdict:
+  //   flagged + non-invert: high values are bad → red.
+  //   flagged + invert (artifact load): high values are bad → red.
+  //   genuine + non-invert: high values are good → green.
+  //   genuine + invert: high values are bad → if low, green; if high, red.
+  const isBad = flagged ? true : invert ? strength > 0.5 : false;
+  const fill = isBad
+    ? 'linear-gradient(90deg, rgba(255,178,74,0.5), #ff5577)'
+    : 'linear-gradient(90deg, rgba(106,255,200,0.45), #6affc8)';
+  const glow = isBad ? '0 0 10px rgba(255,85,119,0.5)' : '0 0 10px rgba(106,255,200,0.4)';
+  const numColor = isBad ? '#ff7aa8' : '#6affc8';
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px', alignItems: 'center', gap: 10 }}>
       <div>
@@ -323,14 +535,13 @@ function ArtifactBar({ name, strength, delay = 0 }) {
         <div style={{ height: 6, background: 'rgba(125,200,255,0.06)', borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
           <div style={{
             height: '100%', width: `${w * 100}%`,
-            background: 'linear-gradient(90deg, rgba(255,178,74,0.5), #ff5577)',
-            boxShadow: '0 0 10px rgba(255,85,119,0.5)',
+            background: fill, boxShadow: glow,
             transition: 'width 700ms cubic-bezier(.2,.8,.2,1)',
             borderRadius: 3,
-          }}></div>
+          }}/>
         </div>
       </div>
-      <span className="num-mono" style={{ fontSize: 13, color: '#ff7aa8', textAlign: 'right' }}>{(strength * 100).toFixed(0)}%</span>
+      <span className="num-mono" style={{ fontSize: 13, color: numColor, textAlign: 'right' }}>{(strength * 100).toFixed(0)}%</span>
     </div>
   );
 }
