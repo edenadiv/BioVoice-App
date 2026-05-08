@@ -27,11 +27,25 @@ class ReferenceSampleResponse(BaseModel):
     created_at: datetime
 
 
+class SampleQuality(BaseModel):
+    """F3.3 — per-sample audio quality summary surfaced on
+    EnrollmentResponse so operators can show a quality score on the kiosk
+    sample dots and explain rejected samples without digging through logs.
+    """
+
+    score: float = Field(ge=0.0, le=100.0)
+    snr_db: float
+    clipping_pct: float = Field(ge=0.0, le=100.0)
+    speech_ratio: float = Field(ge=0.0, le=1.0)
+    acceptable: bool
+
+
 class EnrollmentResponse(BaseModel):
     user_id: str
     status: str
     message: str
     enrolled_at: datetime
+    quality: SampleQuality | None = None
 
 
 class StageBreakdown(BaseModel):

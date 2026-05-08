@@ -154,7 +154,10 @@ def test_verify_silent_recording_raises_value_error(verification_service, enroll
 
 def test_enrol_silent_recording_raises_value_error(verification_service):
     """Same defence on the enrolment side — silent samples never pollute
-    the centroid."""
+    the centroid. F3.3 lands the quality gate ahead of the VAD trim so
+    silent recordings now fail with "0 % speech / SNR 0 dB" instead of
+    the bare VAD message; either is acceptable for the contract test —
+    we just want a ValueError surfacing the speech / SNR diagnosis."""
     silent = _silence_wav(2.0)
-    with pytest.raises(ValueError, match="No speech detected"):
+    with pytest.raises(ValueError, match=r"speech|SNR"):
         verification_service.enroll(user_id="charlie", audio_bytes=silent)

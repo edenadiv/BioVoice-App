@@ -23,7 +23,7 @@ from app.schemas import (
     SpeakerResponse,
     VerificationResponse,
 )
-from app.services.audio import NoSpeechDetectedError
+from app.services.audio import NoSpeechDetectedError, SampleQualityRejectedError
 from app.services.auth import AuthService
 from app.services.rate_limit import LoginRateLimited
 from app.services.spoof import SpoofGenerationService

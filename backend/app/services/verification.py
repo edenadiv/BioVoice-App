@@ -14,11 +14,12 @@ from app.schemas import (
     AnalysisDetails,
     DecisionReason,
     EnrollmentResponse,
+    SampleQuality,
     SpeakerResponse,
     StageBreakdown,
     VerificationResponse,
 )
-from app.services.audio import AudioService
+from app.services.audio import AudioService, SampleQualityRejectedError
 from app.services.detector import DeepfakeDetectorService
 from app.services.speaker_encoder import SpeakerEncoder
 
@@ -102,6 +103,14 @@ class VerificationService:
 
     def enroll(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> EnrollmentResponse:
         payload = self.audio.decode_wav(audio_bytes)
+        # F3.3 — score the sample BEFORE trimming so noise estimates are
+        # taken from the raw recording (post-trim there's no silence to
+        # anchor SNR against). Reject low-quality samples here so they
+        # never enter the centroid; the route layer maps the typed
+        # exception to HTTP 400 + the operator-friendly explanation.
+        quality = self.audio.score_quality(payload)
+        if not quality.acceptable:
+            raise SampleQualityRejectedError(quality.reason, quality)
         # F3.2 — trim silence before embedding so the centroid is built on
         # speech frames, not background noise. ValueError surfaces as 400
         # at the route layer with the operator-friendly message from
@@ -152,6 +161,13 @@ class VerificationService:
             status="enrolled",
             message=message,
             enrolled_at=record.enrolled_at,
+            quality=SampleQuality(
+                score=quality.score,
+                snr_db=quality.snr_db,
+                clipping_pct=quality.clipping_pct,
+                speech_ratio=quality.speech_ratio,
+                acceptable=quality.acceptable,
+            ),
         )
 
     def verify(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> VerificationResponse:

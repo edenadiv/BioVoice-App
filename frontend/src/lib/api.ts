@@ -50,11 +50,20 @@ type VerificationResponse = {
   created_at: string;
 };
 
+type SampleQualityResponse = {
+  score: number;
+  snr_db: number;
+  clipping_pct: number;
+  speech_ratio: number;
+  acceptable: boolean;
+};
+
 type EnrollmentResponse = {
   user_id: string;
   status: string;
   message: string;
   enrolled_at: string;
+  quality?: SampleQualityResponse | null;
 };
 
 type SessionResponse = {
@@ -155,12 +164,17 @@ async function postForm<T>(path: string, formData: FormData): Promise<T> {
   });
 }
 
-export async function enrollSpeaker(userId: string, file: File): Promise<string> {
+export type EnrollResult = {
+  message: string;
+  quality: SampleQualityResponse | null;
+};
+
+export async function enrollSpeaker(userId: string, file: File): Promise<EnrollResult> {
   const formData = new FormData();
   formData.append("user_id", userId);
   formData.append("audio", file);
   const response = await postForm<EnrollmentResponse>("/enroll", formData);
-  return response.message;
+  return { message: response.message, quality: response.quality ?? null };
 }
 
 export async function verifySpeaker(userId: string, file: File): Promise<VerificationResult> {
@@ -171,11 +185,11 @@ export async function verifySpeaker(userId: string, file: File): Promise<Verific
   return toVerificationResult(response);
 }
 
-export async function enrollAuthenticatedSpeaker(file: File): Promise<string> {
+export async function enrollAuthenticatedSpeaker(file: File): Promise<EnrollResult> {
   const formData = new FormData();
   formData.append("audio", file);
   const response = await postForm<EnrollmentResponse>("/me/enroll", formData);
-  return response.message;
+  return { message: response.message, quality: response.quality ?? null };
 }
 
 export async function verifyAuthenticatedSpeaker(file: File): Promise<VerificationResult> {

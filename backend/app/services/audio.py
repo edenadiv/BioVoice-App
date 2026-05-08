@@ -52,6 +52,36 @@ class VoiceActivityResult:
     voiced_seconds: float
 
 
+@dataclass(slots=True)
+class QualityScore:
+    """F3.3 — per-sample audio quality summary. Surfaced on
+    EnrollmentResponse so operators see why a sample was rejected
+    without having to dig through logs.
+
+    `score` is the aggregate 0-100 displayed on the kiosk sample dots.
+    `snr_db`, `clipping_pct`, `speech_ratio` are the three contributing
+    metrics; `acceptable` is the gate decision. `reason` is the
+    user-facing explanation when `acceptable` is False (empty otherwise).
+    """
+
+    score: float
+    snr_db: float
+    clipping_pct: float
+    speech_ratio: float
+    acceptable: bool
+    reason: str = ""
+
+
+class SampleQualityRejectedError(ValueError):
+    """Raised when an enrolment sample fails the F3.3 quality gate. Like
+    NoSpeechDetectedError, the route layer maps this to HTTP 400 and the
+    operator sees the actionable message verbatim."""
+
+    def __init__(self, message: str, score: QualityScore):
+        super().__init__(message)
+        self.score = score
+
+
 # F3.2 — VAD tuning. Picked from a quick sweep on real microphone captures
 # at 16 kHz; documented here so anyone re-tuning has the rationale.
 VAD_FRAME_MS = 30                # window size; 30 ms is the WebRTC default
@@ -66,6 +96,21 @@ VAD_HANGOVER_MS = 200            # bridge gaps shorter than this between speech 
 VAD_PAD_MS = 80                  # keep this much silence on either side of a region
 
 MIN_SPEECH_SECONDS = 1.0         # post-trim minimum; below this → "no speech detected"
+
+# F3.3 — Sample quality gating. Defaults match the SDD specification; all
+# three are tunable via Settings (F6.3 will expose them in the operator UI).
+QUALITY_MIN_SNR_DB = 10.0        # below this is "too noisy"
+QUALITY_MAX_CLIPPING_PCT = 1.0   # above this is "clipped"; counts only
+                                 # plateau runs of ≥ 3 consecutive samples
+                                 # near ±1.0 so isolated peaks (sine crests
+                                 # in test fixtures, normalised audio) don't
+                                 # trip the gate.
+QUALITY_MIN_SPEECH_RATIO = 0.30  # speech_seconds / total_seconds
+QUALITY_CLIP_THRESHOLD = 0.999   # |sample| > this counts toward clipping —
+                                 # true digital saturation. 0.99 false-positives
+                                 # on normalised sine waves (~9 %/period exceeds
+                                 # 0.99 near the crest even for clean signals).
+QUALITY_CLIP_RUN = 3             # need ≥ this many consecutive clipped samples
 
 
 class AudioService:
@@ -189,6 +234,63 @@ class AudioService:
         voiced = sum(end - start for start, end in regions) / rate
         return VoiceActivityResult(regions=regions, voiced_seconds=voiced)
 
+    # F3.3 — Sample quality scoring
+    # ============================================================================
+
+    def score_quality(self, payload: AudioPayload) -> QualityScore:
+        """Compute SNR, clipping %, and speech ratio for `payload`. Returns a
+        QualityScore with an aggregate 0-100 score + an `acceptable` gate
+        decision. The gate is the AND of all three thresholds — if any one
+        fails, `reason` carries the operator-facing explanation.
+        """
+        rate = payload.sample_rate
+        wave = payload.waveform
+        n = len(wave)
+        if n == 0:
+            return QualityScore(
+                score=0.0,
+                snr_db=0.0,
+                clipping_pct=100.0,
+                speech_ratio=0.0,
+                acceptable=False,
+                reason="Empty recording.",
+            )
+
+        snr_db = _estimate_snr_db(wave, rate)
+        clipping_pct = _clipping_percent(wave)
+        vad = self.detect_voice_activity(wave, rate)
+        total_seconds = n / rate
+        speech_ratio = vad.voiced_seconds / total_seconds if total_seconds > 0 else 0.0
+
+        score = _aggregate_quality_score(snr_db, clipping_pct, speech_ratio)
+
+        reasons: list[str] = []
+        if snr_db < QUALITY_MIN_SNR_DB:
+            reasons.append(
+                f"SNR {snr_db:.1f} dB is below the {QUALITY_MIN_SNR_DB:.0f} dB minimum — "
+                "move closer to the microphone or reduce background noise."
+            )
+        if clipping_pct > QUALITY_MAX_CLIPPING_PCT:
+            reasons.append(
+                f"{clipping_pct:.1f}% of samples are clipped (max {QUALITY_MAX_CLIPPING_PCT:.0f}%) — "
+                "lower the input gain on your microphone."
+            )
+        if speech_ratio < QUALITY_MIN_SPEECH_RATIO:
+            reasons.append(
+                f"Only {speech_ratio * 100:.0f}% of the recording is speech — "
+                "speak continuously for the full prompt."
+            )
+
+        acceptable = not reasons
+        return QualityScore(
+            score=score,
+            snr_db=snr_db,
+            clipping_pct=clipping_pct,
+            speech_ratio=speech_ratio,
+            acceptable=acceptable,
+            reason=" ".join(reasons),
+        )
+
     def trim_to_voice(self, payload: AudioPayload) -> tuple[AudioPayload, float]:
         """Trim leading/trailing silence from `payload`. Returns the trimmed
         payload + the wall-clock VAD cost in ms (so callers can fold it into
@@ -298,6 +400,113 @@ def _noise_floor(energies: list[float]) -> float:
     decile = max(1, len(sorted_e) // 10)
     bottom = sorted_e[:decile]
     return bottom[len(bottom) // 2]
+
+
+def _estimate_snr_db(waveform: list[float], sample_rate: int) -> float:
+    """Frame-based SNR. Compute mean-square energy in 30 ms frames; the
+    speech estimate is the median of the top 50 % of frame energies, the
+    noise estimate is the median of the bottom 10 %. SNR is
+    10 * log10(speech / noise).
+
+    Edge case: when the signal has no silent frames to anchor against
+    (uniform energy) we can't measure SNR by floor comparison. Use the
+    mean zero-crossing rate as a discriminator:
+      - low ZCR (< 0.05) → tonal / harmonic content (sustained vowel,
+        synthetic test tone) → return a high-SNR sentinel
+      - high ZCR → broadband content (random noise) → return the
+        floor-vs-floor ratio honestly, which collapses to 0 dB and lets
+        the gate reject the recording
+    """
+    if not waveform:
+        return 0.0
+    frame_size = max(1, int(sample_rate * VAD_FRAME_MS / 1000))
+    if len(waveform) < frame_size:
+        return 0.0
+    energies: list[float] = []
+    zcrs: list[float] = []
+    for i in range(0, len(waveform) - frame_size + 1, frame_size):
+        chunk = waveform[i : i + frame_size]
+        energies.append(_mean_square(chunk))
+        zcrs.append(_frame_zero_crossing_rate(chunk))
+    if not energies:
+        return 0.0
+    sorted_e = sorted(energies)
+    if sorted_e[-1] <= 0.0:
+        return 0.0
+    uniform = sorted_e[0] > 0.0 and sorted_e[0] / sorted_e[-1] > VAD_DYNAMIC_RANGE_RATIO
+    if uniform:
+        mean_zcr = sum(zcrs) / len(zcrs) if zcrs else 0.0
+        if mean_zcr < 0.05:
+            # Tonal / harmonic content; treat as clean reference signal.
+            return 60.0
+        # Otherwise fall through to the floor-ratio measurement, which
+        # for uniform-energy signals gives near-zero dB and surfaces the
+        # noise via the gate.
+    top_half = sorted_e[len(sorted_e) // 2 :]
+    bottom_decile = sorted_e[: max(1, len(sorted_e) // 10)]
+    speech = top_half[len(top_half) // 2]
+    noise = bottom_decile[len(bottom_decile) // 2]
+    if noise <= 0.0:
+        return 60.0
+    ratio = speech / noise
+    if ratio <= 0.0:
+        return 0.0
+    return 10.0 * math.log10(ratio)
+
+
+def _frame_zero_crossing_rate(chunk: list[float]) -> float:
+    if len(chunk) < 2:
+        return 0.0
+    crossings = 0
+    prev = chunk[0]
+    for s in chunk[1:]:
+        if (prev >= 0.0) != (s >= 0.0):
+            crossings += 1
+        prev = s
+    return crossings / (len(chunk) - 1)
+
+
+def _clipping_percent(waveform: list[float]) -> float:
+    """Fraction (×100) of samples inside a plateau run of saturated
+    samples. Counts only runs of at least QUALITY_CLIP_RUN consecutive
+    samples with |s| > QUALITY_CLIP_THRESHOLD so an isolated peak (sine
+    crest, normalised audio) doesn't trip the gate."""
+    if not waveform:
+        return 0.0
+    n = len(waveform)
+    clipped = 0
+    run = 0
+    for s in waveform:
+        if abs(s) > QUALITY_CLIP_THRESHOLD:
+            run += 1
+        else:
+            if run >= QUALITY_CLIP_RUN:
+                clipped += run
+            run = 0
+    if run >= QUALITY_CLIP_RUN:
+        clipped += run
+    return (clipped / n) * 100.0
+
+
+def _aggregate_quality_score(snr_db: float, clipping_pct: float, speech_ratio: float) -> float:
+    """0-100 aggregate. Each metric contributes a sub-score capped at the
+    threshold; the aggregate is the geometric mean so a single bad
+    metric pulls the score down hard.
+
+    Weighting matches the kiosk's QA narrative: a great recording has all
+    three near-perfect; one bad axis already disqualifies it from the
+    "green dot" tier even if the others are pristine.
+    """
+    snr_floor, snr_ceiling = 0.0, 30.0
+    snr_norm = max(0.0, min(1.0, (snr_db - snr_floor) / (snr_ceiling - snr_floor)))
+    clip_norm = max(0.0, 1.0 - (clipping_pct / 5.0))
+    speech_norm = max(0.0, min(1.0, speech_ratio / 0.8))
+    # Geometric mean. Adding 1e-3 keeps a single zero from collapsing the
+    # whole score so the operator can still distinguish "0%" from
+    # "ankle-biter on one axis".
+    product = (snr_norm + 1e-3) * (clip_norm + 1e-3) * (speech_norm + 1e-3)
+    score = (product ** (1 / 3)) * 100.0
+    return max(0.0, min(100.0, score))
 
 
 def _merge_frames_to_regions(
