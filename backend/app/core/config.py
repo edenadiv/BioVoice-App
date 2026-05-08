@@ -52,6 +52,13 @@ def _log_level_from_env() -> str:
     return os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
+def _cookie_secure_from_env() -> bool:
+    """F2.5 — `Secure` flag on the session cookie. ON by default; only disable
+    for HTTP local dev via `BIOVOICE_COOKIE_INSECURE=1`. Production must serve
+    over HTTPS so the cookie is never visible on the wire."""
+    return os.environ.get("BIOVOICE_COOKIE_INSECURE", "").strip() != "1"
+
+
 @dataclass(slots=True)
 class Settings:
     sample_rate: int = 16000
@@ -80,6 +87,12 @@ class Settings:
     # unset; admin routes return 503 in that case (no zero-secret access).
     admin_api_key: str | None = field(default_factory=_admin_api_key_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
+    # F2.5 — session cookie. `Secure` is ON by default; flip via
+    # BIOVOICE_COOKIE_INSECURE=1 for HTTP local dev. SameSite=Strict is
+    # safe because the frontend dev origin (localhost:5173) and the API
+    # (localhost:8000) are same-site — different port, same eTLD+1.
+    session_cookie_name: str = "biovoice_session"
+    session_cookie_secure: bool = field(default_factory=_cookie_secure_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"

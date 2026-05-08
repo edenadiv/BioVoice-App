@@ -12,7 +12,10 @@ import { deriveProfile, type Profile } from "./profileVisual";
 import { useResultsPolling } from "./useResultsPolling";
 import type { Session, Speaker, VerificationResult, SpoofGenerationResult } from "../types";
 
-export const SESSION_STORAGE_KEY = "biovoice_session_token";
+// F2.5 — the session token now lives in an HttpOnly cookie
+// (`biovoice_session`) set by the backend. JavaScript cannot read it; the
+// browser sends it automatically on every fetch with `credentials: "include"`.
+// localStorage is no longer touched, removing the XSS-readable token surface.
 
 type FlowIntent = "enroll" | "verify" | null;
 
@@ -122,17 +125,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Restore session from localStorage on mount.
+  // F2.5 — probe for an existing session via the HttpOnly cookie. The
+  // browser ships it on this fetch automatically; if the cookie is missing
+  // or expired the backend returns 401 and we silently stay logged out.
   useEffect(() => {
-    const token = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!token) return;
     let alive = true;
-    getSession(token)
+    getSession()
       .then((session) => {
         if (alive) dispatch({ type: "set-session", session });
       })
       .catch(() => {
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
+        /* No session — leave state unchanged (initial state is null). */
       });
     return () => {
       alive = false;

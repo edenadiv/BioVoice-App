@@ -42,6 +42,7 @@ deploy time (see "Secrets management" below).
 | `LOGIN_LOCKOUT_SECONDS` | F2.2 — lockout duration once exceeded. Default 900 (15 min). | `LOGIN_LOCKOUT_SECONDS=900` |
 | `BIOVOICE_ADMIN_API_KEY` | F2.4 / F6 — gates the `/admin/*` surface. Unset = admin endpoints disabled (default). Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. | `BIOVOICE_ADMIN_API_KEY=...` |
 | `LOG_LEVEL` | Python `logging` level. F7.2 will switch the format to structured JSON. | `LOG_LEVEL=INFO` |
+| `BIOVOICE_COOKIE_INSECURE` | F2.5 — set to `1` to drop the `Secure` flag on the session cookie so HTTP local dev (no TLS) works. Production must leave this **unset** so the cookie is HTTPS-only. | `BIOVOICE_COOKIE_INSECURE=1` |
 | `DATABASE_URL` | F7.1 (planned) — Postgres connection string. Unset = SQLite at `backend/data/biovoice.sqlite3`. | `DATABASE_URL=postgres://…` |
 | `BIOVOICE_SEED_DEMO` | When set to `1`, populates the SQLite store with two bundled demo users (`alice_demo`, `bob_demo`) on startup if the store is empty. Idempotent. Off by default — production runs see an honest empty state. | `BIOVOICE_SEED_DEMO=1` |
 | `BIOVOICE_FALLBACK_SPOOF` | When set to `1` and the XTTS dependencies/weights are unavailable, `POST /me/spoof` returns the bundled `data/fallback_spoof.wav` instead of HTTP 503. Lets the DeepfakeLab demo work without XTTS. | `BIOVOICE_FALLBACK_SPOOF=1` |

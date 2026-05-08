@@ -123,6 +123,7 @@ def test_env_example_lists_known_vars() -> None:
         "BIOVOICE_ADMIN_API_KEY",
         "LOG_LEVEL",
         "DATABASE_URL",
+        "BIOVOICE_COOKIE_INSECURE",
     )
     missing = [name for name in expected if name not in example]
     assert not missing, f"Add to backend/.env.example: {missing}"

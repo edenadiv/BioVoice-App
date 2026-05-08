@@ -28,7 +28,26 @@ def get_spoof_generation_service(request: Request) -> SpoofGenerationService:
     return get_container(request).spoof_service
 
 
-def get_session_token(authorization: str | None = Header(default=None)) -> str:
+def get_session_token(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> str:
+    """F2.5 — accept the session token from either the cookie OR the legacy
+    Authorization Bearer header. Cookie takes precedence so a refreshed
+    cookie always wins over a stale header.
+
+    Production clients (post-F2.5 frontend) send only the cookie. Bearer
+    support stays for tooling (curl, pytest, k6 load tests).
+    """
+    container = getattr(request.app.state, "container", None)
+    cookie_name = (
+        container.settings.session_cookie_name
+        if container is not None
+        else "biovoice_session"
+    )
+    cookie_token = request.cookies.get(cookie_name)
+    if cookie_token:
+        return cookie_token
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     scheme, _, token = authorization.partition(" ")
