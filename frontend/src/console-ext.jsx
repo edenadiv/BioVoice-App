@@ -2,8 +2,13 @@
 // Components: AmbientField, EmbeddingConstellation, LiveFeatures, VerificationOverlay,
 // LiveClock, ThreatLevel, ScanLine.
 
-import React, { useEffect, useRef, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Waveform, EmbeddingCloud } from "./visuals.jsx";
+import { useVoiceRecorder } from "./lib/audio";
+import { loginWithVoice, logoutSession, verifyAuthenticatedSpeaker } from "./lib/api";
+import { SESSION_STORAGE_KEY, useAppDispatch, useAppState } from "./lib/session";
+import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
+import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 
 // ============================================================================
 // AmbientField — slow-drifting particles with parallax depth in the backdrop.
@@ -395,48 +400,125 @@ function ThreatLevel({ level = 'green' }) {
 }
 
 // ============================================================================
-// VerificationOverlay — full-stage cinematic verification flow.
-// Slides up over the console; runs through Capture → Embed → Match → Result.
+// VerificationOverlay — runs the real verification (E-17/E-18).
+//
+// Lifecycle:
+//   1. Mount  → start the recorder (Y-12).
+//   2. After RECORD_MS (or recorder.maxMs) → stop, encode WAV, kick the API.
+//        - No session            → loginWithVoice(userId, file)
+//        - Session for same user → verifyAuthenticatedSpeaker(token, file)
+//        - Session for different → logout, then loginWithVoice
+//   3. While the API is in flight → animate phases 1 (Embed) and 2 (Match)
+//        on a calibrated 1.5 s timeline (Plan §5).
+//   4. On settle → show ResultPanel with the real similarity / dfScore.
+//   5. On error  → show ErrorPanel with the server's `message`.
 // ============================================================================
-function VerificationOverlay({ profile, audio, onClose, similarity = 0.913, dfScore = 0.97 }) {
-  const [phase, setPhase] = useState(0);  // 0:capture 1:embed 2:match 3:result
-  const [progress, setProgress] = useState(0);
+const RECORD_MS = 3000;
 
+function VerificationOverlay({ profile, onClose }) {
+  const recorder = useVoiceRecorder({ minMs: 1000, maxMs: RECORD_MS });
+  const dispatch = useAppDispatch();
+  const { session } = useAppState();
+
+  // The in-flight verification promise drives the calibrated timeline.
+  const [verifyPromise, setVerifyPromise] = useState(null);
+  const [result, setResult] = useState(null); // VerificationResult on success
+  const [error, setError] = useState(null);   // string on failure
+  const stopFiredRef = useRef(false);
+
+  // Auto-start the recorder once when the overlay mounts.
   useEffect(() => {
-    const phases = [
-      { dur: 1700 },  // capture
-      { dur: 1500 },  // embed
-      { dur: 1500 },  // match
-      { dur: 4000 },  // result hold
-    ];
-    let p = 0;
-    setPhase(0); setProgress(0);
-    let raf, start = performance.now();
-    const tick = (now) => {
-      const elapsed = now - start;
-      const local = elapsed % phases[p].dur;
-      setProgress(local / phases[p].dur);
-      if (elapsed > phases[p].dur) {
-        if (p < phases.length - 1) {
-          p += 1;
-          setPhase(p);
-          start = now;
-        } else {
-          // auto-close after result hold
-          if (elapsed > phases[p].dur) {
-            onClose && onClose();
-            return;
-          }
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [profile, onClose]);
+    void recorder.start();
+    // recorder is intentionally not in deps — start() is idempotent and we
+    // only want to fire once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const passing = similarity >= 0.75 && dfScore >= 0.5;
-  const accent = passing ? '#7ef0ff' : '#ff5577';
+  const handleStopAndVerify = useCallback(async () => {
+    if (stopFiredRef.current) return;
+    stopFiredRef.current = true;
+    const recording = await recorder.stop();
+    if (!recording) {
+      setError(
+        recorder.state === "denied"
+          ? "Microphone access denied. Allow it in your browser to verify."
+          : "Recording too short. Try again.",
+      );
+      return;
+    }
+
+    const userId = profile?.userId ?? profile?.id;
+    let promise;
+    if (!session) {
+      promise = loginWithVoice(userId, recording.wavFile);
+    } else if (session.userId === userId) {
+      promise = verifyAuthenticatedSpeaker(session.sessionToken, recording.wavFile);
+    } else {
+      promise = (async () => {
+        try {
+          await logoutSession(session.sessionToken);
+        } catch {
+          /* ignore — we're replacing the session anyway */
+        }
+        window.localStorage.removeItem(SESSION_STORAGE_KEY);
+        dispatch({ type: "set-session", session: null });
+        return loginWithVoice(userId, recording.wavFile);
+      })();
+    }
+
+    setVerifyPromise(promise);
+
+    promise
+      .then((response) => {
+        let verification;
+        // loginWithVoice returns { session, verification }; verifyAuthenticatedSpeaker
+        // returns the VerificationResult directly.
+        if (response && typeof response === "object" && "session" in response && "verification" in response) {
+          window.localStorage.setItem(SESSION_STORAGE_KEY, response.session.sessionToken);
+          dispatch({ type: "set-session", session: response.session });
+          verification = response.verification;
+        } else {
+          verification = response;
+        }
+        setResult(verification);
+        dispatch({ type: "set-last-verification", result: verification });
+        dispatch({ type: "prepend-result", result: verification });
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err ?? "Verification failed.");
+        setError(message);
+      });
+  }, [recorder, session, profile, dispatch]);
+
+  // Once recording is live, schedule the auto-stop.
+  useEffect(() => {
+    if (recorder.state !== "recording") return;
+    const timer = setTimeout(() => {
+      void handleStopAndVerify();
+    }, RECORD_MS);
+    return () => clearTimeout(timer);
+  }, [recorder.state, handleStopAndVerify]);
+
+  const timeline = useCalibratedTimeline(verifyPromise, {
+    stages: 2, // Embed, Match
+    expectedTotalMs: 1500,
+    slowAfterMs: 4000,
+  });
+
+  const phase = useMemo(() => {
+    if (result || error) return 3;
+    if (recorder.state === "requesting" || recorder.state === "recording") return 0;
+    if (verifyPromise) return 1 + timeline.activeIdx;
+    return 0;
+  }, [recorder.state, verifyPromise, result, error, timeline.activeIdx]);
+
+  const passing = result?.decision === "ACCEPT";
+  const errored = error !== null;
+  const accent = errored || (result && !passing) ? "#ff5577" : "#7ef0ff";
+
+  // Pull display values straight from the response — no client-side derivation.
+  const similarity = result?.similarityScore ?? 0;
+  const dfScore = result?.deepfakeScore ?? 0;
 
   return (
     <div style={{
@@ -462,12 +544,20 @@ function VerificationOverlay({ profile, audio, onClose, similarity = 0.913, dfSc
             VERIFYING · {profile?.id || 'UNKNOWN'}
           </div>
           <div style={{ fontSize: 56, fontWeight: 200, marginTop: 14, letterSpacing: '-0.02em' }}>
-            {phase === 0 && <>Capturing voice <em className="serif" style={{ color: accent }}>signature</em></>}
+            {phase === 0 && (
+              recorder.state === 'denied'
+                ? <>Microphone <em className="serif" style={{ color: accent }}>blocked</em></>
+                : <>Capturing voice <em className="serif" style={{ color: accent }}>signature</em></>
+            )}
             {phase === 1 && <>Computing <em className="serif" style={{ color: accent }}>embedding</em></>}
-            {phase === 2 && <>Matching against <em className="serif" style={{ color: accent }}>{profile?.name}</em></>}
-            {phase === 3 && (passing
-              ? <>Identity <em className="serif" style={{ color: accent }}>confirmed</em></>
-              : <>Identity <em className="serif" style={{ color: accent }}>denied</em></>)}
+            {phase === 2 && (
+              timeline.isSlow
+                ? <>Still <em className="serif" style={{ color: accent }}>working</em>…</>
+                : <>Matching against <em className="serif" style={{ color: accent }}>{profile?.name}</em></>
+            )}
+            {phase === 3 && errored && <>Verification <em className="serif" style={{ color: accent }}>failed</em></>}
+            {phase === 3 && !errored && passing && <>Identity <em className="serif" style={{ color: accent }}>confirmed</em></>}
+            {phase === 3 && !errored && !passing && <>Identity <em className="serif" style={{ color: accent }}>denied</em></>}
           </div>
 
           {/* Phase indicator dots */}
@@ -494,9 +584,14 @@ function VerificationOverlay({ profile, audio, onClose, similarity = 0.913, dfSc
           <div style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
             {phase === 0 && (
               <div style={{ position: 'relative', width: 720, height: 320, display: 'grid', placeItems: 'center' }}>
-                <Waveform samples={audio.samples} width={720} height={260} bars={120} mirror={true} color={accent}/>
+                <Waveform samples={recorder.samples} width={720} height={260} bars={120} mirror={true} color={accent}/>
                 <div style={{ position: 'absolute', left: 12, top: 12 }}>
-                  <span className="pill good"><span className="dot"></span>SAMPLING · 16 KHZ</span>
+                  <span className={`pill ${recorder.state === 'recording' ? 'good' : 'warn'}`}>
+                    <span className="dot"></span>
+                    {recorder.state === 'recording' ? 'SAMPLING · 16 KHZ' :
+                     recorder.state === 'requesting' ? 'AWAITING MIC ACCESS' :
+                     recorder.state === 'denied' ? 'MICROPHONE BLOCKED' : 'PREPARING…'}
+                  </span>
                 </div>
               </div>
             )}
@@ -507,19 +602,22 @@ function VerificationOverlay({ profile, audio, onClose, similarity = 0.913, dfSc
               </div>
             )}
             {phase === 2 && (
-              <CosineMatchViz similarity={similarity}/>
+              <CosineMatchViz similarity={similarity || 0.5}/>
             )}
-            {phase === 3 && (
-              <ResultPanel passing={passing} similarity={similarity} dfScore={dfScore} profile={profile}/>
+            {phase === 3 && errored && (
+              <ErrorPanel message={error} profile={profile}/>
+            )}
+            {phase === 3 && !errored && (
+              <ResultPanel passing={passing} similarity={similarity} dfScore={dfScore} profile={profile} result={result}/>
             )}
           </div>
 
-          {/* Progress bar */}
+          {/* Progress bar — recording progress for phase 0, calibrated timeline for 1-2 */}
           {phase < 3 && (
             <div style={{ marginTop: 40, width: 480, margin: '40px auto 0', height: 2, background: 'rgba(125,200,255,0.10)', borderRadius: 1, overflow: 'hidden' }}>
               <div style={{
                 height: '100%',
-                width: `${progress * 100}%`,
+                width: `${overlayProgress(phase, recorder.durationMs, timeline) * 100}%`,
                 background: `linear-gradient(90deg, ${accent}55, ${accent})`,
                 boxShadow: `0 0 12px ${accent}`,
                 transition: 'width 60ms linear',
@@ -577,8 +675,16 @@ function CosineMatchViz({ similarity }) {
   );
 }
 
-function ResultPanel({ passing, similarity, dfScore, profile }) {
+function ResultPanel({ passing, similarity, dfScore, profile, result }) {
   const accent = passing ? '#7ef0ff' : '#ff5577';
+  const totalMs = result?.stageBreakdown?.totalMs ?? 0;
+  const reason = result?.decisionReason ?? (passing ? 'accepted' : 'mismatch');
+  const reasonBlurb = {
+    accepted: 'Voice matches the enrolled profile.',
+    mismatch: 'Speaker did not match the enrolled profile.',
+    synthetic: 'Audio was flagged as synthetic.',
+    not_enrolled: 'No enrolled profile for this user.',
+  }[reason] || result?.message || '';
   return (
     <div style={{
       width: 720, padding: '36px 48px',
@@ -596,7 +702,7 @@ function ResultPanel({ passing, similarity, dfScore, profile }) {
           }}>{profile?.initials}</div>
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: 26 }}>{profile?.name}</div>
-            <div className="label-mono" style={{ fontSize: 10 }}>{profile?.id} · LAST SEEN 12s AGO</div>
+            <div className="label-mono" style={{ fontSize: 10 }}>{profile?.id} · {result?.sessionId || '—'}</div>
           </div>
         </div>
         <div style={{
@@ -609,13 +715,63 @@ function ResultPanel({ passing, similarity, dfScore, profile }) {
           {passing ? 'ACCESS GRANTED' : 'ACCESS DENIED'}
         </div>
       </div>
+      {reasonBlurb && (
+        <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.06em' }}>
+          {reasonBlurb}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-        <Stat label="Voice match" value={similarity.toFixed(3)} sub={`vs 0.75 threshold · ${passing ? 'PASS' : 'FAIL'}`} accent={accent}/>
-        <Stat label="Authenticity" value={dfScore.toFixed(2)} sub="vs 0.50 · genuine voice" accent="#6affc8"/>
-        <Stat label="Latency" value="1.41s" sub="end-to-end" accent="#7ef0ff"/>
+        <Stat label="Voice match" value={similarity.toFixed(3)} sub={`vs ${SIM_THRESHOLD.toFixed(2)} · ${passing ? 'PASS' : 'FAIL'}`} accent={accent}/>
+        <Stat label="Authenticity" value={dfScore.toFixed(2)} sub={`vs ${DF_THRESHOLD.toFixed(2)} · ${dfScore >= DF_THRESHOLD ? 'genuine voice' : 'synthetic flag'}`} accent={dfScore >= DF_THRESHOLD ? '#6affc8' : '#ff5577'}/>
+        <Stat label="Latency" value={totalMs > 0 ? `${(totalMs / 1000).toFixed(2)}s` : '—'} sub="end-to-end" accent="#7ef0ff"/>
       </div>
     </div>
   );
+}
+
+function ErrorPanel({ message, profile }) {
+  const accent = '#ff5577';
+  return (
+    <div style={{
+      width: 720, padding: '36px 48px',
+      borderRadius: 18,
+      border: `1px solid ${accent}55`,
+      background: `linear-gradient(180deg, ${accent}10, transparent)`,
+      display: 'grid', gap: 22,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: `linear-gradient(135deg, ${profile?.color1 || '#ff5577'}, ${profile?.color2 || '#9450d8'})`,
+            display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 20, fontWeight: 600,
+          }}>{profile?.initials || '!'}</div>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 26 }}>Verification failed</div>
+            <div className="label-mono" style={{ fontSize: 10 }}>{profile?.id || ''}</div>
+          </div>
+        </div>
+        <div style={{
+          padding: '10px 22px', borderRadius: 999,
+          background: 'rgba(255,85,119,0.15)',
+          border: `1px solid ${accent}`,
+          color: accent,
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 12, letterSpacing: '0.2em', fontWeight: 600,
+        }}>
+          ERROR
+        </div>
+      </div>
+      <div style={{ fontSize: 14, color: 'var(--ink-mute)', lineHeight: 1.55 }}>{message}</div>
+    </div>
+  );
+}
+
+// Recording fills 0..50% of the bar over RECORD_MS; the calibrated timeline
+// fills 50..100% during the embed/match wait.
+function overlayProgress(phase, recordingMs, timeline) {
+  if (phase === 0) return Math.min(0.5, (recordingMs / RECORD_MS) * 0.5);
+  if (phase === 3) return 1;
+  return 0.5 + Math.min(0.5, timeline.progress * 0.5);
 }
 
 function Stat({ label, value, sub, accent }) {

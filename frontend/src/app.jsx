@@ -26,9 +26,6 @@ function AppShell() {
   const [page, setPage] = useState('console');
   const [screen, setScreen] = useState('console');
   const [name, setName] = useState('');
-  // E-17 will replace these mocked numbers with real verification responses;
-  // for now they only seed the overlay's existing visual props until that ships.
-  const [verifyResult, setVerifyResult] = useState({ similarity: 0.0, dfScore: 0.0 });
   const [overlayProfile, setOverlayProfile] = useState(null);
   const [soundOn, setSoundOn] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -94,26 +91,17 @@ function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [mode, screen, page, profiles]);
 
-  // Placeholder: E-17 replaces this with the real record + auth.login / verify flow.
-  // For now it only opens the overlay against whatever lastVerification is in context
-  // (initially null — overlay falls back to its own zero state).
+  // Open the verification overlay (E-17) — the overlay itself drives the real
+  // record + auth/login + verify pipeline against the FastAPI backend.
   const runVerification = useCallback((profile) => {
     if (mode === 'expert') {
       setOverlayProfile(profile);
-      if (lastVerification) {
-        setVerifyResult({
-          similarity: lastVerification.similarityScore,
-          dfScore: lastVerification.deepfakeScore,
-        });
-      } else {
-        setVerifyResult({ similarity: 0.0, dfScore: 0.0 });
-      }
       return;
     }
     setName(profile?.name?.split(' ')[0] || profile?.userId || '');
     setScreen('process_verify');
     setTimeout(() => setScreen('verify'), 4400);
-  }, [mode, lastVerification]);
+  }, [mode]);
 
   // Expert mode: page-based
   if (mode === 'expert') {
@@ -137,9 +125,10 @@ function AppShell() {
         <Sidebar page={page} setPage={setPage}/>
         <SettingsPanel mode={mode} setMode={setMode} soundOn={soundOn} setSoundOn={setSoundOn}/>
         {overlayProfile && (
-          <VerificationOverlay profile={overlayProfile} audio={audio}
-            similarity={verifyResult.similarity} dfScore={verifyResult.dfScore}
-            onClose={() => setOverlayProfile(null)}/>
+          <VerificationOverlay
+            profile={overlayProfile}
+            onClose={() => setOverlayProfile(null)}
+          />
         )}
       </>
     );
