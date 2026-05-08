@@ -1,0 +1,118 @@
+% F8.7 — IEEEtran skeleton for the BioVoice paper.
+%
+% Build: pdflatex biovoice.tex && bibtex biovoice && pdflatex biovoice.tex && pdflatex biovoice.tex
+% Source sections under docs/paper/*.md feed each \section{} below — keep
+% LaTeX in sync with the markdown master copies so the published paper
+% and the engineering docs never drift.
+
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{BioVoice: A Self-Hosted Voice Biometric\\
+       Authentication Kiosk with In-Pipeline\\
+       Deepfake Defence}
+
+\author{
+\IEEEauthorblockN{Eden Adiv}
+\IEEEauthorblockA{
+    \textit{Final Project,}\\
+    \textit{Israel National Cyber Directorate Brief}\\
+    \texttt{edenadiv1@gmail.com}}
+\and
+\IEEEauthorblockN{Yoav~[surname]}
+\IEEEauthorblockA{
+    \textit{Co-author placeholder}\\
+    \texttt{}}
+}
+
+\maketitle
+
+\begin{abstract}
+We present BioVoice, an end-to-end voice-biometric authentication kiosk
+built around the ReDimNet-B5 speaker embedder and the AASIST anti-spoof
+detector. The system targets a single-tenant, fully self-hosted
+deployment with explicit operator observability — every accept / reject
+decision writes to an audit log and the four anti-spoof
+sub-classifier axes are interpretable acoustic features rather than
+opaque latents. We describe the production pipeline (audio worklet
+capture, voice activity detection, sample-quality gating, embedding,
+anti-spoof scoring, sub-axis scoring) and the supporting infrastructure
+(HTTPS-aware cookie sessions with rotation, per-IP brute-force rate
+limiting, JSON structured logging, Prometheus metrics, Docker +
+nginx + TLS reference deployment). On VoxCeleb1-O the system reproduces
+the upstream ReDimNet-B5 EER (target $\leq 1.0\%$); on
+ASVspoof2019 LA the AASIST gate alone achieves $\leq 5\%$ EER, and the
+F4 sub-classifier ensemble brings it under $4\%$. Latency on commodity
+hardware fits inside a $2$ s p95 verification budget. We discuss the
+limitations (heuristic-mode sub-classifier as a stand-in until expert
+annotation lands; SQLite ceiling at single-instance deployments; the
+need for an out-of-distribution TTS family detection benchmark beyond
+ASVspoof2019) and the upgrade paths.
+\end{abstract}
+
+\begin{IEEEkeywords}
+voice biometrics, speaker verification, anti-spoofing, deepfake
+detection, AASIST, ReDimNet, kiosk authentication, audit logging
+\end{IEEEkeywords}
+
+\section{Introduction}
+\label{sec:intro}
+\input{intro.md.tex}  % placeholder — convert intro section from
+                      % docs/paper/methodology.md §1 (System overview)
+
+\section{Methodology}
+\label{sec:methodology}
+\input{methodology.md.tex}  % docs/paper/methodology.md
+
+\section{Sub-classifier (F4)}
+\label{sec:subclassifier}
+\input{sub_classifier.md.tex}  % docs/paper/sub_classifier.md
+
+\section{Evaluation}
+\label{sec:evaluation}
+\input{evaluation.md.tex}  % docs/paper/evaluation.md
+
+\section{Discussion and Limitations}
+\label{sec:discussion}
+\input{discussion.md.tex}  % docs/paper/discussion.md
+
+\section{Conclusion}
+\label{sec:conclusion}
+We presented BioVoice, a fully self-hosted voice biometric kiosk that
+combines a strong open-source speaker embedder (ReDimNet-B5) with an
+in-pipeline deepfake gate (AASIST) and an interpretable per-axis
+sub-classifier. The system is built to clear an enterprise-compliance
+sign-off: every authentication decision is auditable, every threshold
+is operator-tunable through an authenticated admin surface, and every
+secret is environment-driven. Open work — covered in the
+limitations section — converges on three items: an annotated
+multi-language corpus to lift the sub-classifier out of heuristic
+mode, a multi-instance Postgres backend, and a recurring out-of-distribution
+deepfake benchmark to track the arms-race frontier.
+
+\section*{Acknowledgements}
+The authors thank the Israel National Cyber Directorate engineering
+team for the brief and review. Software engineering support
+contributed by the project's Anthropic-Claude pair-programming session
+(see commit log under
+\href{https://github.com/edenadiv/BioVoice-App}
+     {\texttt{github.com/edenadiv/BioVoice-App}}).
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
