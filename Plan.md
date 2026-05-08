@@ -178,7 +178,21 @@ Run `uvicorn app.main:app --reload` in `backend/` and `npm run dev` in `frontend
 
 ---
 
-## 12. Forward execution (post wire-live milestone)
+## 12. Forward execution — SUPERSEDED
+
+The "demo readiness" framing of §12 was rejected by the project lead in favour
+of the full production-system plan in §13 below. §12 is preserved as historical
+context only; the only sub-step from it that survives is the `CORS_ORIGINS`
+env-var override (kept because configurable origins are required for production,
+not just demos).
+
+§12 sub-steps that have been **explicitly stripped** from `main`:
+
+- `BIOVOICE_SEED_DEMO=1` startup hook + `seed_demo.py` + bundled demo WAVs
+- `BIOVOICE_FALLBACK_SPOOF=1` env path + `fallback_spoof.wav` + the
+  catch-and-fallback branch in `services/spoof.py`
+
+See §13.F1.3 for the strip operation.
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
 > Each step lists concrete sub-actions and a verification block. Verification = the artifact or command that proves the step landed correctly.
@@ -408,3 +422,255 @@ Closing the milestone requires every check below to be green.
 8. `BIOVOICE_SEED_DEMO=1` startup populates two demo users; without the env var, an empty DB stays empty.
 9. `docs/paper/biovoice-paper.md` exists with all four appendices.
 10. §6 Phase A/B/C/D ✅; §12 phases E1/E2/E3 ✅.
+
+---
+
+## 13. Full system execution (Phases F1 – F9)
+
+> **Adopted plan.** Replaces §12. Project lead has confirmed the deliverable is the **full production system** that the Israel National Cyber Directorate evaluates and the supporting research paper documents — not a demo with crutches.
+
+### 13.0 Decisions locked
+
+| | Choice | Implication |
+|---|---|---|
+| Deployment target | **Production kiosk** | HTTPS, structured logging, Prometheus metrics, SQLite → Postgres migration path, Dockerfile, deployment docs, secrets management. |
+| Mobile + Hebrew RTL | **Both required** | i18n framework, RTL CSS layer, Hebrew typography, fluid layout replacing the 1920×1080 fixed stage. |
+| AASIST sub-classifier | **Real model** | Train four probe heads on AASIST embeddings; replace `analysis_details_from_score`. |
+| Demo seeding (`BIOVOICE_SEED_DEMO`) | **Removed** (F1.3) | Production must show honest empty state. |
+| Fallback spoof WAV (`BIOVOICE_FALLBACK_SPOOF`) | **Removed** (F1.3) | XTTS install for real (F1.4). No fallback. |
+| CORS env var (`CORS_ORIGINS`) | **Kept** | Configurable origins are a production need. |
+
+### 13.F1 — Foundations & cleanup (week 1)
+
+#### 13.F1.1 Sequential merge of the 6 wire-live PRs ⬜
+
+Order: `feat/yoav-backend-completion` → `feat/eden-profiles-enroll` → `feat/eden-yoav-result-screens` → `feat/yoav-deepfake-lab` → `feat/yoav-enroll-screen` → `feat/yoav-processing-and-polish`. Sync `main` after each.
+
+**Verification**
+
+- After every merge: `cd backend && pytest -q` passes; `cd frontend && npm run build` exits 0.
+- `git log --oneline` on `main` shows all six feat commits.
+
+#### 13.F1.2 Manual real-mic QA ⬜
+
+12-step protocol from §9, with two real users + real microphone.
+
+**Verification**
+
+- All 12 steps pass; defects filed one PR each.
+
+#### 13.F1.3 Strip the demo crutches ⬜
+
+**Sub-actions**
+
+1. Revert `BIOVOICE_SEED_DEMO=1` hook in `app/main.py`.
+2. Delete `scripts/seed_demo.py`, `scripts/_make_demo_wavs.py`, `data/demo/*.wav`, `tests/test_seed_demo.py`.
+3. Delete `BIOVOICE_FALLBACK_SPOOF` branch in `services/spoof.py`; restore the original 503 contract.
+4. Delete `data/fallback_spoof.wav`, `scripts/_make_fallback_spoof.py`, `tests/test_fallback_spoof.py`.
+5. Restore `.gitignore` blanket `backend/data/`.
+6. Update `backend/README.md` — drop the demo-seeding + fallback sections.
+7. Keep `CORS_ORIGINS` env var + `tests/test_config.py`.
+
+**Verification**
+
+- `grep -rE "BIOVOICE_SEED_DEMO|BIOVOICE_FALLBACK_SPOOF|fallback_spoof|seed_demo" backend/` → 0 matches.
+- `pytest backend/tests/ -q` → green.
+- `ls backend/data/` shows only `biovoice.sqlite3` + production storage dirs.
+
+#### 13.F1.4 Real XTTS install (production) ⬜
+
+**Sub-actions**
+
+1. Run `bash backend/scripts/setup_xtts.sh`.
+2. `pip install 'TTS>=0.22,<0.23'` (pin Python 3.12 if 3.13+ is the default).
+3. Smoke `POST /me/spoof` → 200 with audio/wav.
+4. End-to-end: spoof → `POST /me/spoof/test` → `decision: 'FAKE'`.
+
+**Verification**
+
+- p95 (warm) < 2 s for `/me/spoof`.
+- Lab "Forge & test attack" produces audible cloned speech.
+- AASIST flags 100 % of generated samples in N=20 test runs.
+
+### 13.F2 — Security hardening (week 1–2)
+
+#### 13.F2.1 Session expiry + refresh ⬜
+Add `expires_at` + `last_seen_at` columns; 30-min idle window; `POST /auth/refresh` rotates the token; frontend `lib/api.ts` interceptor catches 401 → tries refresh once → propagates. Pytests: 6+ for expiry, refresh, rotation, abuse.
+
+#### 13.F2.2 Rate-limit `/auth/login` ⬜
+5 attempts / 5 min / `(user_id, ip)`; 15-min lockout; HTTP 429 + `Retry-After`. UI countdown in the VerificationOverlay error panel.
+
+#### 13.F2.3 Stable session-id ⬜
+Replace `result_id[-4:]` with `VRF-YYYYMMDD-NNNNN` (per-day monotonic counter from a `verification_seq` table). Pytest at 100 k iterations confirms no collisions.
+
+#### 13.F2.4 Secrets management baseline ⬜
+`.env.example`; production secrets workflow doc (1Password / Doppler / AWS Secrets Manager — pick one); pytest secret-scan guard.
+
+#### 13.F2.5 HTTPS-aware cookie session ⬜
+Move session token from `localStorage` to `HttpOnly; Secure; SameSite=Strict` cookie. Frontend switches from `Authorization: Bearer ...` to `credentials: 'include'`.
+
+### 13.F3 — Audio pipeline production-grade (week 2)
+
+#### 13.F3.1 AudioWorklet replaces ScriptProcessor ⬜
+`recorder-processor.js` worklet captures Float32 PCM. ScriptProcessor stays only as fallback for old Safari.
+
+#### 13.F3.2 Voice Activity Detection ⬜
+`services/audio.py:detect_voice_activity` — energy + zero-crossing with hangover. Trim before embed/detect; reject < 1 s speech with HTTP 400.
+
+#### 13.F3.3 Sample quality scoring ⬜
+SNR + clipping % + speech ratio per enrol sample. Reject low-quality (SNR < 10 dB / clipping > 1 % / speech ratio < 0.3). Surface 0–100 score on EnrollScreen sample dots.
+
+### 13.F4 — Real AASIST sub-classifier (week 2–3)
+
+#### 13.F4.1 Sub-concept dataset ⬜
+~5 k clips from VoxCeleb1 + ASVspoof2019 LA + F5-TTS-generated. Annotated on naturalness / spectral / temporal / artifact axes. 70/15/15 split. κ > 0.7 inter-rater agreement on a 200-clip review subset.
+
+#### 13.F4.2 Probe-tune four heads ⬜
+Penultimate AASIST embeddings → 4 MLPs (input → 256 → 1) per concept. L2 regression. Save to `backend/models/aasist_heads.pt`. Test-set correlation r > 0.6 per head.
+
+#### 13.F4.3 Replace `analysis_details_from_score` ⬜
+`services/verification.py:verify` calls `AcousticProbe.score(embedding)` instead. Schema unchanged. The seeded-jitter helper + its tests deleted.
+
+#### 13.F4.4 Calibration + per-concept thresholds ⬜
+EER per concept on validation. Optional per-concept thresholds in `core/config.py`. Methodology in `docs/paper/sub_classifier_results.md`.
+
+### 13.F5 — Hebrew RTL + mobile responsive (week 3–4)
+
+#### 13.F5.1 i18n framework ⬜
+`react-i18next`. `frontend/src/i18n/{en,he}.json`. `<I18nextProvider>` wraps `<App>`. Translation key conventions documented.
+
+#### 13.F5.2 String extraction across .jsx ⬜
+Every literal in `.jsx` → `t('key')`. Native-speaker translation in `he.json` (budget for a localisation contractor; do not ship Google Translate).
+
+#### 13.F5.3 RTL CSS layer ⬜
+`<html dir="rtl">` toggle. Logical CSS properties (`margin-inline-start` etc.). Absolute-positioned chrome elements (`Sidebar`, `Chrome`, `LiveNav`) audited per direction.
+
+#### 13.F5.4 Hebrew typography ⬜
+`Heebo` (Hebrew) + `Sora` (Latin). Locale-driven font-family. Mixed-direction strings render correctly.
+
+#### 13.F5.5 Mobile responsive layout ⬜
+Replace fixed 1920×1080 with three breakpoints (≥ 1440 / 768–1439 / < 768). Phone: stack columns, hamburger Sidebar, vertical overlay phases. 44 px touch-target audit.
+
+#### 13.F5.6 Touch-friendly interactions ⬜
+Always-visible affordances on touch. Long-press menus on profile cards. Swipe nav between linear-mode screens.
+
+#### 13.F5.7 Locale-aware date/number formatting ⬜
+`Intl.DateTimeFormat` per locale; Hebrew locale numbering; 24-hour clock for `he`.
+
+### 13.F6 — Operator admin (week 4)
+
+#### 13.F6.1 Profile management ⬜
+`DELETE /users/{user_id}` (soft delete to `deleted_users`); `POST /users/{user_id}/rename` (display name only). Audit-log entry per mutation.
+
+#### 13.F6.2 Audit log viewer ⬜
+Persisted `audit_log` table. `GET /admin/audit?since=...` (admin role). New admin page in the sidebar visible only to admins.
+
+#### 13.F6.3 Threshold tuning UI ⬜
+Editable similarity / deepfake / per-concept thresholds; persist to `settings` table. Roll-back to defaults button.
+
+### 13.F7 — Production deployment (week 5)
+
+#### 13.F7.1 Postgres migration path ⬜
+`DATABASE_URL` env. SQLAlchemy 2 async store implementing the `VerificationStore` Protocol. Alembic migrations. CI runs against both SQLite and Postgres.
+
+#### 13.F7.2 Structured logging ⬜
+`structlog` (or loguru JSON sink). Standard fields: `request_id`, `user_id`, `decision`, `latency_ms`. ERROR carries traceback.
+
+#### 13.F7.3 Prometheus metrics ⬜
+`prometheus-fastapi-instrumentator`. `/metrics` admin-only. Custom counters + histograms. Grafana dashboard JSON committed.
+
+#### 13.F7.4 Health + readiness probes ⬜
+`/healthz` (liveness — already exists); `/readyz` (DB + model availability). K8s manifest stub.
+
+#### 13.F7.5 Dockerfile + docker-compose ⬜
+Multi-stage Dockerfile (pin Python 3.12). `docker-compose.yml` runs backend + frontend + Postgres. Image < 1.5 GB with model weights mounted from a volume.
+
+#### 13.F7.6 Deployment docs ⬜
+`docs/deployment.md` — dependencies, Postgres setup, model weights, secrets, reverse proxy, TLS, backup, monitoring. systemd + nginx templates committed.
+
+#### 13.F7.7 HTTPS reverse-proxy + HSTS ⬜
+nginx + Let's Encrypt template. HSTS headers, secure ciphers, force https. SSL Labs A+ on staging.
+
+#### 13.F7.8 Backup + restore ⬜
+`scripts/backup.sh` (`pg_dump` + reference-samples tarball); `scripts/restore.sh` symmetric. Cron-friendly.
+
+### 13.F8 — Research paper (week 5–6)
+
+#### 13.F8.1 Methodology section ⬜
+`docs/paper/methodology.md`. SDD-6 diagrams + new diagrams for F4 sub-classifier and F3 audio pipeline.
+
+#### 13.F8.2 EER on VoxCeleb1-O ⬜
+ReDimNet-B5 + verification pipeline on VoxCeleb1-O. DET curve. Target: within ± 0.2 % of published 0.79 %.
+
+#### 13.F8.3 Spoof-detection benchmark ⬜
+AASIST + F4 probe heads on ASVspoof2019 LA. EER, AUC, per-attack-type breakdown. Detection rate on F5-TTS / XTTS / ElevenLabs clones.
+
+#### 13.F8.4 Latency benchmark ⬜
+1 k iterations on three machines (laptop / server / kiosk). p50/p95/p99 + cold-start vs warm.
+
+#### 13.F8.5 Multi-user enrolment study ⬜
+≥ 20 enrolled users (mixed gender + first language). All-pairs cross-verify. FAR vs FRR plot. EER reported.
+
+#### 13.F8.6 Discussion + limitations ⬜
+`docs/paper/discussion.md`. Co-author sign-off.
+
+#### 13.F8.7 LaTeX conversion (IEEE) ⬜
+Markdown → IEEE conference template. BibTeX. `docs/paper/biovoice.pdf` compiled.
+
+### 13.F9 — Final QA + ship (week 6)
+
+#### 13.F9.1 Cross-browser test matrix ⬜
+Chrome, Safari, Firefox (desktop) + Mobile Safari + Mobile Chrome. Screenshot dossier.
+
+#### 13.F9.2 WCAG 2.1 AA accessibility audit ⬜
+axe-core + keyboard-only walkthrough + screen-reader (VoiceOver + NVDA) + contrast.
+
+#### 13.F9.3 Performance regression suite ⬜
+Lighthouse CI (LCP < 2 s, CLS < 0.1, FID < 100 ms). Backend p95 < 2 s alarm in CI.
+
+#### 13.F9.4 Penetration test ⬜
+External or internal red team against `/auth/*`, `/me/*`, `/admin/*`. Zero outstanding Critical/High.
+
+#### 13.F9.5 Final acceptance with real speakers ⬜
+5 native Hebrew + 5 native English. Each enrols + verifies + tries to spoof another. 10/10 successful + Hebrew-speaking operator can use the kiosk without English.
+
+### 13.10 Risk register
+
+| Risk | Mitigation |
+|---|---|
+| AASIST sub-classifier dataset hard to label consistently | Start from proxy metrics (formant variance, CQCC, spectral flux); refine; document mapping in F4.1. |
+| TTS won't install on Python 3.13+ | F1.4 + Dockerfile pin Python 3.12. |
+| Hebrew translations need a native speaker | F5.2 budgets for a localisation contractor; no Google Translate. |
+| Postgres migration breaks SQLite data | Alembic includes a one-shot SQLite → Postgres copy script; tested in staging. |
+| Pentest finds Critical/High late | Internal threat-model review at F2 completion (week 2) catches obvious issues; full pentest at F9.4. |
+| Multi-user study needs 20+ volunteers | Coordinate early; budget 2 weeks lead time; data-protection review for storing enrolment audio for research. |
+| Mobile + Hebrew doubles QA matrix | F9.1 parallelised across engineers; one engineer per platform combo. |
+
+### 13.11 Open questions
+
+- [ ] Hebrew localisation contractor — internal or external?
+- [ ] Production Postgres flavour — managed (RDS / Cloud SQL / Supabase) or self-hosted?
+- [ ] Pentest provider — internal red team or external firm?
+- [ ] Multi-user study (F8.5) — IRB / data-protection review needed for storing 20+ enrolment samples for research?
+- [ ] AASIST sub-classifier dataset — reuse VoxCeleb licence terms or cleanroom new annotations?
+
+### 13.12 End-to-end milestone-close checklist
+
+Closing the **full system** milestone requires every check below to be green. Single atomic acceptance gate.
+
+1. `cd backend && pytest -q` ≥ 60 tests passing (current 18 + F2/F3/F4/F6/F7 additions).
+2. `cd frontend && npm run build` exit 0; bundle ≤ 350 KB gzipped.
+3. Headless smoke (`/tmp/capture_errors.js`) on every screen → no `pageerror`.
+4. 12-step manual QA on Chrome + Safari + Firefox + Mobile Safari + Mobile Chrome.
+5. WCAG 2.1 AA: zero serious/critical axe violations. Keyboard-only walkthrough succeeds.
+6. Hebrew RTL: every string translated; layout mirrors cleanly; native-speaker reviewer signs off.
+7. Real microphone + two real speakers + one real spoof attempt: ACCEPT / REJECT / DEEPFAKE all observed in 10/10 trials.
+8. EER on VoxCeleb1-O ≤ 1 %. EER on ASVspoof2019 LA ≤ 5 %. Detection rate on F5-TTS / XTTS clones ≥ 95 %.
+9. p95 verification latency ≤ 2 s on the production target.
+10. `/auth/login` rate-limited; sessions expire; cookies are HttpOnly+Secure+SameSite=Strict.
+11. Pentest: zero outstanding Critical/High.
+12. Production deployment: `docker compose up` → working stack with Postgres + nginx + TLS.
+13. Research paper: `docs/paper/biovoice.pdf` IEEE-formatted, all six results sections populated, two engineers + co-author sign-off.
+14. §6 Phase A/B/C/D ✅; §13 phases F1–F9 ✅.
+
+When all 14 are green, the system is delivered.
