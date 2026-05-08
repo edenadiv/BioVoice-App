@@ -1,246 +1,177 @@
-# BioVoice — UI Implementation Plan
+# BioVoice — Wire-Live Migration Plan
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
 > **Last updated:** 2026-05-08
 > **Owner of this file:** Eden (UI lead — keeps it updated as phases progress)
-> **Source of truth for screens:** `docs/SDD-6 Riva.pdf` §5 (Figures 15–20). **TCAV (Figure 19) is dropped** for this milestone — it is not yet working and is removed from scope until further notice.
+> **Source of truth for the UI:** the kiosk prototype currently in `frontend/src/` (`app.jsx`, `audio.jsx`, `screens.jsx`, `console.jsx`, `console-ext.jsx`, `more-screens.jsx`, `visuals.jsx`). The SDD-6 PDF (`docs/SDD-6 Riva.pdf`) figures §5 are reference-only — the previous plan to rebuild from those figures was a misread (see `MIGRATION_POSTMORTEM.md`).
 
 ---
 
 ## 1. Goals
 
-The BioVoice UI must be production-grade for the Israel National Cyber Directorate evaluation and the supporting research paper. The current frontend is a developer dashboard; the SDD mockups specify a polished desktop-style application. We are rebuilding the UI to match the mockups deeply (not pixel-shimming) and wiring it to the existing FastAPI backend.
+The kiosk prototype is in `main` and renders correctly with mock data. For the Israel National Cyber Directorate evaluation and the supporting research paper, **every number on screen must come from the live FastAPI backend**:
 
-**Acceptance bar:**
+- No hardcoded `PROFILES`.
+- No `Math.random()` similarity / deepfake scores.
+- No drift counters.
+- No animated stubs that pretend to be ML inference.
 
-- All 5 in-scope screens (Enrollment, Processing, Deepfake Result, Verification Result, Test Lab) render at parity with the mockups on a 1280×800 desktop window and degrade gracefully down to 1024×768.
-- End-to-end flow (enroll → login → verify → see result) works against the real backend with no console errors.
-- Latency budget per SDD §1.5: < 2 s from "stop recording" to result.
-- Audio constraints per SDD §1.5: 16 kHz mono, 1–10 s recordings.
-- Decision logic per SDD §2.5: `ACCEPT = (similarity ≥ 0.75) ∧ (deepfake_score ≥ 0.5)`.
+Acceptance bar (per SDD §1.5):
+
+- End-to-end verify p95 < 2 s wall-clock.
+- 16 kHz mono WAV, 1 – 10 s recordings.
+- Decision logic: `ACCEPT = (similarity ≥ 0.75) ∧ (deepfake_score ≥ 0.5)`.
 
 ## 2. Team
 
-**Two-person team for this milestone.** Idan is not active; his backend tasks have been redistributed.
+Two-person team. Eden is UI lead + verification side; Yoav is audio + active screens + the two pending backend routes.
 
-| Member | Role | Owns |
-|---|---|---|
-| **Eden Adiv** | UI lead, architecture, integration | Design system, app shell, Home/Login/Verification Result screens, backend extensions for verification records, view-details endpoint, decision-logic alignment with SDD §2.5, perf probe, plan upkeep |
-| **Yoav Zucker** | Frontend audio + active screens | Audio capture rewrite, Waveform component, Enrollment/Processing/Deepfake Result/Test Lab screens, ID-availability endpoint, AASIST sub-score derivation, spoof-test endpoint |
-
-Eden is the UI leader and the final reviewer on visual / UX questions. Yoav is the audio specialist and the final reviewer on anything microphone-adjacent. Both engineers do their own backend work for the screens they own — the engineer who consumes an endpoint also writes it.
+| Member | Owns this milestone |
+|---|---|
+| **Eden Adiv** | API client + state foundations, strip mocks, real counters/feed, implicit-login Run Verification, overlay reconcile, VerifyScreen, ProfilesPage, plan upkeep. |
+| **Yoav Zucker** | Recorder hook (the keystone), EnrollScreen, ProcessingScreen, DeepfakeScreen, DeepfakeLab, two pending backend routes (availability + spoof-test), AASIST sub-score derivation, mic-permission UX. |
 
 ## 3. Scope (in / out)
 
 **In scope (this milestone):**
 
-| # | Screen (SDD §) | Mockup | Owner |
-|---|---|---|---|
-| 1 | Enrollment Screen (5.1) | Fig. 15 | Yoav |
-| 2 | Processing Screen (5.2) | Fig. 16 | Yoav |
-| 3 | Deepfake Detection Result (5.3) | Fig. 17 | Yoav |
-| 4 | Verification Result (5.4) | Fig. 18 | Eden |
-| 5 | Deepfake Generator / Test Lab (5.6) | Fig. 20 | Yoav |
+- Wire every kiosk screen to the live FastAPI backend.
+- Add the two pending backend routes: `GET /users/{user_id}/availability`, `POST /me/spoof/test`.
+- Replace placeholder AASIST sub-scores with deterministic seeded derivation.
+- Preserve the existing kiosk visual language. **No visual rebuild.**
 
-**Out of scope (this milestone):**
+**Out of scope:**
 
-- TCAV Explanation Screen (SDD §5.5, Fig. 19) — explicitly dropped. Remove all TCAV references from UI copy, plans, and the navigation graph. Do **not** delete the SDD reference; we may revisit later.
-- Multi-tenant admin views, profile management UI, audit log viewer.
-- i18n / Hebrew RTL — single-language English build for now.
+- TCAV / ExplainScreen — explicitly dropped. Strip from the navigation graph in this milestone.
+- Multi-tenant admin views, audit-log viewer.
+- i18n / Hebrew RTL.
+- Settings persistence (operator preferences in `UserSettingsPage` stay UI-only).
+- macOS-window rebuild from SDD §5 figures — abandoned (see `MIGRATION_POSTMORTEM.md`).
 
-## 4. Architectural decisions
+## 4. User-confirmed decisions
 
-1. **Window chrome.** All screens live inside a single fake-desktop window component (`<AppWindow>`) with macOS-style traffic-light header and a centered title that reflects the current screen. Matches the mockups exactly.
-2. **Light theme.** Mockups are light. We replace `styles.css` with a fresh design-token system (CSS custom properties on `:root`). Dark theme is dropped for this milestone.
-3. **Single-page, screen-state machine.** No router. `App.tsx` holds a `screen` enum and a `flowState` object (audio buffer, embedding scores, verification id, etc.) that screens read from. Keeps the prestigious-client demo predictable and avoids URL/ref desync.
-4. **Backend additions are minimal.** We extend, not rewrite, the existing FastAPI services. New endpoints:
-   - `GET /users/{user_id}/availability` — returns `{ available: bool }` for the enrollment ID-Available pill. (**Yoav**)
-   - `POST /me/spoof/test` — runs the AASIST detector on an in-flight spoof sample and returns `{ deepfake_score, decision }` so the Test Lab "Test Detection" button can show a result without enrolling/verifying anyone. (**Yoav**)
-   - `GET /me/verifications/{result_id}` — returns the full verification record (including stage breakdown the result screen displays). Keeps the Verification Result screen self-contained. (**Eden**)
-5. **Processing screen is presentation-layer only.** The pipeline stages (Load Audio → Resample 16 kHz → Normalize → Mel-Spectrogram → Extract Features) are visualized on the client while the single `/me/verify` (or `/me/enroll`) call is in flight. We do not stream stage events from the server in this milestone — the UI advances stages on a calibrated timeline that completes when the response lands. Documented as such in the research paper appendix.
-6. **Existing 3-sample enrollment is preserved.** The backend already enforces `min_enrollment_samples = 3` for centroid robustness. The Enrollment screen surfaces "Sample N / 3" alongside the mockup's single-recording layout. The SDD §2.4 figure of "1 sample" is a design simplification; we keep 3 in production and call it out in the paper.
-7. **No TCAV anywhere.** Anything referring to "Why This Decision" or TCAV concept bars is removed from `App.tsx`, navigation, and copy.
-8. **Engineer-owns-stack.** The engineer who builds a screen also builds the endpoints it consumes. Avoids cross-team handoffs in a two-person team.
+- **Login flow:** implicit via Run Verification. `POST /auth/login` both verifies and creates the session — no separate login modal.
+- **Empty-DB state:** honest zeros + onboarding banner ("No enrolled profiles yet. Click '+ ENROLL NEW' in Profiles."). No demo-data seeding.
+- **DeepfakeLab attack tiles:** hide replay/splice (unimplemented). Show only the working clone tile.
 
-## 5. Phased rollout
+## 5. Architectural decisions
 
-Each phase is a logical, independently testable chunk. Phase numbers map to assigned tasks in `Eden.md` and `Yoav.md`.
+1. **No file/folder reorg.** The `.jsx` files stay where they are. New `.ts/.tsx` helpers (`lib/audio.ts`, `lib/session.tsx`, `lib/thresholds.ts`, `lib/useResultsPolling.ts`, `lib/useCalibratedTimeline.ts`) sit alongside `lib/api.ts` and `lib/wav.ts`.
+2. **One context, no Redux.** `lib/session.tsx` holds `{ session, speakers, results, lastVerification, lastSpoof, flow }`. Each screen reads via `useAppState()`.
+3. **WAV recorder is segregated.** `useMicrophone` + `useSyntheticAudio` (in `audio.jsx`) stay for **visualization only**. The new `useVoiceRecorder` (`lib/audio.ts`, Y-12) is the **only** producer of `File` blobs sent to the backend; it refuses to start without a real `MediaStream`. Synthetic audio never reaches the server.
+4. **Decision lives on the server.** Frontend reads `result.decision` directly. `lib/thresholds.ts` mirrors `backend/app/core/config.py` thresholds for **display only** (gauge marker labels). The frontend never re-derives `accepted = sim ≥ 0.75 && df ≥ 0.5`.
+5. **Calibrated timelines, not random ones.** `useCalibratedTimeline(promise, expectedTotalMs)` drives both `ProcessingScreen` stages and `VerificationOverlay` phases. Animations hold the final stage until the promise resolves; > 4 s switches to "Still working…".
+6. **Polling, not websockets.** `useResultsPolling(5000)` calls `listResults()` every 5 s with `AbortController` cleanup + exponential backoff on error. Drives counters + activity feed.
 
-### Phase 0 — Cleanup (drop TCAV, dead code) ✅
+## 6. Phased rollout
 
-- Audit the codebase for any TCAV-related imports, components, copy, routes; remove them.
-- Delete or archive `frontend/src/screens.jsx`, `more-screens.jsx`, `visuals.jsx`, `console.jsx`, `console-ext.jsx`, `audio.jsx`, `app.jsx` if they are not referenced from `main.tsx` (they are leftover prototypes).
-- Verify `npm run build` and the FastAPI app still boot.
+### Phase A — Foundations (parallel, both engineers, day 1) ⬜
 
-**Owner:** Eden (frontend audit + backend boot check).
+- **Y-12** Recorder hook — keystone; blocks every screen with a mic.
+- **E-14** API client + state foundations — `getAvailability`, `spoofTest`, `lib/session.tsx`, `lib/thresholds.ts`, `lib/useResultsPolling.ts`, `lib/useCalibratedTimeline.ts`.
+- **E-15** Strip mocks — delete `PROFILES`, `ExplainScreen`, `'explain'` order entries, `seedActivity`/`makeRandomActivity`.
+- **E-16** Real counters + activity feed.
+- **Y-17** Backend `GET /users/{user_id}/availability`.
+- **Y-19** `analysis_details_from_score()` deterministic derivation.
 
-### Phase 1 — Design system foundation ✅
+### Phase B — Verification flow (day 2) ⬜
 
-- New `tokens.css` with light-theme CSS variables matching the mockups (off-white backgrounds, black text, semantic greens/reds/blues/purples for status pills, the orange "test mode" warning band, etc.).
-- New `<AppWindow>` shell with traffic-light dots and centered title.
-- New shared primitives: `<Button variant="primary|secondary|danger|warn|success">`, `<Badge>`, `<ProgressBar>`, `<Waveform>` (live + static), `<Gauge>` (semicircle for verification score), `<StageList>` (for the processing pipeline).
-- Typography stack: Inter for UI, JetBrains Mono for mono labels.
+- **E-17** Implicit-login Run Verification.
+- **E-18** Rebuild `VerificationOverlay` around the calibrated timeline.
+- **Y-13** Wire `EnrollScreen` (depends on Y-12 + Y-17).
+- **Y-14** Wire `ProcessingScreen`.
+- **Y-18** Backend `POST /me/spoof/test`.
+- **E-20** Wire `ProfilesPage` + inline enroll dialog.
 
-**Owner:** Eden.
-**Exit:** demo route (e.g., `?showcase=1`) renders one of each primitive; Yoav signs off via screenshot in the PR before screens consume the primitives.
+### Phase C — Result & lab (day 3) ⬜
 
-### Phase 2 — App shell + screen state machine ✅
+- **E-19** Wire `VerifyScreen` to `state.lastVerification`.
+- **Y-15** Wire `DeepfakeScreen`.
+- **Y-16** Wire `DeepfakeLab` (depends on Y-18).
+- **Y-20** Mic-permission denial UX.
 
-- Replace existing `App.tsx` content with a new screen-state machine.
-- Screens enum: `home → enroll → processing → deepfake_result → verify_result → test_lab` plus a `login` screen for returning users.
-- Shared `flowState`: `{ userId, lastAudio, lastEmbedding?, lastDeepfakeScore?, lastVerification?, sessionToken? }`.
-- Persist `sessionToken` in `localStorage` exactly as today.
-- Drop the workspace dashboard (it is a developer view — not in mockups). Replace with a minimal `home` landing that routes to "Enroll" or "Login".
+### Phase D — QA & ship (day 4) ⬜
 
-**Owner:** Eden.
+- **E-21** Cross-screen manual run-through (see §9 below) + Plan.md status update.
+- Backend pytest stays green.
+- Both engineers review each other's PRs end-to-end. UI PRs require a screenshot; backend PRs require a curl/pytest snippet.
 
-### Phase 3 — Enrollment screen (Fig. 15) ⬜
-
-- Layout: User ID input (left) + ID-Available pill (right) + "Voice Recording" waveform card + timer + big red record/stop button + tip card.
-- Live waveform animation while recording (microphone level → bars).
-- Timer counts up `mm:ss.s`. Stops at 10 s with auto-stop; minimum 1 s.
-- ID-availability check: debounced 300 ms call to `GET /users/{user_id}/availability`.
-- On stop: POST `/enroll` (multipart) → on success advance to Processing screen.
-- Show "Sample N / 3" progress indicator (kept from existing 3-sample flow).
-- Validation: empty user ID, taken user ID, recording too short, recording too long.
-
-**Owner:** Yoav (screen + availability endpoint).
-
-### Phase 4 — Processing screen (Fig. 16) ⬜
-
-- Stage list: Load Audio → Resample 16 kHz → Normalize → Mel-Spectrogram → Extract Features.
-- Each stage shows: pending (gray), in-progress (blue with spinner), done (green check).
-- Bottom progress bar with "X% Complete" label.
-- Calibrated to advance stages over the duration of the in-flight `/me/verify` (or `/me/enroll`) request; final stage holds until the response lands.
-- On success: route to Deepfake Result for verification flow, or directly to Verification Result for the joint flow. The exact next-screen is decided by `flowState.intent` (`enroll` | `verify`).
-
-**Owner:** Yoav.
-
-### Phase 5 — Deepfake Detection Result (Fig. 17) ⬜
-
-- Big verdict card: green "GENUINE AUDIO" or red "SYNTHETIC AUDIO DETECTED" with confidence percentage.
-- Analysis Details section with four metrics, each as a horizontal bar:
-  - Voice Naturalness
-  - Spectral Consistency
-  - Temporal Patterns
-  - Artifact Detection
-- AASIST badge + "Powered by Audio Anti-Spoofing AI" footer.
-- Auto-advances after 2 s (or on click) to Verification Result if inside the verification flow.
-- The four sub-scores are derived from the existing AASIST score with deterministic per-metric noise (±2 %) so the visualization reads richly without lying about precision; documented in the paper.
-
-**Owner:** Yoav (UI + sub-score derivation in `detector.py`).
-
-### Phase 6 — Verification Result (Fig. 18) ✅
-
-- Top banner: green "IDENTITY VERIFIED" or red "ACCESS DENIED" + "Welcome back, {name}" / reason.
-- Two metric cards side-by-side:
-  - Voice Similarity gauge (0.00 – 1.00) with threshold marker at 0.75.
-  - Authenticity Check status icon + "Audio is genuine" / "Audio flagged as synthetic".
-- Three buttons: Continue (primary green), Try Again (gray), View Details (blue).
-- Footer: timestamp + Session ID `VRF-YYYY-MMDD-XXXX`.
-- "View Details" opens a modal listing per-sample similarities and the centroid similarity (we already compute these — see `verification.py:130-135`).
-
-**Owner:** Eden (screen + `/me/verifications/{result_id}` endpoint, session ID format, decision-logic alignment).
-
-### Phase 7 — Deepfake Generator / Test Lab (Fig. 20) ⬜
-
-- Orange "TESTING MODE — For validation purposes only" banner.
-- Source Audio waveform card with file picker / reference-sample picker.
-- External TTS API config card: service name (read-only "Voice Cloning API"), target text textarea.
-- Big orange "Generate Fake" button → calls existing `POST /me/spoof`.
-- Generated Deepfake waveform card (tinted red).
-- "Test Detection" button → calls new `POST /me/spoof/test` endpoint with the generated WAV → shows the AASIST score inline.
-- Status footer: "Ready to generate test sample" / "Generated. Test detection?" / "Detection score: 0.04 (FAKE)".
-
-**Owner:** Yoav (UI + `/me/spoof/test` endpoint).
-
-### Phase 8 — Backend support 🟡 (Eden's slice complete; Yoav's pending)
-
-Concrete endpoint additions and changes:
-
-| Endpoint | Method | Purpose | Owner |
-|---|---|---|---|
-| `/users/{user_id}/availability` | GET | ID-Available pill | Yoav |
-| `/me/verifications/{result_id}` | GET | View Details modal | Eden |
-| `/me/spoof/test` | POST | AASIST score for an arbitrary WAV | Yoav |
-
-Plus:
-
-- `verification.py` already returns `centroid_similarity` and `sample_similarities`. Add `session_id` (formatted) and a `stage_breakdown: {load_ms, resample_ms, mel_ms, embed_ms, detect_ms}` to `VerificationResponse`. Wire timings with `time.perf_counter()` around the existing call sites. **(Eden)**
-- `detector.py` extends to expose `analysis_details: { voice_naturalness, spectral_consistency, temporal_patterns, artifact_detection }`. For now derive deterministically from the global AASIST score with seeded jitter; document in the paper. **(Yoav)**
-- Decision-logic alignment with SDD §2.5 (preprocess → embedding → AASIST → if DF<0.5 reject as fake → similarity → if sim<0.75 reject as mismatch → accept), with copy-locked messages and a machine-readable `decision_reason` enum. **(Eden)**
-
-### Phase 9 — QA & Validation ⬜
-
-- Manual run-through of the full happy path on macOS (Chrome + Safari) at 1280×800.
-- Negative paths: empty mic input, taken user ID, < 1 s recording, > 10 s recording, mid-recording cancel, network error, deepfake-flagged audio.
-- Performance: confirm < 2 s end-to-end for verify (SDD §1.5).
-- Accessibility smoke: keyboard-only navigation through Enrollment, Verification Result, Test Lab.
-- Cross-engineer code review (Eden ↔ Yoav).
-
-**Owners:** Both. Eden coordinates and signs off the visual + integration bar; Yoav signs off the audio + active-screen bar.
-
-## 6. Repository layout after the rebuild
+## 7. Repo layout (after this milestone)
 
 ```
 frontend/src/
-  App.tsx                  # screen state machine
-  main.tsx
-  styles/
-    tokens.css             # design tokens (light)
-    base.css               # resets + base typography
-    primitives.css         # styles for shared primitives
-    screens.css            # per-screen layouts
-  components/
-    AppWindow.tsx          # macOS-style window chrome
-    Button.tsx
-    Badge.tsx
-    Gauge.tsx
-    ProgressBar.tsx
-    StageList.tsx
-    Waveform.tsx           # live + static
-  screens/
-    HomeScreen.tsx
-    EnrollScreen.tsx
-    ProcessingScreen.tsx
-    DeepfakeResultScreen.tsx
-    VerifyResultScreen.tsx
-    TestLabScreen.tsx
-    LoginScreen.tsx
+  main.tsx                 # imports ./app.jsx (no change)
+  app.jsx                  # state-machine entry — uses session context
+  audio.jsx                # visualization hooks (Mic, Synthetic) — NO recorder
+  screens.jsx              # WelcomeScreen, EnrollScreen, ProcessingScreen,
+                           #   VerifyScreen, DeepfakeScreen, Chrome
+                           # ExplainScreen DELETED
+  console.jsx              # ConsoleScreen, SettingsPanel, ParticleFlow, useCounter
+  console-ext.jsx          # AmbientField, EmbeddingConstellation, LiveFeatures,
+                           #   LiveClock, ThreatLevel, VerificationOverlay (rebuilt)
+  more-screens.jsx         # Sidebar, DeepfakeLab, UserSettingsPage, ProfilesPage
+  visuals.jsx              # VoiceOrb, Waveform, MelSpectrogram, etc.
   lib/
-    api.ts                 # extended with new endpoints
-    audio.ts               # mic capture + WAV encoding
-    flowState.ts           # screen transitions
-  types.ts
+    api.ts                 # +getAvailability, +spoofTest
+    audio.ts               # NEW (Y-12) — useVoiceRecorder
+    session.tsx            # NEW (E-14) — context + provider + hooks
+    thresholds.ts          # NEW (E-14) — SIM_THRESHOLD, DF_THRESHOLD
+    useResultsPolling.ts   # NEW (E-14)
+    useCalibratedTimeline.ts # NEW (E-14)
+    wav.ts                 # unchanged
+  types.ts                 # +SpoofTestResult
+
 backend/app/
-  api/routes.py            # + /availability, + /me/verifications, + /me/spoof/test
+  api/routes.py            # + GET /users/{user_id}/availability  (Y-17)
+                           # + POST /me/spoof/test                (Y-18)
   services/
-    detector.py            # + analysis_details
-    verification.py        # + stage_breakdown, + session_id, + decision_reason
+    detector.py            # + analysis_details_from_score()      (Y-19)
+    verification.py        # uses Y-19 instead of placeholder mirror
+
+backend/tests/
+  test_users.py            # NEW (Y-17)
+  test_spoof.py            # NEW (Y-18)
+  test_verification.py     # unchanged from PR #6
 ```
 
-Components from the old prototype to delete in Phase 0: `screens.jsx`, `more-screens.jsx`, `visuals.jsx`, `console.jsx`, `console-ext.jsx`, `audio.jsx`, `app.jsx`. The current `.tsx` components (`AuthRecordingForm`, `ResultCard`, `SimilarityInsights`, `SpoofStudio`, `VerificationHistory`, `RecordPanel`, `Panel`, `StatusPill`) are superseded by the screens above — keep them in git history; remove them from the build once their screens are live.
-
-## 7. Risks & mitigations
+## 8. Risks & mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Mockup waveforms have ~50 bars at full width — naive ScriptProcessor smoothing produces ugly aliasing. | Use `requestAnimationFrame` + analyser FFT 512, downsample by averaging fixed-width buckets. Yoav owns. |
-| AASIST sub-scores are not real per-metric outputs. | Deterministic seeded derivation, transparently documented in the research paper appendix. Yoav owns the derivation function and the documentation paragraph. |
-| Single-shot 3-sample enrollment doesn't match Fig. 15's single-record UI. | Show a "Sample N / 3" indicator + progress dots. After sample 3, route to Login. UX is honest. |
-| < 2 s latency budget on cold ReDimNet load. | Warm the model on backend startup (already done in `services/speaker_encoder.py` if `lazy=False`). Verify in Phase 9 (Eden). |
-| The Processing screen advances stages on a timeline, not real backend events — looks fake under network slowness. | Cap stage 1–4 at 60 % of the wall clock; stage 5 (Extract Features) holds until the response. If the response takes > 4 s, switch to an indeterminate "Still working…" indicator. |
-| Two-person team means single-reviewer PRs. | Both engineers must read each other's PRs end-to-end. UI PRs require a screenshot in the description; backend PRs require a curl/pytest snippet. |
+| Synthetic audio fallback (`useSyntheticAudio`) accidentally feeding the backend. | Hard segregation — `useVoiceRecorder` (Y-12) refuses to start without a real `MediaStream`; visualization hooks have no WAV path. |
+| Network slowness vs the calibrated timeline. | `useCalibratedTimeline` switches to "Still working…" after 4 s; same hook for `ProcessingScreen` + `VerificationOverlay`. |
+| XTTS unavailability for `/me/spoof` (HTTP 503). | `DeepfakeLab` catches 503 explicitly with an inline banner. Test Detection still works against any uploaded WAV. |
+| LAN-IP CORS for phone demos (`config.py:13` is hardcoded to `localhost:5173`). | Document `CORS_ORIGINS` env-var override as a follow-up; do not ship in this milestone. |
+| `lastVerification` is null when user navigates directly to a result screen. | Result-screen mounts check the context; redirect to Console if null. No stub rendering. |
+| Two-person team / single-reviewer PRs. | Both engineers review every PR end-to-end. UI PRs require a screenshot; backend PRs require a curl/pytest snippet. (Standing rule from `MIGRATION_POSTMORTEM.md`.) |
+| Build green ≠ app works. | Every UI PR must include a headless render check (puppeteer / `Chrome --screenshot`) confirming no `pageerror`. (Standing rule from `MIGRATION_POSTMORTEM.md`.) |
 
-## 8. Communication
+## 9. Verification (end-to-end manual run-through)
 
-- Daily 5-minute stand-up message in Slack/WhatsApp covering: shipped, in flight, blockers.
-- Weekly sync: 30 min, Wednesday 18:00 IDT.
+Run `uvicorn app.main:app --reload` in `backend/` and `npm run dev` in `frontend/`. With both up:
+
+1. **Backend smoke** — `curl http://localhost:8000/health` → `{"status":"ok"}`. `curl http://localhost:8000/users` → `[]` on a fresh DB.
+2. **Console empty state** — open `http://localhost:5173`. Expect `verifyCount=0`, `threatCount=0`, empty activity feed, onboarding banner.
+3. **Real enrollment (3 samples)** — Profiles → "+ ENROLL NEW" → username `eden_test` → record three 4-second WAVs. Card shows `sampleCount: 3` with real `enrolledAt`.
+4. **Implicit-login + ACCEPT** — Console → pick `eden_test` → Run Verification → record. Overlay snaps to phase 3 with real similarity ≥ 0.75 and df ≥ 0.5. `VerifyScreen` shows the same numbers and real `stageBreakdown.totalMs`.
+5. **REJECT (mismatch)** — enrol second user; while logged in as the first, verify with the second's voice. Overlay shows red, `decisionReason: 'mismatch'`.
+6. **DEEPFAKE** — DeepfakeLab → pick reference sample → Generate → Test Detection → verdict `decision: 'FAKE'`. Feed the generated WAV through `/me/verify` → `decision: 'DEEPFAKE'`.
+7. **Activity feed** — console shows the 4 events. Counters: `verifyCount=2`, `threatCount=1`. Refresh — counters persist (sourced from `/results`).
+8. **Latency budget** — devtools Network: `/me/verify` p95 < 2 s over 10 runs.
+9. **No leaked mocks** — `grep -nE "Math.random\(\)" frontend/src/*.jsx` returns only ambient/visual jitter (e.g. `console-ext.jsx:22-27` particles), nothing in business logic.
+10. **Backend tests** — `cd backend && pytest` green, including new `test_users.py` and `test_spoof.py`.
+11. **No console errors** — devtools console clean across every screen + verification flow.
+12. **Permission denial** — disable mic; refresh; expect inline "Microphone access required" with Retry button (Y-20). Synthetic audio never POSTs.
+
+## 10. Communication
+
+- Daily 5-minute stand-up in Slack/WhatsApp: shipped, in flight, blockers.
 - Status updates land in this `Plan.md` checkbox grid (mark phase status as you go).
-- PRs target `main` via topic branches, one per phase. The other engineer is the required reviewer.
+- PRs target `main` via topic branches, one per task or small group of tasks.
+- The other engineer is the required reviewer.
 
-## 9. Open questions
+## 11. Open questions
 
-- [ ] Should "Continue" on the Verification Result navigate to the home screen or to a (future) post-auth dashboard? Default for this milestone: home screen.
-- [ ] Final session ID format. Proposing `VRF-YYYY-MMDD-XXXX` where `XXXX` is the last 4 chars of `result_id`.
-- [ ] Will Idan rejoin during the QA phase? If yes, he picks up the perf probe and an extra QA pass.
+- [ ] LAN-IP CORS for phone demos: do we want a `CORS_ORIGINS` env-var override now, or post-milestone?
+- [ ] Should the activity feed include enrollments, or stay verifications-only? (Currently /results is verify-only.)
+- [ ] Will Idan rejoin? If yes, he picks up the LAN-CORS env override + extra QA pass.

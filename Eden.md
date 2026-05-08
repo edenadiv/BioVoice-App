@@ -1,227 +1,171 @@
 # Eden — Tasks
 
 > Owner: Eden Adiv. Cross-references `Plan.md` (master plan).
-> **Role on this milestone:** **UI lead**. Owns the design system, app shell, the marquee Verification Result screen, the Home/Login flow, and the backend extensions that feed the result screen (verification record fields, view-details endpoint, decision-logic alignment, perf probe). Also owns `Plan.md` upkeep.
+> **Role on this milestone:** UI lead + verification side. Owns API client + state foundations, the strip-mocks pass, real counters/feed, the implicit-login Run-Verification flow, the rebuilt `VerificationOverlay`, the `VerifyScreen` wiring, the `ProfilesPage` wiring, and `Plan.md` upkeep.
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
 
-> **Note:** Idan is not active this milestone. His backend tasks were redistributed — Eden owns the verification-side backend work, Yoav owns the deepfake-side and availability work.
+---
+
+## Completed in earlier milestones
+
+These shipped in PRs #5 and #6 and **stay** as the live backend / api-client baseline. They are not redone in this milestone.
+
+- **E-1** ✅ Phase 0 audit (frontend + backend boot)
+- **E-7** ✅ `VerificationResponse` extensions: `decision_reason`, `session_id`, `stage_breakdown`, `analysis_details`
+- **E-8** ✅ `GET /me/verifications/{result_id}`
+- **E-9** ✅ Decision logic alignment with SDD §2.5 (copy-locked messages, decision_reason enum)
+- **E-10** ✅ 12 verification pytests
+- **E-11** ✅ `backend/scripts/bench_verify.py` p50/p95 probe
+
+The macOS-window screens from the previous plan (E-2 design system, E-3 app shell, E-4 Home/Login, E-5 Verification Result) are **superseded**. The kiosk prototype is the UI; see `MIGRATION_POSTMORTEM.md`.
 
 ---
 
-## Sprint 1 — Foundation
+## This milestone (Wire-Live)
 
-### E-1. Phase 0 audit (frontend + backend boot) ⬜
+### Sprint A — Foundations (day 1)
 
-- Confirm the legacy `.jsx` files (`screens.jsx`, `more-screens.jsx`, `visuals.jsx`, `console.jsx`, `console-ext.jsx`, `audio.jsx`, `app.jsx`) are not referenced from `main.tsx`. If clean, delete them.
-- Grep the frontend for any `tcav|TCAV|concept|"Why This Decision"` and remove. Grep the backend for the same — there should be nothing today, but confirm.
-- Sanity-check that the FastAPI app boots (`uvicorn app.main:app --reload` from `backend/`). Document any startup warnings.
-- Confirm `services/speaker_encoder.py` warm-loads ReDimNet on boot so the first verify request stays under the 2 s budget.
-- Run `npm run build` and confirm green.
+#### E-14 — API client + state foundations ⬜
 
-**Definition of done:** clean `tsc -b && vite build`, clean `uvicorn` boot, no TCAV strings remain anywhere, repo diff is one focused commit.
-
-### E-2. Design system — tokens & primitives (Phase 1) ⬜
-
-- Replace `frontend/src/styles.css` with `styles/tokens.css` + `styles/base.css` + `styles/primitives.css`.
-- Implement light-theme tokens from the mockups:
-  - `--bg-window: #ffffff`, `--bg-titlebar: #2f2f33`, `--bg-surface: #f4f5f7`, `--bg-info: #eaf2ff`, `--bg-success: #e8f6ec`, `--bg-warn: #fff1e0`, `--bg-test: #fbe9d6`.
-  - Text: `--text-primary: #1c1d20`, `--text-secondary: #6b7180`.
-  - Accent: `--accent-success: #2ecc71`, `--accent-danger: #e74c3c`, `--accent-warn: #f08a2a`, `--accent-info: #3686ff`, `--accent-neutral: #8a8f9a`.
-  - Radii: `--r-sm: 6px`, `--r-md: 10px`, `--r-lg: 18px`.
-  - Shadow: `--shadow-window: 0 24px 60px rgba(20, 26, 36, 0.18)`.
-- Build primitives in `components/`:
-  - `AppWindow.tsx` — macOS chrome (red/yellow/green dots, centered title), 800×600 minimum, scales to viewport.
-  - `Button.tsx` — variants `primary` (blue), `success` (green), `warn` (orange), `danger` (red), `secondary` (gray), `ghost`.
-  - `Badge.tsx` — pill with optional left icon (used by ID-Available pill, GENUINE AUDIO chip).
-  - `ProgressBar.tsx` — horizontal, animated, supports `value` 0–100.
-  - `Gauge.tsx` — semicircle gauge (0.00–1.00), with threshold marker.
-  - `StageList.tsx` — vertical list of stages with status (`pending|active|done`), connector line.
-  - `Waveform.tsx` — accepts either a live `AnalyserNode` (live mode) or a `Float32Array` (static mode); renders 48 bars; spec'd with Yoav so live + replay use the same visual.
-- Add a `?showcase=1` query route in `App.tsx` that renders one of each primitive for review. Keep until end of Phase 2.
-
-**Definition of done:** primitives render under `?showcase=1`; Yoav signs off via screenshot in the PR.
-
-### E-3. App shell + screen state machine (Phase 2) ⬜
-
-- Rewrite `App.tsx` as a screen state machine. Screens enum: `home | login | enroll | processing | deepfake_result | verify_result | test_lab`.
-- Centralize `flowState`:
+- `lib/api.ts`: add two wrappers.
   ```ts
-  type FlowState = {
-    intent: "enroll" | "verify";
-    userId: string;
-    sampleIndex?: number;       // 1..3 during enrollment
-    audioFile?: File;
-    sessionToken?: string;
-    lastDeepfakeScore?: number;
-    lastDeepfakeDetails?: AnalysisDetails;
-    lastVerification?: VerificationResult;
-  };
+  getAvailability(userId: string): Promise<boolean>            // GET /users/{userId}/availability
+  spoofTest(sessionToken: string, file: File): Promise<{
+    deepfakeScore: number; decision: "FAKE" | "GENUINE";
+    analysisDetails: AnalysisDetails;
+  }>                                                            // POST /me/spoof/test
   ```
-- Hydrate `sessionToken` from `localStorage` on mount. Drop the existing workspace dashboard from the visible flow (keep it on a dev-only `?dev=1` route for backend smoke testing — for **internal use only**).
-- All screens receive `flowState` and a `dispatch({ type, payload })` reducer. Keep this in `lib/flowState.ts`.
+- `types.ts`: add `SpoofTestResult` + `SpoofDecision = "FAKE" | "GENUINE"`.
+- `lib/session.tsx` (NEW): React context with `{ session, speakers, results, lastVerification, lastSpoof, flow: { intent: 'enroll' | 'verify' | null, pendingPromise: Promise<any> | null } }`. Provides `useAppState()` and `useAppDispatch()`. Hydrates `session.sessionToken` from `localStorage` on mount; restores via `getSession`.
+- `lib/thresholds.ts` (NEW): `SIM_THRESHOLD = 0.75`, `DF_THRESHOLD = 0.50`. Comment: *"Display only. Source of truth = `backend/app/core/config.py:11-12`."*
+- `lib/useResultsPolling.ts` (NEW): polls `listResults()` every 5 s with `AbortController` cleanup + exponential backoff (5s → 10s → 20s, cap 30s).
+- `lib/useCalibratedTimeline.ts` (NEW): `(promise, { stages, expectedTotalMs, slowAfterMs }) → { activeIdx, progress, isSlow, settled }`. Drives stages over `expectedTotalMs`; final stage holds 95 % until promise resolves; flips `isSlow=true` after `slowAfterMs`.
 
-**Definition of done:** Home → Enroll happy path navigates to Processing then to Deepfake Result then to Verify Result with stub data, in light mode, inside the AppWindow. No real network calls yet — those are wired by the screen owners.
+**Definition of done:** `npm run build` green; smoke test the context with a temporary `?devstate=1` route that prints `state.results.length`.
 
----
+#### E-15 — Strip PROFILES + ExplainScreen ⬜
 
-## Sprint 2 — Screens I own
+- Delete `PROFILES` const at `app.jsx:12-19`.
+- Delete `ExplainScreen` import at `app.jsx:7`; `case 'explain':` at `app.jsx:164-165`; `'explain'` entry from order arrays at `app.jsx:55, 92, 96, 198`.
+- Delete `ExplainScreen` function (`screens.jsx:719-820`) and remove from exports (`screens.jsx:822-825`). Also remove unused `ConceptBars` if no other importer.
+- Replace any `PROFILES`-driven dropdowns with `useAppState().speakers` (populated by `listSpeakers()` on mount in the context).
+- Verify: `grep -rE "PROFILES|ExplainScreen" frontend/src/` returns nothing.
 
-### E-4. Home + Login screens (Phase 2 follow-up) ⬜
+**Definition of done:** build green; kiosk renders without `PROFILES`; navigation no longer surfaces Explain.
 
-- Home screen: brand mark + tagline, two big buttons "New User Enrollment" and "Voice Login".
-- Login screen: User ID input, single record button, "Authenticate" CTA. On success, advance via Processing → Verify Result. Reuse the recorder built by Yoav.
+#### E-16 — Real counters + activity feed ⬜
 
-**Definition of done:** the two screens match the visual rhythm of the other mockup screens (single window, centered content, soft shadows). Login wiring uses `POST /auth/login`.
+- Mount `useResultsPolling(5000)` once in `<AppStateProvider>`.
+- Replace `verifyCount`/`threatCount` derivation in `app.jsx`:
+  ```
+  verifyCount = results.filter(r => r.decision === 'ACCEPT').length
+  threatCount = results.filter(r => r.decision === 'DEEPFAKE').length
+  ```
+  Drop the `setInterval` drift at `app.jsx:70-76` and the initial values `2147` / `38` at `app.jsx:30-31`.
+- Replace `seedActivity` / `makeRandomActivity` (`console.jsx:560-582`) with `state.results.slice(0, 10)`. Map `decision === 'ACCEPT' → 'accept'`, `'REJECT' → 'reject'`, `'DEEPFAKE' → 'deepfake'`. Drop the `'enroll'` activity kind for this milestone.
+- `useCounter` (`console.jsx:12-28`) animation hook stays; it animates from 0 to whatever the derived count is on each results update.
 
-### E-5. Verification Result screen (Phase 6) ⬜
+**Definition of done:** counters and feed both reflect real `/results`; on a fresh DB, console shows zeros + onboarding banner; new verifications appear within 5 s.
 
-This is the marquee screen for the demo. Match Fig. 18 exactly.
+### Sprint B — Verification flow (day 2)
 
-- Top banner card:
-  - Success: light-green background, green check circle, headline "IDENTITY VERIFIED", body "Welcome back, {name}!", subtle "Voice match confirmed".
-  - Reject: light-red background, red X circle, headline "ACCESS DENIED", body explains reason ("Speaker did not match enrolled profile" / "Audio flagged as synthetic").
-- Two metric cards in a row:
-  - Voice Similarity: `<Gauge>` rendering `result.similarityScore` against threshold 0.75; label `<score>` + "score" + "Threshold: 0.75".
-  - Authenticity Check: green check + "Audio is genuine" if `deepfakeScore >= 0.5`; red X + "Audio flagged as synthetic" otherwise.
-- Action row: Continue (success), Try Again (secondary), View Details (info).
-- Footer text rows: `Verified at {timestamp}` and `Session ID: VRF-YYYY-MMDD-XXXX` (last 4 of `result_id`).
-- "View Details" → modal listing `centroidSimilarity` + each `sampleSimilarities[i]` + `stage_breakdown` from the response.
-- Continue → routes to home and clears `flowState`.
-- Try Again → routes back to Login (or Enroll if intent was enroll).
+#### E-17 — Implicit-login Run Verification ⬜
 
-**Definition of done:** screen pixel-snaps to Fig. 18 within ~4 px tolerance, View Details modal renders the breakdown returned by E-7's extended `/me/verify` response.
+- Rewrite `runVerification(profile)` in `app.jsx:99-117`:
+  1. If `state.session === null`: call `loginWithVoice(profile.userId, file)` (file from Y-12 recorder). On success store `session` in context + `localStorage`, push `verification` into `state.lastVerification`.
+  2. If `state.session !== null` and `session.userId === profile.userId`: call `verifyAuthenticatedSpeaker(session.sessionToken, file)`.
+  3. If `state.session !== null` and `session.userId !== profile.userId`: log out the current session (`logoutSession`) then go to (1).
+- Set `state.flow.pendingPromise = thePromise` so `VerificationOverlay` (E-18) and `ProcessingScreen` (Y-14) can read it.
+- On success: set `state.lastVerification` and optimistically prepend the new result to `state.results` (counters update immediately; polling reconciles 5 s later).
+- On error: set `state.flow.pendingError = err.message`. Overlay renders an error panel (E-18).
 
-### E-6. Plan.md upkeep ⬜ (continuous)
+**Definition of done:** clicking Run Verification on the console drives a real `/auth/login` (or `/me/verify` if session exists), the overlay shows real numbers, and the activity feed updates.
 
-- Maintain `Plan.md` as the source of truth: tick off phases, log decisions, log open questions.
-- Commit message convention: `docs(plan): ...`.
+#### E-18 — Rebuild VerificationOverlay timeline ⬜
 
----
+- File: `console-ext.jsx:401-537`. Drop the existing `useEffect`-based `[1700, 1500, 1500, 4000]` ms phase timer at `console-ext.jsx:405-436`.
+- Use `useCalibratedTimeline(state.flow.pendingPromise, { stages: 3, expectedTotalMs: 1500, slowAfterMs: 4000 })`.
+  - Phases 0 (Capture), 1 (Embed), 2 (Match) animate to ~95 % over 1.5 s.
+  - Phase 3 (Result) does NOT mount until the promise settles.
+  - If promise resolves during phases 0-2: snap to phase 3.
+  - If `> 4 s`: copy on the bottom progress bar flips to "Still working…" and the bar holds at 90 %.
+  - On error: phase 3 mounts an error panel using `result.message` (and a Close button). Same colour treatment as the existing red panel.
+- Replace the hardcoded `passing = similarity >= 0.75 && dfScore >= 0.50` calc (`console-ext.jsx:438`) with `result.decision === 'ACCEPT'`.
+- The 0.75 / 0.50 markers come from `lib/thresholds.ts` (display only).
 
-## Sprint 3 — Backend extensions I own
+**Definition of done:** at backend p50 (~1.4 s) the overlay feels calm and lands at the real numbers; at 5 s it switches to "Still working…"; on a 4xx/5xx response it shows the server's `message` in the error panel.
 
-These tasks were Idan's; they now belong to Eden because they feed the Verification Result screen Eden owns.
+#### E-20 — Wire ProfilesPage + inline enroll ⬜
 
-### E-7. Verification record extensions (Phase 8) ⬜
+- File: `more-screens.jsx:534-590`.
+- Replace `PROFILES` map with `state.speakers` (loaded once via `listSpeakers()` in the context provider).
+- Per-card stats:
+  - VERIFIED count = `state.results.filter(r => r.userId === speaker.userId && r.decision === 'ACCEPT').length`.
+  - ENROLLED date = `formatDistanceToNow(speaker.enrolledAt)`.
+  - QUALITY = drop or replace with `${speaker.sampleCount}/3 samples`.
+- "+ ENROLL NEW" button at `more-screens.jsx:548` opens an inline modal/dialog:
+  - Username input + `getAvailability` debounced 300 ms (Yoav-owned API call).
+  - Y-12 recorder.
+  - Three sequential samples, calling `enrollSpeaker(userId, file)` (or `enrollAuthenticatedSpeaker` if a session exists).
+  - On the third sample, refetch `listSpeakers()` and close the modal.
+- Strip `Math.floor(120 + Math.random() * 600)` etc. at `more-screens.jsx:580-583`.
 
-Extend `VerificationResponse` (and `VerifyResult` model) with:
+**Definition of done:** Profiles page shows real speakers from `/users`; the enroll dialog runs an actual 3-sample flow against the backend; refresh persists.
 
-```python
-class VerificationResponse(BaseModel):
-    # ... existing fields ...
-    session_id: str               # "VRF-2026-0508-AB12" formatted
-    stage_breakdown: StageBreakdown
-    decision_reason: Literal["accepted", "mismatch", "synthetic", "not_enrolled"]
-```
+### Sprint C — Result screen + QA (days 3–4)
 
-```python
-class StageBreakdown(BaseModel):
-    load_ms: float
-    resample_ms: float
-    normalize_ms: float
-    mel_ms: float
-    embed_ms: float
-    detect_ms: float
-    total_ms: float
-```
+#### E-19 — Wire VerifyScreen ⬜
 
-- Wire timings in `services/verification.py:verify()` using `time.perf_counter()`.
-- `session_id` format: `VRF-{YYYY}-{MMDD}-{XXXX}` where `XXXX = result_id[-4:].upper()`.
-- Persist `stage_breakdown` and `decision_reason` on `VerificationRecord.metadata` so historical queries return them.
+- File: `screens.jsx:427-508`.
+- Read `state.lastVerification` instead of receiving `similarity` / `dfScore` props.
+- Replace the four hardcoded `val:` values for the artifact rows (`screens.jsx:608-611`) with:
+  ```
+  voiceNaturalness, spectralConsistency, temporalPatterns, artifactDetection
+  ```
+- Replace hardcoded `'1.27 s'` Stat with `${(stageBreakdown.totalMs / 1000).toFixed(2)} s`.
+- Decision banner uses `result.decision === 'ACCEPT'`. Subline uses `result.message`.
+- If `state.lastVerification === null` on mount, redirect to `console`.
 
-**Definition of done:** existing `/verify` and `/me/verify` responses include the new fields without breaking the frontend's existing typed parsers.
+**Definition of done:** the screen is a pure render of the response; no random fallbacks; matches the overlay's numbers exactly.
 
-### E-8. View-details endpoint (Phase 8) ⬜
+#### E-21 — QA pass + Plan.md upkeep ⬜
 
-```http
-GET /me/verifications/{result_id}  →  VerificationResponse
-```
+- Run the 12-step verification protocol from `Plan.md` §9.
+- For any drift, file a follow-up issue or fix inline.
+- Mark Phase A/B/C/D as ✅ in `Plan.md` as they land.
+- Confirm `grep -nE "Math.random\(\)" frontend/src/*.jsx` only matches ambient/visual jitter (no business logic).
 
-- Auth required. 404 if `result_id` doesn't belong to the authenticated `user_id`.
-- Returns the full record built by E-7.
-
-**Definition of done:** Eden's "View Details" modal (E-5) wires to this endpoint and renders centroid, per-sample similarities, and stage breakdown.
-
-### E-9. Decision logic alignment with SDD §2.5 ⬜
-
-Current `services/verification.py` returns `DEEPFAKE` if the deepfake score is below threshold. The SDD specifies:
-
-```
-ACCEPT = (similarity ≥ 0.75) ∧ (deepfake_score ≥ 0.5)
-```
-
-- Confirm the order of checks matches the SDD activity diagram (Fig. 13): preprocess → embedding → AASIST → if DF<0.5 reject as fake → similarity → if sim<0.75 reject as mismatch → accept.
-- Tighten the messages so they match the UI copy:
-  - DEEPFAKE → "Audio flagged as synthetic. Access denied."
-  - REJECT → "Speaker did not match the enrolled profile."
-  - ACCEPT → "Identity verified."
-- Surface a `decision_reason` enum (`accepted | mismatch | synthetic | not_enrolled`) on the response.
-
-**Definition of done:** all three decisions have stable, copy-locked messages and machine-readable reasons. Yoav's Deepfake Result screen consumes the same enum.
-
-### E-10. Verification tests ⬜
-
-- `tests/test_verification.py` — happy path (ACCEPT), mismatch (REJECT), deepfake-flagged (DEEPFAKE).
-- Use FastAPI's `TestClient` with the in-memory store fixture.
-
-**Definition of done:** `pytest backend/tests/test_verification.py` is green.
-
-### E-11. Performance probe ⬜
-
-- Add a one-shot script `backend/scripts/bench_verify.py` that posts 10 verifications against the running server and prints p50/p95 timings + the new `stage_breakdown`.
-- Confirm p95 < 2 s on a dev box. Append numbers to `Plan.md` §7 risks table.
-
----
-
-## Sprint 4 — QA pass
-
-### E-12. Cross-screen polish ⬜
-
-- Audit all 5 screens at 1280×800 and 1024×768. File issues for misalignments, missing focus states, contrast issues.
-- Confirm keyboard-only navigation: Tab order through Enrollment, Verification Result, Test Lab.
-- Verify `<2s` p50 verify latency by manual stopwatch over 10 runs.
-
-### E-13. Demo script ⬜
-
-- Prepare a 90-second walkthrough script for the client. Topics: enrollment, processing visualization, genuine vs synthetic, verification gauge.
+**Definition of done:** all 12 protocol steps green; backend pytest green; one screenshot per screen attached to the final QA PR description.
 
 ---
 
 ## Files Eden owns
 
-**Frontend:**
+**Frontend (existing):**
 
-- `Plan.md`
-- `frontend/src/App.tsx`
-- `frontend/src/main.tsx`
-- `frontend/src/styles/tokens.css`
-- `frontend/src/styles/base.css`
-- `frontend/src/styles/primitives.css`
-- `frontend/src/components/AppWindow.tsx`
-- `frontend/src/components/Button.tsx`
-- `frontend/src/components/Badge.tsx`
-- `frontend/src/components/Gauge.tsx`
-- `frontend/src/components/ProgressBar.tsx`
-- `frontend/src/components/StageList.tsx`
-- `frontend/src/components/Waveform.tsx` (jointly with Yoav)
-- `frontend/src/screens/HomeScreen.tsx`
-- `frontend/src/screens/LoginScreen.tsx`
-- `frontend/src/screens/VerifyResultScreen.tsx`
-- `frontend/src/lib/flowState.ts`
+- `frontend/src/app.jsx` — E-15, E-16, E-17
+- `frontend/src/screens.jsx` — E-15 (delete ExplainScreen), E-19
+- `frontend/src/console.jsx` — E-16
+- `frontend/src/console-ext.jsx` — E-18
+- `frontend/src/more-screens.jsx` — E-20
+- `frontend/src/lib/api.ts` — E-14
+- `frontend/src/types.ts` — E-14
 
-**Backend (taken from Idan's old scope):**
+**Frontend (new):**
 
-- `backend/app/api/routes.py` (additions: `/me/verifications/{result_id}`)
-- `backend/app/schemas.py` (additions: `StageBreakdown`, extended `VerificationResponse`, `decision_reason`)
-- `backend/app/services/verification.py` (timings, session id, decision messages, decision_reason)
-- `backend/tests/test_verification.py` (new)
-- `backend/scripts/bench_verify.py` (new)
+- `frontend/src/lib/session.tsx` — E-14
+- `frontend/src/lib/thresholds.ts` — E-14
+- `frontend/src/lib/useResultsPolling.ts` — E-14
+- `frontend/src/lib/useCalibratedTimeline.ts` — E-14
+
+**Repo docs:**
+
+- `Plan.md` (continuous E-21)
 
 ## Coordination notes
 
-- **Blocks Yoav** on E-2 (primitives must exist before he wires Enroll/Processing/Test Lab screens).
-- **Blocks Yoav** indirectly on E-9 — the `decision_reason` enum is shared between Verification Result and Deepfake Result screens.
-- **Needs from Yoav** before final QA: the audio capture rewrite (Y-1) and the AASIST analysis details (Y-5).
-- Daily 5-min stand-up message covering: what shipped yesterday, what's in flight, blockers.
-- API contract changes go through a 24 h notice; Yoav updates his typed parser in lockstep.
+- **Blocks Yoav** on E-14 (`useCalibratedTimeline` is shared with Y-14, `lib/session.tsx` is shared with Y-13/Y-15/Y-16).
+- **Blocked by Yoav** on Y-12 (recorder) — E-17 / E-20 cannot ship until the recorder hook exists.
+- **Blocked by Yoav** on Y-17 — E-20's enroll dialog needs `getAvailability` to flip the ID-Available pill.
+- **Standing rule:** every UI PR includes a screenshot; every backend PR includes a curl/pytest snippet. Both engineers review each other's PRs end-to-end.

@@ -1,211 +1,223 @@
 # Yoav — Tasks
 
 > Owner: Yoav Zucker. Cross-references `Plan.md` (master plan).
-> **Role on this milestone:** Frontend audio + the four "active" screens — Enrollment, Processing, Deepfake Result, Test Lab. Yoav owns everything microphone-adjacent on the client. With Idan out, Yoav also owns the deepfake-side and availability backend work.
+> **Role on this milestone:** audio + active screens + the two pending backend routes. Yoav owns everything microphone-adjacent on the client and ships the AASIST sub-score derivation that feeds the Deepfake screens.
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
 
-> **Note:** Idan is not active this milestone. Yoav picks up his ID-availability endpoint, AASIST sub-score derivation, and spoof-test endpoint — all of them feed the screens Yoav already owns. Eden takes the verification-side backend work.
+---
+
+## Superseded earlier tasks
+
+The previous Y-1…Y-11 task list targeted the macOS-window rebuild from the SDD §5 figures. That rebuild was a misread (see `MIGRATION_POSTMORTEM.md`). Those tasks are **superseded** by this milestone:
+
+- Y-1 (audio capture rewrite) → continues as **Y-12** below, but against the kiosk prototype, not the SDD screen rewrite.
+- Y-2 (Waveform component) → not needed; the prototype's `<Waveform>` in `visuals.jsx` is the design. No rewrite.
+- Y-3 (Enroll screen rewrite) → continues as **Y-13** (wire the existing kiosk EnrollScreen, don't rebuild it).
+- Y-4 (Processing screen rewrite) → continues as **Y-14**.
+- Y-5 (Deepfake Result screen rewrite) → continues as **Y-15**.
+- Y-6 (Test Lab screen rewrite) → continues as **Y-16** against the existing DeepfakeLab.
+- Y-7, Y-8, Y-9 (backend availability / sub-scores / spoof-test) → continue as **Y-17, Y-19, Y-18**.
+- Y-10, Y-11 (mic permission + recovery UX) → continues as **Y-20**.
 
 ---
 
-## Sprint 1 — Audio plumbing
+## This milestone (Wire-Live)
 
-### Y-1. Audio capture rewrite ⬜
+### Sprint A — Foundation (day 1)
 
-Current `components/AudioRecorder.tsx` uses `ScriptProcessorNode` (deprecated) with hard-coded 20 bars and crude smoothing. Rewrite as `lib/audio.ts` + `components/Waveform.tsx`:
+#### Y-12 — Recorder hook (`lib/audio.ts`) ⬜ — **KEYSTONE**
 
-- Use `AudioContext` + `AnalyserNode` (no ScriptProcessor for capture; use `AudioWorkletNode` if it lands cleanly, otherwise keep capture via `MediaRecorder` + WebAudio for visualization).
-- Capture into a `Float32Array` buffer at the device sample rate, then resample to 16 kHz on stop using `OfflineAudioContext`.
-- Encode WAV via the existing `lib/wav.ts` (16-bit PCM, mono, 16 kHz).
-- Emit:
-  - Live `level: number` (0..1) every animation frame for the bar visualizer.
-  - On stop: `{ wavFile: File, durationSec: number, sampleRate: 16000 }`.
-- Min recording: 1 s. Max: 10 s (auto-stop). Fire `onWarn` at 8 s.
+This blocks every screen that POSTs to the backend. Ship first.
 
-**Definition of done:** a 5-second recording produces a 16 kHz mono WAV that the backend `services/audio.py:decode_wav` accepts without error, and the bars in `Waveform.tsx` look like the mockup at all volume levels (no clipping, no flat-line dead zones).
+```ts
+// lib/audio.ts
+export type RecorderState = "idle" | "requesting" | "recording" | "stopped" | "denied" | "error";
 
-### Y-2. Waveform component ⬜ (jointly with Eden's E-2)
+export type RecorderOptions = {
+  minMs?: number;     // default 1000
+  maxMs?: number;     // default 10_000
+  warnAtMs?: number;  // default 8000
+};
 
-`components/Waveform.tsx` supports two modes:
+export type RecordingResult = {
+  wavFile: File;
+  durationSec: number;
+  sampleRate: 16000;
+};
 
-```tsx
-<Waveform mode="live"   analyser={analyserNode} bars={48} color="blue" />
-<Waveform mode="static" samples={float32}      bars={48} color="red"  />
+export function useVoiceRecorder(options?: RecorderOptions): {
+  state: RecorderState;
+  level: number;                                  // 0..1, RAF-driven
+  durationMs: number;
+  start(): Promise<void>;                         // requests getUserMedia, opens a real MediaStream
+  stop(): Promise<RecordingResult | null>;        // null if min duration unmet
+  cancel(): void;
+};
 ```
 
-- Static mode: average absolute samples into 48 buckets, normalize, render rounded vertical bars.
-- Live mode: `getByteFrequencyData` averaged into 48 buckets, RAF-driven, smoothed with EMA (`α = 0.7`).
-- Color variants: `blue` (default), `red` (Test Lab generated), `gray` (idle).
+Implementation notes:
+- Capture path: `navigator.mediaDevices.getUserMedia({ audio: true })` → `MediaStreamAudioSourceNode` → `AnalyserNode` (for `level`) **and** an `AudioWorklet` (or fallback `ScriptProcessor`) collecting `Float32Array` chunks.
+- On `stop()`: concatenate chunks → `OfflineAudioContext` resampled to 16 kHz → `lib/wav.ts:encodeWav(Float32Array, 16000)` → wrap as `File`.
+- **Refuse to start without a real `MediaStream`.** Synthetic audio never reaches this code path.
+- Auto-stop at `maxMs` (default 10 000). Reject with `null` if `< minMs` (default 1 000). Fire an `onWarn` event at `warnAtMs` (default 8 000).
+- Cleanup in `useEffect` return: stop tracks, close audio context, cancel RAF.
 
-**Definition of done:** both modes render at 60 fps on a M1 MacBook Air; the static mode is a deterministic function of input samples.
+**Definition of done:** a 5-second recording produces a 16 kHz mono WAV that `backend/app/services/audio.py:decode_wav_with_timings` accepts; the level visualizer matches mockup density at all volumes.
 
----
-
-## Sprint 2 — Screens
-
-### Y-3. Enrollment screen (Phase 3, Fig. 15) ⬜
-
-- Page header: title "New User Enrollment", subtitle "Record your voice to create a unique voiceprint".
-- Form row: `User ID` text input on the left (`john_doe_123`), `<Badge>` on the right showing `🔵 Checking...` → `✅ ID Available` / `❌ ID Taken` (debounced 300 ms call to `GET /users/{user_id}/availability`, owned by Y-7).
-- Body: "Voice Recording" label + `<Waveform mode="live">` filling the recording card.
-- Below waveform: timer in mono (`mm:ss.s`), centered.
-- Big circular record button (red filled square when recording, blue mic icon when idle). State label "Recording…" / "Tap to record".
-- Tip card at bottom: "💡 Tip: Speak naturally for 3–10 seconds. Say anything you like! A quiet environment will give best results."
-- Sample-progress strip (bottom): `● ● ○` for 1/3, 2/3, 3/3 — keeps the current 3-sample backend behavior visible.
-- On stop: validate (1–10 s), then `POST /enroll` (multipart `user_id` + `audio`).
-- On success: dispatch `flowState.intent = 'enroll'` and route to Processing.
-- On 3rd successful sample: route to Login screen with the `userId` pre-filled and a banner "Enrollment complete. Sign in with your voice."
-
-**Definition of done:** matches Fig. 15. ID-Available pill flips correctly. Negative cases (recording too short, ID taken, network down) show a non-modal inline error.
-
-### Y-4. Processing screen (Phase 4, Fig. 16) ⬜
-
-- Layout matches Fig. 16: title "Processing Audio", subtitle "Converting your voice to a secure voiceprint".
-- `<StageList>` with these stages:
-  1. Load Audio
-  2. Resample 16 kHz
-  3. Normalize
-  4. Mel-Spectrogram
-  5. Extract Features
-- `<ProgressBar>` at the bottom with "X% Complete" label.
-- Behavior:
-  - On screen mount, the previous screen's submit promise is already in flight (passed via `flowState.pendingPromise`).
-  - Drive stages on a calibrated timeline: each stage takes ~`expected_total / 5`, where `expected_total` defaults to `1.2 s`. Stage 5 holds (in `active` state) until the promise settles.
-  - If the promise takes > 4 s, switch the bottom label to "Still working…" and slow the bar to a crawl.
-- On promise resolution:
-  - Verify intent → Deepfake Result screen with the response payload.
-  - Enroll intent → return to Enroll screen with sample counter incremented; or Login screen if 3/3.
-- On promise rejection: show the error inline and offer "Back" / "Retry".
-
-**Definition of done:** at 1.2 s wall clock the full progress bar fills smoothly; at 5 s the screen still feels alive; errors don't strand the user.
-
-### Y-5. Deepfake Detection Result screen (Phase 5, Fig. 17) ⬜
-
-- Verdict card at top:
-  - Genuine: light-green bg, green check icon, "GENUINE AUDIO", "This audio appears to be from a real human speaker.", "No signs of synthetic generation or manipulation detected.", "Confidence: {score*100}%".
-  - Synthetic: light-red bg, red shield icon, "SYNTHETIC AUDIO DETECTED", "This audio shows signs of AI generation or manipulation.", "Confidence: {(1-score)*100}%".
-- Analysis Details list, four rows of `<ProgressBar>` with right-aligned percentage labels:
-  - Voice Naturalness — `analysis_details.voice_naturalness`
-  - Spectral Consistency — `analysis_details.spectral_consistency`
-  - Temporal Patterns — `analysis_details.temporal_patterns`
-  - Artifact Detection — `analysis_details.artifact_detection` (low is good for genuine audio; render this bar in green when low)
-- AASIST badge at bottom-left, "Powered by Audio Anti-Spoofing AI" caption.
-- Auto-advance after 2.4 s to Verification Result if `flowState.intent = 'verify'`. If user clicks anywhere, advance immediately.
-
-**Definition of done:** numbers match `analysis_details` in the response (no client-side fudging). Auto-advance can be paused by hovering the verdict card.
-
-### Y-6. Test Lab screen (Phase 7, Fig. 20) ⬜
-
-This is the public testing/validation surface.
-
-- Top warning banner (orange): "⚠️ TESTING MODE — For validation purposes only".
-- "Deepfake Audio Generator" headline + "Generate synthetic audio to test detection capabilities".
-- Two cards side-by-side:
-  - **Source Audio** (left): waveform card + filename caption + an upload button. Optionally a dropdown of saved reference samples (`GET /me/reference-samples`).
-  - **External TTS API** (right, blue-tinted): "Service: Voice Cloning API" (read-only), "Target text:" textarea (default "Hello, this is a test message").
-- Big orange "Generate Fake" button between the cards (or below). Calls `POST /me/spoof` with the source + text.
-- After generation:
-  - Below the cards: "Generated Deepfake" headline + a red-tinted waveform card showing the generated WAV.
-  - Right side: red "Test Detection" button → `POST /me/spoof/test` (built in Y-9) → updates the status footer.
-- Status footer line: "Status: Ready to generate test sample" / "Status: Generated. Click Test Detection." / "Status: Detection score 0.04 — flagged as FAKE ✅".
-
-**Definition of done:** matches Fig. 20. Uses the shared `<Waveform mode="static">`. Generated WAV plays back via an `<audio>` element on click. Deletes its blob URL on screen unmount.
-
----
-
-## Sprint 3 — Backend extensions Yoav owns
-
-These tasks were Idan's; they now belong to Yoav because they feed the screens Yoav already owns.
-
-### Y-7. ID-availability endpoint ⬜
+#### Y-17 — `GET /users/{user_id}/availability` ⬜
 
 ```http
-GET /users/{user_id}/availability  →  { "available": true|false }
+GET /users/{user_id}/availability  →  { "available": true | false }
 ```
 
+- File: `backend/app/api/routes.py`.
 - No auth.
-- 200 with `{ available: bool }`. Validate `user_id` against `^[a-zA-Z0-9_\-\.]{3,32}$`. Return 422 on bad shape.
+- Validate `user_id` against `^[a-zA-Z0-9_\-\.]{3,32}$`. Return 422 on bad shape.
 - Backed by `VerificationStore.get_speaker(user_id) is None`.
+- New pytest at `backend/tests/test_users.py` with FastAPI `TestClient`:
+  - 200 + `{ available: true }` for unknown id.
+  - 200 + `{ available: false }` for an enrolled id.
+  - 422 for bad shape.
 
-**Definition of done:** the Enroll screen (Y-3) calls it from the ID-Available pill and gets a stable `available` boolean. Add a lightweight pytest under `backend/tests/test_users.py`.
+**Definition of done:** `pytest backend/tests/test_users.py` green; Eden's E-20 enroll dialog can flip its ID-Available pill against this route.
 
-### Y-8. Deepfake analysis details ⬜
+#### Y-19 — `analysis_details_from_score()` ⬜
 
-`detector.py` currently returns a single AASIST score. The Deepfake Result screen (Fig. 17) shows four sub-metrics. We will derive them deterministically.
+- File: `backend/app/services/detector.py`.
+- Add module-level function:
+  ```python
+  def analysis_details_from_score(score: float, *, audio_hash: str) -> AnalysisDetails:
+      """
+      Deterministic AASIST sub-score derivation. Each sub-metric is anchored to
+      `score` with seeded jitter (±0.02) so the bars look richly resolved without
+      lying about precision. Documented in the research paper appendix
+      (Plan.md §8 risks table).
+      """
+  ```
+- Sub-metrics:
+  - `voice_naturalness, spectral_consistency, temporal_patterns ≈ score ± 0.02`
+  - `artifact_detection ≈ (1 − score) ± 0.02`
+  - All clamped to `[0.0, 1.0]`.
+- Seed RNG with `hashlib.sha256(audio_hash.encode()).digest()[:4]` for stability per audio.
+- File: `backend/app/services/verification.py` — replace `_derive_analysis_details(deepfake_score)` (around line 240–260) with a call to `analysis_details_from_score(deepfake_score, audio_hash=...)`. Compute `audio_hash` as `hashlib.sha256(audio_bytes).hexdigest()` upstream in `verify()`.
+- Unit test in `backend/tests/test_verification.py`: 100 random `(score, hash)` pairs, all sub-scores stable across two calls.
 
-```python
-def analysis_details_from_score(score: float, *, seed_audio_hash: str) -> AnalysisDetails:
-    """
-    Deterministic derivation of UI-facing sub-scores from the global AASIST score.
-    Each sub-metric is anchored to `score` with seeded jitter (±0.02) so the bars
-    look richly resolved without lying about precision. The derivation is
-    documented in the research paper appendix (see Plan.md §7 risks table).
-    """
-```
+**Definition of done:** every `VerificationResponse.analysis_details` returns four distinct numbers (not all equal to the global score); values are stable across repeated calls on the same audio.
 
-- Sub-metrics: `voice_naturalness`, `spectral_consistency`, `temporal_patterns`, `artifact_detection`. The first three should track `score`; `artifact_detection` should track `1 - score` (high = many artifacts found = synthetic).
-- Seed must be `seed_audio_hash` (stable per-audio) so re-asking returns the same result.
-- Bound each in `[0.0, 1.0]`.
-- Wire `analysis_details` into `VerificationResponse` (coordinated with Eden's E-7).
-- Unit test: 100 random scores produce sub-scores within ±0.02 of expectation.
+### Sprint B — Verification flow (day 2)
 
-**Definition of done:** every `VerificationResponse.analysis_details` is populated; values are stable across repeated calls on the same audio. Document the derivation in `Plan.md` §7 risks table and in a code comment above the function.
+#### Y-13 — Wire EnrollScreen ⬜
 
-### Y-9. Spoof-test endpoint ⬜
+- File: `screens.jsx:177-308`. Drop the 4.5 s phase timer at lines 188–193 and the `phase === 'done'` shortcut.
+- Real flow:
+  1. Username input + `<Badge>` next to it. Debounced 300 ms call to `getAvailability(userId)` flips between `Checking…` / `ID Available` / `ID Taken`.
+  2. Big record button → Y-12 `useVoiceRecorder.start()`.
+  3. On stop → `enrollSpeaker(userId, file)` (or `enrollAuthenticatedSpeaker` if a session exists).
+  4. Show `Sample N / 3` progress strip; refetch `listSpeakers()` after each save.
+  5. After sample 3 → `onComplete(userId)` (callback unchanged).
+- Validation: empty user ID, ID taken, recording too short, recording too long. Inline error under the input — no modal.
+
+**Definition of done:** matches the existing kiosk visual; ID-Available pill works against Y-17; backend stores 3 real samples; refreshing the page persists them.
+
+#### Y-14 — Wire ProcessingScreen ⬜
+
+- File: `screens.jsx:313-421`.
+- Drop the hardcoded `[600, 700, 900, 1100, 800, 700]` ms timeline at line 329 and the `seedRand(1337)` synthetic embedding at lines 341–344.
+- Use `useCalibratedTimeline(state.flow.pendingPromise, { stages: 6, expectedTotalMs: 1200, slowAfterMs: 4000 })` (hook from E-14).
+- The embedding visualization (right column) can sample real-time `audio.freqs` for 192 magnitudes — visual only; backend never returns the embedding vector itself.
+- Final stage holds active until the promise resolves.
+- > 4 s: bottom subtitle flips to "Still working…", bar holds at 90 %.
+- On reject: error inline + Back / Retry buttons; clear the pending promise.
+
+**Definition of done:** at 1.2 s the bar fills smoothly; at 5 s the screen still feels alive; errors don't strand the user.
+
+#### Y-18 — `POST /me/spoof/test` ⬜
 
 ```http
 POST /me/spoof/test
+  Authorization: Bearer {sessionToken}
   multipart audio: WAV
-  →  { "deepfake_score": 0.04, "decision": "FAKE" | "GENUINE", "analysis_details": {...} }
+  →  { "deepfake_score": 0.04, "decision": "FAKE" | "GENUINE", "analysis_details": { ... } }
 ```
 
+- File: `backend/app/api/routes.py`.
 - Auth required.
-- Reuses `DeepfakeDetectorService.detect()` and `analysis_details_from_score()`.
+- Reuse `DeepfakeDetectorService.detect()` and `analysis_details_from_score()` (Y-19).
 - `decision = "FAKE"` if `deepfake_score < 0.5`, else `"GENUINE"`.
-- Latency must stay under 200 ms (we're not running full verification).
+- Latency budget: < 200 ms (no full verify pipeline).
+- New pytest at `backend/tests/test_spoof.py`:
+  - 200 + `decision: "GENUINE"` for clean audio (use the test conftest's `make_wav`).
+  - 200 + `decision: "FAKE"` if you can stub the detector to return `< 0.5`.
+  - 401 on missing/invalid token.
 
-**Definition of done:** the Test Lab "Test Detection" button (Y-6) posts the freshly generated spoof WAV and renders the result in the status footer. Include a pytest in `backend/tests/test_spoof.py`.
+**Definition of done:** Y-16's "Test Detection" button posts the freshly generated spoof WAV and renders the verdict in the lab; pytest green.
 
----
+### Sprint C — Result + Lab screens (day 3)
 
-## Sprint 4 — Polish
+#### Y-15 — Wire DeepfakeScreen ⬜
 
-### Y-10. Microphone permission UX ⬜
+- File: `screens.jsx:557-687`.
+- Drop the two-phase 1.8 s timer at lines 559–562.
+- Read directly from `state.lastVerification`:
+  - Verdict banner: `result.decision === 'DEEPFAKE'` → red SYNTHETIC; else → green GENUINE. Confidence: `result.deepfakeScore` (or `1 − deepfakeScore` for synthetic).
+  - Four artifact rows at lines 608–611 map 1:1 to `analysisDetails.{voiceNaturalness, spectralConsistency, temporalPatterns, artifactDetection}`.
+- Auto-advance to `VerifyScreen` after 2.4 s if `state.flow.intent === 'verify'`. Pause on hover.
+- On click anywhere, advance immediately.
 
-- Detect denial of mic permission and route to a small "Microphone access required" screen with a Retry button.
-- Confirm Safari and Chrome both produce the WAV the backend accepts.
+**Definition of done:** numbers match `analysisDetails` from the response; auto-advance can be paused; same screen handles both genuine + synthetic outcomes.
 
-### Y-11. Recording-failure recovery ⬜
+#### Y-16 — Wire DeepfakeLab ⬜
 
-- If the WAV blob is < 1 s or empty, surface "Recording too short, try again" without dropping the user out of the Enroll screen.
+- File: `more-screens.jsx:65-305`.
+- Drop the four-stage state machine at lines 79–113 and the random `dfScore` / `confidence` / `artifacts` at lines 96–107.
+- Real flow:
+  1. **Source picker** (replacing the `targetProfile` selector at lines 140–162):
+     - Dropdown of `listReferenceSamples(sessionToken)` — show `originalFilename` + `createdAt`.
+     - Plus an "Upload WAV" file input. Mutually exclusive.
+  2. **Generate** button → `generateSpoofSample(sessionToken, { text, language: 'en', referenceSampleId | file })` (existing wrapper). Disabled until source + non-empty text.
+     - On 503: inline yellow banner "Voice cloning model is offline. Try again or pick a saved sample."
+     - On success: store the returned blob URL in component state for `<audio src={audioUrl}>` playback.
+  3. **Decode the generated blob** for visualization: `AudioContext.decodeAudioData(arrayBuffer)` → `Float32Array` → average into 92 buckets → render via existing `<Waveform>` component.
+  4. **Test Detection** button (appears only after generation): refetch the blob, wrap as `File`, call `spoofTest(sessionToken, file)` (E-14 wrapper). Update the verdict card with `deepfake_score`, `decision`, `analysis_details`.
+  5. **Cleanup:** `URL.revokeObjectURL(audioUrl)` in `useEffect` cleanup AND before each new generation.
+- **Hide replay/splice attack tiles** (lines 178–198). Show only the working clone tile.
+
+**Definition of done:** generate a spoof from a real saved reference sample; Test Detection returns real `deepfake_score` < 0.5 with proper sub-scores; blob URLs don't leak.
+
+#### Y-20 — Mic-permission + recording-failure UX ⬜
+
+- Detect `getUserMedia` denial (Y-12 sets `state === 'denied'`). Render a small "Microphone access required" inline screen with a Retry button — wherever the recorder is mounted (EnrollScreen, console Run-Verification flow).
+- Detect `< 1 s` recordings (Y-12 returns `null`). Surface "Recording too short, try again" inline; do not drop the user out of the current screen.
+- Confirm Safari + Chrome both produce a WAV the backend accepts.
+
+**Definition of done:** disable mic in the browser, refresh — expect the Retry screen; record < 1 s — expect inline error; both browsers green.
 
 ---
 
 ## Files Yoav owns
 
-**Frontend:**
+**Frontend (existing):**
 
-- `frontend/src/lib/audio.ts`
-- `frontend/src/components/Waveform.tsx` (jointly with Eden)
-- `frontend/src/screens/EnrollScreen.tsx`
-- `frontend/src/screens/ProcessingScreen.tsx`
-- `frontend/src/screens/DeepfakeResultScreen.tsx`
-- `frontend/src/screens/TestLabScreen.tsx`
+- `frontend/src/screens.jsx` — Y-13, Y-14, Y-15
+- `frontend/src/more-screens.jsx` — Y-16
 
-**Backend (taken from Idan's old scope):**
+**Frontend (new):**
 
-- `backend/app/api/routes.py` (additions: `/users/{user_id}/availability`, `/me/spoof/test`)
-- `backend/app/services/detector.py` (analysis details, hashing)
-- `backend/app/services/spoof.py` (existing — extend if needed for `/me/spoof/test` integration)
-- `backend/app/schemas.py` (additions: `AnalysisDetails`)
-- `backend/tests/test_users.py` (new)
-- `backend/tests/test_spoof.py` (new)
+- `frontend/src/lib/audio.ts` — Y-12
+
+**Backend:**
+
+- `backend/app/api/routes.py` — Y-17, Y-18
+- `backend/app/services/detector.py` — Y-19
+- `backend/app/services/verification.py` — Y-19 wire-up
+- `backend/tests/test_users.py` — Y-17 (new)
+- `backend/tests/test_spoof.py` — Y-18 (new)
 
 ## Coordination notes
 
-- **Blocked by Eden's E-2** (design primitives) before screens can be styled.
-- **Blocked by Eden's E-9** for the shared `decision_reason` enum (the Deepfake Result screen needs it to know whether to auto-advance to Verification Result or stop on a synthetic-audio denial).
-- Audio capture rewrite (Y-1) is independent and should ship first — it unblocks every screen with a microphone.
-- Any change to the WAV encoding or sample rate must be communicated to Eden (he validates server-side via the verification flow).
-- Eden is the UI lead — defer to him on visual / UX disputes.
+- **Y-12 (recorder) is the keystone.** Ship it day 1. Eden's E-17 / E-20 are blocked on it.
+- **Blocked by Eden's E-14** for `useCalibratedTimeline` (Y-14) and `lib/session.tsx` (Y-13/Y-15/Y-16).
+- **Y-17 + Y-19** are independent — ship in parallel with Y-12 on day 1.
+- API contract changes need a 24 h Slack notice; Eden updates `lib/api.ts` types in lockstep.
+- **Standing rule:** every UI PR includes a screenshot; every backend PR includes a curl/pytest snippet. Both engineers review each other's PRs end-to-end.
