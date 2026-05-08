@@ -8,6 +8,8 @@ import {
   ConceptBars, PipelineFlow, BrandMark, PartnerCrest, LivePulse,
 } from "./visuals.jsx";
 import { LiveClock, ThreatLevel } from "./console-ext.jsx";
+import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
+import { useAppState } from "./lib/session";
 
 // =============================================================================
 // Common chrome (top + bottom bars) used across screens
@@ -424,8 +426,24 @@ function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
 // =============================================================================
 // 4. VERIFICATION RESULT
 // =============================================================================
-function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.97, samples }) {
-  const accepted = similarity >= 0.75 && dfScore >= 0.5;
+function VerifyScreen({ onNext, name, similarity: similarityProp, dfScore: dfScoreProp, samples }) {
+  // Source of truth: state.lastVerification (E-19). Props are kept for the
+  // legacy linear-mode path but are overridden by real data when present.
+  const { lastVerification } = useAppState();
+  const similarity = lastVerification?.similarityScore ?? similarityProp ?? 0;
+  const dfScore = lastVerification?.deepfakeScore ?? dfScoreProp ?? 0;
+  // Accepted comes from the server decision — no client-side derivation.
+  const accepted = lastVerification
+    ? lastVerification.decision === 'ACCEPT'
+    : similarity >= SIM_THRESHOLD && dfScore >= DF_THRESHOLD;
+  const reasonBlurb = accepted
+    ? 'Your voice matched the stored profile, and the audio was confirmed as a real human speaker — not synthetic.'
+    : lastVerification?.decisionReason === 'synthetic'
+      ? 'Audio was flagged as synthetic. The stored profile was not consulted.'
+      : 'The captured voice did not match the stored profile.';
+  const displayName = name || lastVerification?.userId?.split(/[^A-Za-z0-9]+/)[0] || 'speaker';
+  const totalMs = lastVerification?.stageBreakdown?.totalMs ?? 0;
+  const latencyDisplay = totalMs > 0 ? `${(totalMs / 1000).toFixed(2)} s` : '— s';
   return (
     <div className="screen fade-enter">
       <Chrome status={accepted ? "ACCESS GRANTED" : "ACCESS DENIED"} statusKind={accepted ? "good" : "bad"} screenName="04 VERIFY · RESULT"/>
@@ -442,12 +460,10 @@ function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.9
               <span className="serif" style={{ fontStyle: 'italic', color: accepted ? 'var(--teal-2)' : 'var(--bad)' }}>
                 {accepted ? 'Welcome,' : 'Not a match.'}
               </span>
-              {accepted && <><br/><span style={{ color: 'var(--ink)' }}>{name}.</span></>}
+              {accepted && <><br/><span style={{ color: 'var(--ink)' }}>{displayName}.</span></>}
             </div>
             <div style={{ marginTop: 22, fontSize: 21, color: 'var(--ink-mute)', maxWidth: 540, lineHeight: 1.5 }}>
-              {accepted
-                ? 'Your voice matched the stored profile, and the audio was confirmed as a real human speaker — not synthetic.'
-                : 'The captured voice did not match the stored profile, or the audio appeared to be synthetic.'}
+              {reasonBlurb}
             </div>
           </div>
 
@@ -457,19 +473,19 @@ function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.9
               icon="◉"
               title="Voice match"
               value={similarity}
-              threshold={0.75}
-              passed={similarity >= 0.75}
+              threshold={SIM_THRESHOLD}
+              passed={similarity >= SIM_THRESHOLD}
               tech="Cosine similarity · ReDimNet-B5"
-              caption={similarity >= 0.75 ? 'The voice fingerprint matches what we stored at enrollment.' : 'The fingerprints diverge beyond the safe threshold.'}
+              caption={similarity >= SIM_THRESHOLD ? 'The voice fingerprint matches what we stored at enrollment.' : 'The fingerprints diverge beyond the safe threshold.'}
             />
             <ScoreCard
               icon="◊"
               title="Authenticity"
               value={dfScore}
-              threshold={0.5}
-              passed={dfScore >= 0.5}
+              threshold={DF_THRESHOLD}
+              passed={dfScore >= DF_THRESHOLD}
               tech="AASIST anti-spoofing"
-              caption={dfScore >= 0.5 ? 'Spectro-temporal patterns are consistent with genuine human speech.' : 'Synthetic artefacts detected — likely AI-generated audio.'}
+              caption={dfScore >= DF_THRESHOLD ? 'Spectro-temporal patterns are consistent with genuine human speech.' : 'Synthetic artefacts detected — likely AI-generated audio.'}
             />
           </div>
 
@@ -487,10 +503,10 @@ function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.9
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
           <div className="panel outline-glow" style={{ padding: '36px 56px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
             <div className="label-mono" style={{ fontSize: 11 }}>VERIFICATION CONFIDENCE</div>
-            <SimilarityGauge value={similarity} threshold={0.75} size={420}/>
+            <SimilarityGauge value={similarity} threshold={SIM_THRESHOLD} size={420}/>
             <div style={{ display: 'flex', gap: 24, paddingTop: 24, borderTop: '1px solid var(--line)', width: '100%', justifyContent: 'space-around' }}>
-              <Stat label="Latency" value="1.27 s"/>
-              <Stat label="Sample" value="4.5 s"/>
+              <Stat label="Latency" value={latencyDisplay}/>
+              <Stat label="Session" value={lastVerification?.sessionId?.split('-').slice(-1)[0] ?? '—'}/>
               <Stat label="Model" value="ReDimNet-B5"/>
             </div>
           </div>
@@ -555,18 +571,24 @@ function ScoreCard({ icon, title, value, threshold, passed, tech, caption }) {
 // 5. DEEPFAKE CATCH SCREEN
 // =============================================================================
 function DeepfakeScreen({ onNext, audio }) {
-  const [phase, setPhase] = useState('analyzing'); // analyzing | flagged
-  useEffect(() => {
-    const id = setTimeout(() => setPhase('flagged'), 1800);
-    return () => clearTimeout(id);
-  }, []);
-  const score = phase === 'flagged' ? 0.18 : 0.5;
+  // Driven entirely by state.lastVerification (Y-15). No mock animation; if a
+  // verification has happened, render the real numbers; otherwise fall back to
+  // an "analyzing" placeholder until a verification lands.
+  const { lastVerification } = useAppState();
+  const isSynthetic = lastVerification?.decisionReason === 'synthetic';
+  const phase = lastVerification ? (isSynthetic ? 'flagged' : 'genuine') : 'analyzing';
+  const score = lastVerification?.deepfakeScore ?? 0.5;
+  const details = lastVerification?.analysisDetails;
 
   return (
     <div className="screen fade-enter">
       <Chrome
-        status={phase === 'flagged' ? 'SYNTHETIC AUDIO DETECTED' : 'ANTI-SPOOFING · ANALYZING'}
-        statusKind={phase === 'flagged' ? 'bad' : 'warn'}
+        status={
+          phase === 'flagged' ? 'SYNTHETIC AUDIO DETECTED' :
+          phase === 'genuine' ? 'GENUINE AUDIO · CONFIRMED' :
+          'ANTI-SPOOFING · ANALYZING'
+        }
+        statusKind={phase === 'flagged' ? 'bad' : phase === 'genuine' ? 'good' : 'warn'}
         screenName="03 DEEPFAKE · CATCH"
       />
 
@@ -575,8 +597,10 @@ function DeepfakeScreen({ onNext, audio }) {
         {/* Left */}
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 32 }}>
           <div>
-            <div className="label-mono" style={{ color: phase === 'flagged' ? 'var(--bad)' : 'var(--warn)', marginBottom: 14 }}>
-              {phase === 'flagged' ? '⚠ DEEPFAKE FLAGGED' : '◌ ANALYZING SAMPLE'}
+            <div className="label-mono" style={{ color: phase === 'flagged' ? 'var(--bad)' : phase === 'genuine' ? 'var(--good)' : 'var(--warn)', marginBottom: 14 }}>
+              {phase === 'flagged' ? '⚠ DEEPFAKE FLAGGED' :
+               phase === 'genuine' ? '✓ HUMAN SPEAKER CONFIRMED' :
+               '◌ ANALYZING SAMPLE'}
             </div>
             <div style={{ fontSize: 78, fontWeight: 200, lineHeight: 1.02, letterSpacing: '-0.02em' }}>
               {phase === 'flagged' ? (
@@ -584,6 +608,12 @@ function DeepfakeScreen({ onNext, audio }) {
                   <span className="serif" style={{ fontStyle: 'italic', color: 'var(--bad)' }}>Not a human.</span>
                   <br/>
                   <span style={{ color: 'var(--ink)' }}>Access denied.</span>
+                </>
+              ) : phase === 'genuine' ? (
+                <>
+                  <span className="serif" style={{ fontStyle: 'italic', color: 'var(--good)' }}>Real voice.</span>
+                  <br/>
+                  <span style={{ color: 'var(--ink)' }}>Cleared.</span>
                 </>
               ) : (
                 <>
@@ -596,28 +626,30 @@ function DeepfakeScreen({ onNext, audio }) {
             <div style={{ marginTop: 22, fontSize: 19, color: 'var(--ink-mute)', maxWidth: 580, lineHeight: 1.5 }}>
               {phase === 'flagged'
                 ? 'AASIST found unnatural spectro-temporal patterns — the kind only present in AI-generated audio. The voice was a clone, not the real person.'
-                : 'AASIST examines micro-patterns in pitch, harmonic stability and temporal flow that real vocal cords leave behind. No two are quite the same.'}
+                : phase === 'genuine'
+                  ? 'AASIST detected the natural spectro-temporal micro-patterns that only real vocal cords produce. No synthetic artefacts.'
+                  : 'AASIST examines micro-patterns in pitch, harmonic stability and temporal flow that real vocal cords leave behind. No two are quite the same.'}
             </div>
           </div>
 
-          {/* Artifact breakdown */}
+          {/* Artifact breakdown — driven by real analysis_details (Y-15/Y-19) */}
           <div className="panel" style={{ padding: '22px 26px' }}>
             <div className="label-mono" style={{ fontSize: 10, marginBottom: 14 }}>WHAT BIOVOICE NOTICED</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[
-                { label: 'Voice naturalness',     val: 0.18, bad: phase === 'flagged' },
-                { label: 'Spectral consistency',  val: 0.24, bad: phase === 'flagged' },
-                { label: 'Temporal pattern',      val: 0.31, bad: phase === 'flagged' },
-                { label: 'Artifact detection',    val: 0.92, bad: phase === 'flagged', invert: true, label2: 'High artefact load' },
+                { label: 'Voice naturalness',    val: details?.voiceNaturalness   ?? (phase === 'flagged' ? 0.18 : phase === 'genuine' ? 0.92 : 0.5), bad: phase === 'flagged' },
+                { label: 'Spectral consistency', val: details?.spectralConsistency ?? (phase === 'flagged' ? 0.24 : phase === 'genuine' ? 0.90 : 0.5), bad: phase === 'flagged' },
+                { label: 'Temporal pattern',     val: details?.temporalPatterns    ?? (phase === 'flagged' ? 0.31 : phase === 'genuine' ? 0.94 : 0.5), bad: phase === 'flagged' },
+                { label: 'Artifact detection',   val: details?.artifactDetection   ?? (phase === 'flagged' ? 0.92 : phase === 'genuine' ? 0.06 : 0.5), bad: phase === 'flagged', invert: true, label2: phase === 'flagged' ? 'High artefact load' : 'Low artefact load' },
               ].map((r, i) => (
-                <ArtifactRow key={i} {...r} animate={phase === 'flagged'} delay={i*120}/>
+                <ArtifactRow key={i} {...r} animate={phase !== 'analyzing'} delay={i*120}/>
               ))}
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: 16 }}>
-            <button className="btn btn-primary" onClick={onNext} disabled={phase !== 'flagged'} style={{ opacity: phase === 'flagged' ? 1 : 0.4 }}>
-              Show me why
+            <button className="btn btn-primary" onClick={onNext} disabled={phase === 'analyzing'} style={{ opacity: phase === 'analyzing' ? 0.4 : 1 }}>
+              Continue
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                 <path d="M3 9 L15 9 M10 4 L15 9 L10 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
@@ -635,12 +667,17 @@ function DeepfakeScreen({ onNext, audio }) {
             </div>
             <div style={{ fontSize: 28, color: 'var(--ink-soft)' }}>vs</div>
             <div style={{ textAlign: 'center' }}>
-              <VoiceOrb size={280} samples={audio.samples} level={audio.level * 0.6} hue={phase === 'flagged' ? 'rose' : 'gold'}/>
-              <div className="label-mono" style={{ fontSize: 10, marginTop: 12, color: phase === 'flagged' ? 'var(--bad)' : 'var(--warn)' }}>
-                {phase === 'flagged' ? '⚠ SYNTHETIC CLONE' : 'TEST SAMPLE'}
+              <VoiceOrb
+                size={280}
+                samples={audio.samples}
+                level={audio.level * (phase === 'flagged' ? 0.6 : 0.7)}
+                hue={phase === 'flagged' ? 'rose' : phase === 'genuine' ? 'cyan' : 'gold'}
+              />
+              <div className="label-mono" style={{ fontSize: 10, marginTop: 12, color: phase === 'flagged' ? 'var(--bad)' : phase === 'genuine' ? 'var(--good)' : 'var(--warn)' }}>
+                {phase === 'flagged' ? '⚠ SYNTHETIC CLONE' : phase === 'genuine' ? '✓ HUMAN VOICE' : 'TEST SAMPLE'}
               </div>
               <div className="num-mono" style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>
-                {phase === 'flagged' ? 'F5-TTS CLONE' : 'ANALYZING…'}
+                {phase === 'flagged' ? 'AASIST FLAG' : phase === 'genuine' ? 'AASIST PASS' : 'ANALYZING…'}
               </div>
             </div>
           </div>
@@ -651,7 +688,7 @@ function DeepfakeScreen({ onNext, audio }) {
               <span className="label-mono" style={{ fontSize: 9, color: 'var(--warn)' }}>THRESHOLD ≥ 0.50</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
-              <div className="num-mono" style={{ fontSize: 64, color: phase === 'flagged' ? 'var(--bad)' : 'var(--warn)', fontWeight: 200, letterSpacing: '-0.02em' }}>
+              <div className="num-mono" style={{ fontSize: 64, color: phase === 'flagged' ? 'var(--bad)' : phase === 'genuine' ? 'var(--good)' : 'var(--warn)', fontWeight: 200, letterSpacing: '-0.02em' }}>
                 {score.toFixed(2)}
               </div>
               <div style={{ flex: 1 }}>
@@ -663,8 +700,12 @@ function DeepfakeScreen({ onNext, audio }) {
                     width: `${score * 100}%`,
                     background: phase === 'flagged'
                       ? 'linear-gradient(90deg, rgba(255,85,119,0.4), #ff5577)'
-                      : 'linear-gradient(90deg, rgba(255,178,74,0.4), #ffb24a)',
-                    boxShadow: '0 0 16px rgba(255,85,119,0.4)',
+                      : phase === 'genuine'
+                        ? 'linear-gradient(90deg, rgba(106,255,200,0.35), #6affc8)'
+                        : 'linear-gradient(90deg, rgba(255,178,74,0.4), #ffb24a)',
+                    boxShadow: phase === 'genuine'
+                      ? '0 0 16px rgba(106,255,200,0.4)'
+                      : '0 0 16px rgba(255,85,119,0.4)',
                     borderRadius: 6,
                     transition: 'width 1500ms cubic-bezier(0.2, 0.8, 0.2, 1)',
                   }}></div>
