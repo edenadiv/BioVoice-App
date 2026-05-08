@@ -1,7 +1,26 @@
 """Runtime settings for the BioVoice backend."""
 
+from __future__ import annotations
+
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
+
+
+def _cors_origins_from_env() -> list[str]:
+    """Parse CORS_ORIGINS as a comma-separated env var (E2.2).
+
+    Empty / unset → the default list. The frontend dev server runs at
+    http://localhost:5173; LAN/phone demos add their host:port via env.
+    """
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw:
+        return list(DEFAULT_CORS_ORIGINS)
+    parsed = [item.strip() for item in raw.split(",") if item.strip()]
+    return parsed or list(DEFAULT_CORS_ORIGINS)
 
 
 @dataclass(slots=True)
@@ -10,7 +29,7 @@ class Settings:
     similarity_threshold: float = 0.75
     deepfake_threshold: float = 0.50
     min_enrollment_samples: int = 3
-    cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"

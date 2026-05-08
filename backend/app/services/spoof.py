@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +14,13 @@ from typing import Any, Protocol
 from app.models import ReferenceSampleRecord
 from app.schemas import ReferenceSampleResponse
 from app.services.audio import AudioService
+
+logger = logging.getLogger(__name__)
+
+# E2.1 — fallback WAV served when XTTS deps/weights are missing AND
+# BIOVOICE_FALLBACK_SPOOF=1 is set. The path resolves relative to the
+# package: backend/data/fallback_spoof.wav.
+FALLBACK_WAV_PATH = Path(__file__).resolve().parents[2] / "data" / "fallback_spoof.wav"
 
 
 class ReferenceSampleStore(Protocol):
@@ -73,20 +82,30 @@ class SpoofGenerationService:
             raise ValueError("Text is required to generate a spoof sample")
 
         language_code = (language or self.default_language).strip().lower()
-        with self._reference_context(
-            user_id=user_id,
-            reference_sample_id=reference_sample_id,
-            reference_audio_bytes=reference_audio_bytes,
-            reference_filename=reference_filename,
-        ) as (reference_paths, source_description):
-            model, config = self._ensure_model_loaded()
-            output = model.synthesize(
-                message_text,
-                config,
-                speaker_wav=reference_paths[0] if len(reference_paths) == 1 else reference_paths,
-                gpt_cond_len=3,
-                language=language_code,
-            )
+        try:
+            with self._reference_context(
+                user_id=user_id,
+                reference_sample_id=reference_sample_id,
+                reference_audio_bytes=reference_audio_bytes,
+                reference_filename=reference_filename,
+            ) as (reference_paths, source_description):
+                model, config = self._ensure_model_loaded()
+                output = model.synthesize(
+                    message_text,
+                    config,
+                    speaker_wav=reference_paths[0] if len(reference_paths) == 1 else reference_paths,
+                    gpt_cond_len=3,
+                    language=language_code,
+                )
+        except RuntimeError as exc:
+            # XTTS missing/incomplete. If the fallback flag is set, serve the
+            # bundled WAV so the lab demo isn't blocked. Otherwise re-raise so
+            # the route returns 503 (existing contract).
+            fallback = self._maybe_fallback(exc)
+            if fallback is not None:
+                return fallback
+            raise
+
         waveform = self._coerce_waveform(output.get("wav") if isinstance(output, dict) else output)
         audio_bytes = self.audio.encode_wav(waveform, sample_rate=self.output_sample_rate)
         safe_user_id = "".join(character if character.isalnum() or character in {"-", "_"} else "_" for character in user_id)
@@ -96,6 +115,21 @@ class SpoofGenerationService:
             audio_bytes=audio_bytes,
             file_name=file_name,
             source_description=source_description,
+        )
+
+    def _maybe_fallback(self, original_error: RuntimeError) -> SpoofGenerationResult | None:
+        """Return the bundled fallback WAV if BIOVOICE_FALLBACK_SPOOF=1 and the
+        bundle exists. None means "re-raise the original RuntimeError"."""
+        if os.environ.get("BIOVOICE_FALLBACK_SPOOF") != "1":
+            return None
+        if not FALLBACK_WAV_PATH.exists():
+            logger.warning("BIOVOICE_FALLBACK_SPOOF=1 but %s missing", FALLBACK_WAV_PATH)
+            return None
+        logger.info("Serving fallback spoof WAV (XTTS unavailable: %s)", original_error)
+        return SpoofGenerationResult(
+            audio_bytes=FALLBACK_WAV_PATH.read_bytes(),
+            file_name="fallback-spoof.wav",
+            source_description="Fallback (XTTS unavailable)",
         )
 
     def _ensure_model_loaded(self) -> tuple[Any, Any]:
