@@ -30,6 +30,10 @@ backend/data/
 *.docx
 *.xlsx
 *.pptx
+!docs/*.pdf
+!docs/*.docx
+!docs/*.xlsx
+!docs/*.pptx
 *.zip
 *.tar.gz
 *yarn.lock
