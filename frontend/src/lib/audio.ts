@@ -5,14 +5,19 @@
 // to the backend. It refuses to start without a real `MediaStream` so the
 // synthetic-audio fallback in `audio.jsx` can never reach the server.
 //
-// Design notes:
-//   - Capture path uses `ScriptProcessorNode` (deprecated but ubiquitous; the
-//     modern AudioWorklet path will replace it once Safari ships full support
-//     for our build target).
-//   - Resampling to 16 kHz happens on `stop()` via `OfflineAudioContext`, not
-//     in real-time, so the captured Float32 chunks stay at device rate until
-//     the recording ends.
-//   - WAV encoding reuses `lib/wav.ts:encodeWav`.
+// Capture path (F3.1):
+//   - Primary: AudioWorkletNode + `/audio-worklets/recorder-processor.js`. The
+//     worklet runs on the audio rendering thread, posts ~85 ms PCM batches
+//     back to the main thread, and is the path Chrome 64+, Safari 14.5+, and
+//     Firefox 76+ all support.
+//   - Fallback: ScriptProcessorNode (deprecated, main-thread). Kicks in when
+//     the browser lacks `audioWorklet`, the worklet module fails to load, or
+//     `addModule` rejects. Older Safari and corporate-locked-down browsers
+//     end up here. Behaviourally identical from the consumer's perspective.
+//
+// Resampling to 16 kHz happens on `stop()` via `OfflineAudioContext`, not in
+// real-time, so the captured Float32 chunks stay at device rate until the
+// recording ends. WAV encoding reuses `lib/wav.ts:encodeWav`.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { encodeWav } from "./wav";
@@ -21,6 +26,7 @@ const TARGET_SAMPLE_RATE = 16_000 as const;
 const DEFAULT_MIN_MS = 1_000;
 const DEFAULT_MAX_MS = 10_000;
 const ANALYSER_FFT_SIZE = 2048;
+const WORKLET_URL = "/audio-worklets/recorder-processor.js";
 
 export type RecorderState =
   | "idle"
@@ -34,6 +40,10 @@ export type RecordingResult = {
   wavFile: File;
   durationSec: number;
   sampleRate: typeof TARGET_SAMPLE_RATE;
+  /** Which capture path produced the recording. Useful for the QA matrix
+   *  + observability (we surface it on the verification overlay's debug
+   *  panel and the bench harness in F8). */
+  captureMode: "audioworklet" | "scriptprocessor";
 };
 
 export type RecorderOptions = {
@@ -46,11 +56,13 @@ type RecorderRefs = {
   stream: MediaStream | null;
   source: MediaStreamAudioSourceNode | null;
   analyser: AnalyserNode | null;
+  workletNode: AudioWorkletNode | null;
   processor: ScriptProcessorNode | null;
   chunks: Float32Array[];
   startedAt: number;
   raf: number | null;
   autoStop: number | null;
+  captureMode: "audioworklet" | "scriptprocessor" | null;
 };
 
 const initialRefs = (): RecorderRefs => ({
@@ -58,11 +70,13 @@ const initialRefs = (): RecorderRefs => ({
   stream: null,
   source: null,
   analyser: null,
+  workletNode: null,
   processor: null,
   chunks: [],
   startedAt: 0,
   raf: null,
   autoStop: null,
+  captureMode: null,
 });
 
 export type RecorderHandle = {
@@ -75,6 +89,27 @@ export type RecorderHandle = {
   stop: () => Promise<RecordingResult | null>;
   cancel: () => void;
 };
+
+// Module-level guard so we only addModule() once per AudioContext-class
+// lifetime. Subsequent recorders can skip the network fetch.
+const workletRegistry = new WeakSet<AudioContext>();
+
+async function ensureWorkletLoaded(ctx: AudioContext): Promise<boolean> {
+  if (!ctx.audioWorklet) return false;
+  if (workletRegistry.has(ctx)) return true;
+  try {
+    await ctx.audioWorklet.addModule(WORKLET_URL);
+    workletRegistry.add(ctx);
+    return true;
+  } catch (err) {
+    // Network 404, CSP block, or processor-script syntax error all land
+    // here. Surface to the console (the fallback path still produces a
+    // usable WAV) so the QA matrix surfaces broken deployments.
+    // eslint-disable-next-line no-console
+    console.warn("[biovoice] AudioWorklet load failed; falling back to ScriptProcessor:", err);
+    return false;
+  }
+}
 
 export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
   const minMs = opts.minMs ?? DEFAULT_MIN_MS;
@@ -95,6 +130,15 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
     const r = refs.current;
     if (r.raf !== null) cancelAnimationFrame(r.raf);
     if (r.autoStop !== null) clearTimeout(r.autoStop);
+    if (r.workletNode) {
+      r.workletNode.port.onmessage = null;
+      try {
+        r.workletNode.port.close();
+      } catch {
+        /* port may already be closed */
+      }
+      r.workletNode.disconnect();
+    }
     if (r.processor) {
       r.processor.disconnect();
       r.processor.onaudioprocess = null as unknown as (event: AudioProcessingEvent) => void;
@@ -133,17 +177,48 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
       analyser.fftSize = ANALYSER_FFT_SIZE;
       analyser.smoothingTimeConstant = 0.78;
 
-      // 4096 frames per buffer at the device rate. ScriptProcessor runs on the
-      // main thread; this is ~85 ms at 48 kHz which is fine for 16 kHz target.
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
       const chunks: Float32Array[] = [];
-      processor.onaudioprocess = (event) => {
-        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-      };
+      const useWorklet = await ensureWorkletLoaded(ctx);
 
-      source.connect(analyser);
-      analyser.connect(processor);
-      processor.connect(ctx.destination);
+      let workletNode: AudioWorkletNode | null = null;
+      let processor: ScriptProcessorNode | null = null;
+      let captureMode: "audioworklet" | "scriptprocessor";
+
+      if (useWorklet) {
+        workletNode = new AudioWorkletNode(ctx, "biovoice-recorder", {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 1,
+        });
+        workletNode.port.onmessage = (event: MessageEvent) => {
+          const data = event.data;
+          if (data && data.type === "chunk" && data.samples instanceof Float32Array) {
+            chunks.push(data.samples);
+          }
+        };
+        // The worklet is a sink; route source → analyser → worklet, then
+        // worklet → destination so the renderer pulls audio (the worklet
+        // node's process() only fires while the graph is running). Output
+        // is silent — the worklet returns nothing, but we connect anyway
+        // to keep the audio graph resolved.
+        source.connect(analyser);
+        analyser.connect(workletNode);
+        workletNode.connect(ctx.destination);
+        captureMode = "audioworklet";
+      } else {
+        // Fallback: ScriptProcessorNode. 4096 frames per buffer at the
+        // device rate ≈ 85 ms at 48 kHz — plenty of headroom for a 16 kHz
+        // target. Runs on the main thread so a heavy React render can stall
+        // it; on supported browsers AudioWorklet is preferred.
+        processor = ctx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (event) => {
+          chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        };
+        source.connect(analyser);
+        analyser.connect(processor);
+        processor.connect(ctx.destination);
+        captureMode = "scriptprocessor";
+      }
 
       samplesRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
       freqsRef.current = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
@@ -154,11 +229,13 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
         stream,
         source,
         analyser,
+        workletNode,
         processor,
         chunks,
         startedAt,
         raf: null,
         autoStop: null,
+        captureMode,
       };
 
       const tick = () => {
@@ -201,6 +278,7 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
     const elapsedMs = performance.now() - r.startedAt;
     const sourceRate = r.ctx?.sampleRate ?? 48_000;
     const chunks = r.chunks;
+    const captureMode = r.captureMode ?? "scriptprocessor";
     teardown();
     setState("stopped");
 
@@ -225,6 +303,7 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
       wavFile,
       durationSec: resampled.length / TARGET_SAMPLE_RATE,
       sampleRate: TARGET_SAMPLE_RATE,
+      captureMode,
     };
   }, [state, minMs, teardown]);
 
