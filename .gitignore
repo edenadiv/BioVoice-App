@@ -6,6 +6,10 @@ dist/
 build/
 .DS_Store
 backend/data/
+# Demo + fallback WAVs are bundled — exempt from the data/ blanket ignore.
+!backend/data/demo/
+!backend/data/demo/*.wav
+!backend/data/fallback_spoof.wav
 .data/
 .toml
 .env
