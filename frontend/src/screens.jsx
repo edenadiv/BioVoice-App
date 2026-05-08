@@ -9,7 +9,13 @@ import {
 } from "./visuals.jsx";
 import { LiveClock, ThreatLevel } from "./console-ext.jsx";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
-import { useAppState } from "./lib/session";
+import { useAppDispatch, useAppState } from "./lib/session";
+import { useVoiceRecorder } from "./lib/audio";
+import { enrollSpeaker, getAvailability, listSpeakers } from "./lib/api";
+
+const ENROLL_TARGET = 3;
+const ENROLL_RECORD_MS = 3000;
+const USER_ID_PATTERN_SCREENS = /^[a-zA-Z0-9_\-\.]{3,32}$/;
 
 // =============================================================================
 // Common chrome (top + bottom bars) used across screens
@@ -177,96 +183,204 @@ function WelcomeScreen({ onStart, micState, audio }) {
 // 2. ENROLLMENT SCREEN
 // =============================================================================
 function EnrollScreen({ onComplete, audio, micState, micStart }) {
-  const [phase, setPhase] = useState('prompt'); // prompt | recording | done
-  const [secs, setSecs] = useState(0);
-  const [name, setName] = useState('Eden');
+  // Y-13 — wired enrolment: 3-sample loop driven by the Y-12 recorder, with
+  // /users/{id}/availability-backed ID pill (Y-17) and POST /enroll for each
+  // sample. The original 4.5 s timer + onComplete(name) call after the first
+  // recording is gone.
+  const dispatch = useAppDispatch();
+  const recorder = useVoiceRecorder({ minMs: 1000, maxMs: ENROLL_RECORD_MS });
+  const [userId, setUserId] = useState('');
+  const [availability, setAvailability] = useState({ status: 'idle', available: null });
+  const [samplesEnrolled, setSamplesEnrolled] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const lockedUserId = samplesEnrolled > 0;
+  const userIdValid = USER_ID_PATTERN_SCREENS.test(userId);
+  const userIdAvailable = availability.status === 'ready' && availability.available === true;
+  const canRecord = userIdValid && (lockedUserId || userIdAvailable) && !busy && recorder.state !== 'recording';
+  const recordTimerRef = useRef(null);
 
+  // Debounced availability check.
   useEffect(() => {
-    if (phase !== 'recording') return;
-    const id = setInterval(() => setSecs(s => s + 0.1), 100);
-    return () => clearInterval(id);
-  }, [phase]);
-
-  useEffect(() => {
-    if (phase === 'recording' && secs >= 4.5) {
-      setPhase('done');
-      setTimeout(() => onComplete(name), 800);
+    if (lockedUserId) return;
+    if (!userId) {
+      setAvailability({ status: 'idle', available: null });
+      return;
     }
-  }, [secs, phase, onComplete, name]);
+    if (!USER_ID_PATTERN_SCREENS.test(userId)) {
+      setAvailability({ status: 'invalid', available: null });
+      return;
+    }
+    setAvailability({ status: 'checking', available: null });
+    const timer = setTimeout(async () => {
+      try {
+        const available = await getAvailability(userId);
+        setAvailability({ status: 'ready', available });
+      } catch {
+        setAvailability({ status: 'error', available: null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [userId, lockedUserId]);
 
-  const startRec = async () => {
-    if (micState !== 'live') await micStart();
-    setSecs(0);
-    setPhase('recording');
-  };
+  const handleStopAndSave = useCallback(async () => {
+    const recording = await recorder.stop();
+    if (!recording) {
+      setError(
+        recorder.state === 'denied'
+          ? 'Microphone access denied — allow it in your browser to enrol.'
+          : 'Recording too short — try again.',
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const message = await enrollSpeaker(userId, recording.wavFile);
+      const next = samplesEnrolled + 1;
+      setSamplesEnrolled(next);
+      setStatusMessage(message);
+      try {
+        const speakers = await listSpeakers();
+        dispatch({ type: 'set-speakers', speakers });
+      } catch {
+        /* polling will catch up */
+      }
+      if (next >= ENROLL_TARGET) {
+        setTimeout(() => onComplete(userId), 800);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err ?? 'Enrolment failed.'));
+    } finally {
+      setBusy(false);
+    }
+  }, [recorder, userId, samplesEnrolled, dispatch, onComplete]);
+
+  // Auto-stop when the recording reaches its budget.
+  useEffect(() => {
+    if (recorder.state !== 'recording') return;
+    recordTimerRef.current = setTimeout(() => {
+      void handleStopAndSave();
+    }, ENROLL_RECORD_MS);
+    return () => {
+      if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
+    };
+  }, [recorder.state, handleStopAndSave]);
+
+  const onRecordClick = useCallback(() => {
+    if (recorder.state === 'recording') return;
+    setError(null);
+    setStatusMessage(null);
+    void recorder.start();
+  }, [recorder]);
+
+  // Use the live mic visualizer for the orb when not recording, the recorder
+  // analyser when recording (the recorder owns its own mic stream while live).
+  const orbSamples = recorder.state === 'recording' ? recorder.samples : audio.samples;
+  const orbLevel = recorder.state === 'recording' ? recorder.level : audio.level;
+  const isRecording = recorder.state === 'recording';
+  const elapsedSec = recorder.durationMs / 1000;
 
   return (
     <div className="screen fade-enter">
-      <Chrome status="ENROLLMENT · NEW PROFILE" statusKind="" screenName="01 ENROLL"/>
+      <Chrome
+        status={
+          samplesEnrolled >= ENROLL_TARGET
+            ? 'PROFILE COMPLETE'
+            : isRecording ? 'CAPTURING SAMPLE' : 'ENROLLMENT · NEW PROFILE'
+        }
+        statusKind={samplesEnrolled >= ENROLL_TARGET ? 'good' : ''}
+        screenName="01 ENROLL"
+      />
 
       <div style={{ position: 'absolute', inset: 0, padding: '160px 120px 130px', display: 'grid', gridTemplateColumns: '1fr 720px', gap: 80 }}>
 
         {/* Left: copy + form */}
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 32 }}>
           <div>
-            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 14 }}>STEP 1 · ENROLLMENT</div>
+            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 14 }}>STEP 1 · ENROLLMENT · {samplesEnrolled}/{ENROLL_TARGET}</div>
             <div style={{ fontSize: 76, fontWeight: 200, lineHeight: 1.05, letterSpacing: '-0.02em' }}>
               Let the system <br/>
               <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>learn your voice.</span>
             </div>
             <div style={{ marginTop: 22, fontSize: 19, color: 'var(--ink-mute)', maxWidth: 540, lineHeight: 1.5 }}>
-              Speak any sentence for a few seconds. We'll capture the timbre, pitch and rhythm
-              that make your voice unmistakably yours — and store it as a 192-number fingerprint.
+              Pick a username, then record three short samples. We'll average their
+              192-dimensional embeddings into a single fingerprint that the verifier
+              will match against later.
             </div>
           </div>
 
           <div className="panel outline-glow" style={{ maxWidth: 540 }}>
-            <div className="label-mono" style={{ fontSize: 10, marginBottom: 10 }}>YOUR NAME</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span className="label-mono" style={{ fontSize: 10 }}>USER ID</span>
+              <EnrollAvailabilityPill availability={availability} userId={userId} userIdValid={userIdValid} locked={lockedUserId}/>
+            </div>
             <input
-              value={name}
-              onChange={e => setName(e.target.value)}
-              disabled={phase !== 'prompt'}
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder="3–32 chars · letters, digits, _ - ."
+              readOnly={lockedUserId}
+              autoFocus
               style={{
                 width: '100%', background: 'transparent', border: 'none',
-                outline: 'none', color: 'var(--ink)', fontSize: 32, fontWeight: 300,
-                fontFamily: 'Sora, sans-serif', padding: 0,
+                outline: 'none', color: 'var(--ink)', fontSize: 28, fontWeight: 300,
+                fontFamily: 'JetBrains Mono, monospace', padding: 0,
               }}
             />
             <div style={{ marginTop: 12, height: 1, background: 'linear-gradient(90deg, var(--teal-1), transparent)' }}></div>
-            <div className="label-mono" style={{ fontSize: 9, marginTop: 10, color: 'var(--good)' }}>
-              ✓ NEW IDENTIFIER · NO PRIOR ENROLLMENT
+            <div className="label-mono" style={{ fontSize: 9, marginTop: 10, color: lockedUserId ? 'var(--good)' : 'var(--ink-soft)' }}>
+              {lockedUserId ? `✓ LOCKED · ${samplesEnrolled}/${ENROLL_TARGET} SAMPLES STORED` : '> ENTER A NEW IDENTIFIER'}
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            {phase === 'prompt' && (
-              <button className="btn btn-primary" onClick={startRec}>
-                <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: '#04070d', boxShadow: '0 0 0 2px rgba(4,7,13,0.3)',
-                }}></span>
-                Record voice
-              </button>
-            )}
-            {phase === 'recording' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span className="pill bad"><span className="dot"></span>RECORDING</span>
-                <span className="num-mono" style={{ fontSize: 24, color: 'var(--ink)' }}>
-                  00:0{secs.toFixed(1)}
-                </span>
-              </div>
-            )}
-            {phase === 'done' && (
-              <span className="pill good"><span className="dot"></span>SAMPLE CAPTURED</span>
-            )}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              className={isRecording ? 'btn' : 'btn btn-primary'}
+              onClick={onRecordClick}
+              disabled={!canRecord && !isRecording}
+              style={{
+                background: isRecording ? 'rgba(255,85,119,0.20)' : undefined,
+                color: isRecording ? '#ff7aa8' : undefined,
+                border: isRecording ? '1px solid rgba(255,85,119,0.55)' : undefined,
+                opacity: !canRecord && !isRecording ? 0.55 : 1,
+              }}
+            >
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: isRecording ? '#ff5577' : '#04070d',
+                boxShadow: isRecording ? '0 0 8px rgba(255,85,119,0.7)' : '0 0 0 2px rgba(4,7,13,0.3)',
+                animation: isRecording ? 'pulse 0.8s infinite' : 'none',
+              }}/>
+              {isRecording
+                ? 'Recording…'
+                : busy
+                  ? 'Saving…'
+                  : samplesEnrolled === 0 ? 'Record sample 1' : `Record sample ${samplesEnrolled + 1}`}
+            </button>
+            <SampleDotsScreens count={ENROLL_TARGET} done={samplesEnrolled} active={busy ? samplesEnrolled : -1}/>
           </div>
+
+          {(error || statusMessage) && (
+            <div style={{
+              padding: 12, borderRadius: 10,
+              background: error ? 'rgba(255,85,119,0.08)' : 'rgba(106,255,200,0.08)',
+              border: `1px solid ${error ? 'rgba(255,85,119,0.45)' : 'rgba(106,255,200,0.35)'}`,
+              color: error ? 'var(--bad)' : 'var(--good)',
+              fontSize: 12, fontFamily: 'JetBrains Mono, monospace',
+              maxWidth: 540,
+            }}>
+              {error || statusMessage}
+            </div>
+          )}
         </div>
 
         {/* Right: live orb + waveform */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
           <div style={{ position: 'relative' }}>
-            <VoiceOrb size={460} samples={audio.samples} level={audio.level} hue="cyan" listening={phase === 'recording'} intensity={phase === 'recording' ? 1.6 : 0.7}/>
-            {phase === 'recording' && (
+            <VoiceOrb size={460} samples={orbSamples} level={orbLevel} hue="cyan" listening={isRecording} intensity={isRecording ? 1.6 : 0.7}/>
+            {isRecording && (
               <div style={{
                 position: 'absolute', top: -10, right: -10,
                 padding: '6px 12px', borderRadius: 999,
@@ -274,7 +388,7 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
                 color: '#ff7aa8', fontFamily: 'JetBrains Mono, monospace',
                 fontSize: 10, letterSpacing: '0.22em',
               }}>
-                <span style={{ display: 'inline-block', width: 6, height: 6, background: '#ff5577', borderRadius: '50%', marginRight: 6, animation: 'pulse 0.8s infinite' }}></span>
+                <span style={{ display: 'inline-block', width: 6, height: 6, background: '#ff5577', borderRadius: '50%', marginRight: 6, animation: 'pulse 0.8s infinite' }}/>
                 REC
               </div>
             )}
@@ -284,11 +398,11 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span className="label-mono" style={{ fontSize: 10 }}>WAVEFORM · 16 KHZ MONO</span>
               <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>
-                {phase === 'recording' ? `${(secs).toFixed(1)}s / 5.0s` : '— / 5.0s'}
+                {isRecording ? `${elapsedSec.toFixed(1)}s / ${(ENROLL_RECORD_MS / 1000).toFixed(1)}s` : `— / ${(ENROLL_RECORD_MS / 1000).toFixed(1)}s`}
               </span>
             </div>
-            <Waveform samples={audio.samples} width={552} height={100} bars={92} mirror={true}/>
-            <div className="ticks" style={{ marginTop: 8 }}></div>
+            <Waveform samples={orbSamples} width={552} height={100} bars={92} mirror={true}/>
+            <div className="ticks" style={{ marginTop: 8 }}/>
           </div>
 
           <div style={{ display: 'flex', gap: 32, justifyContent: 'center' }}>
@@ -305,6 +419,41 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EnrollAvailabilityPill({ availability, userId, userIdValid, locked }) {
+  if (locked) return <span className="pill good"><span className="dot"/>LOCKED</span>;
+  if (!userId) return <span className="pill"><span className="dot" style={{ background: 'var(--ink-soft)' }}/>ENTER ID</span>;
+  if (!userIdValid) return <span className="pill warn"><span className="dot"/>BAD FORMAT</span>;
+  if (availability.status === 'checking') return <span className="pill"><span className="dot" style={{ background: 'var(--teal-2)' }}/>CHECKING…</span>;
+  if (availability.status === 'error') return <span className="pill warn"><span className="dot"/>BACKEND DOWN</span>;
+  if (availability.status === 'ready' && availability.available) return <span className="pill good"><span className="dot"/>AVAILABLE</span>;
+  if (availability.status === 'ready' && !availability.available) return <span className="pill bad"><span className="dot"/>TAKEN</span>;
+  return <span className="pill"><span className="dot"/>—</span>;
+}
+
+function SampleDotsScreens({ count, done, active }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      {Array.from({ length: count }).map((_, i) => {
+        const isDone = i < done;
+        const isActive = i === active;
+        return (
+          <span
+            key={i}
+            style={{
+              width: 14, height: 14, borderRadius: '50%',
+              background: isDone ? 'var(--teal-2)' : 'rgba(125,200,255,0.10)',
+              border: isActive ? '1px solid var(--teal-2)' : '1px solid var(--line-2)',
+              boxShadow: isDone ? '0 0 8px rgba(126,240,255,0.6)' : 'none',
+              transition: 'all 240ms ease',
+            }}
+          />
+        );
+      })}
+      <span className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginLeft: 6 }}>{done}/{count}</span>
     </div>
   );
 }
