@@ -1,9 +1,11 @@
 # Yoav — Tasks
 
 > Owner: Yoav Zucker. Cross-references `Plan.md` (master plan).
-> **Role on this milestone:** Frontend audio + the three "active" screens — Enrollment, Processing, Deepfake Result — plus the Test Lab. Yoav owns everything microphone-adjacent on the client.
+> **Role on this milestone:** Frontend audio + the four "active" screens — Enrollment, Processing, Deepfake Result, Test Lab. Yoav owns everything microphone-adjacent on the client. With Idan out, Yoav also owns the deepfake-side and availability backend work.
 
 > **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
+
+> **Note:** Idan is not active this milestone. Yoav picks up his ID-availability endpoint, AASIST sub-score derivation, and spoof-test endpoint — all of them feed the screens Yoav already owns. Eden takes the verification-side backend work.
 
 ---
 
@@ -45,7 +47,7 @@ Current `components/AudioRecorder.tsx` uses `ScriptProcessorNode` (deprecated) w
 ### Y-3. Enrollment screen (Phase 3, Fig. 15) ⬜
 
 - Page header: title "New User Enrollment", subtitle "Record your voice to create a unique voiceprint".
-- Form row: `User ID` text input on the left (`john_doe_123`), `<Badge>` on the right showing `🔵 Checking...` → `✅ ID Available` / `❌ ID Taken` (debounced 300 ms call to `GET /users/{user_id}/availability`, owned by Idan / I-2).
+- Form row: `User ID` text input on the left (`john_doe_123`), `<Badge>` on the right showing `🔵 Checking...` → `✅ ID Available` / `❌ ID Taken` (debounced 300 ms call to `GET /users/{user_id}/availability`, owned by Y-7).
 - Body: "Voice Recording" label + `<Waveform mode="live">` filling the recording card.
 - Below waveform: timer in mono (`mm:ss.s`), centered.
 - Big circular record button (red filled square when recording, blue mic icon when idle). State label "Recording…" / "Tap to record".
@@ -105,27 +107,84 @@ This is the public testing/validation surface.
 - Big orange "Generate Fake" button between the cards (or below). Calls `POST /me/spoof` with the source + text.
 - After generation:
   - Below the cards: "Generated Deepfake" headline + a red-tinted waveform card showing the generated WAV.
-  - Right side: red "Test Detection" button → `POST /me/spoof/test` → updates the status footer.
+  - Right side: red "Test Detection" button → `POST /me/spoof/test` (built in Y-9) → updates the status footer.
 - Status footer line: "Status: Ready to generate test sample" / "Status: Generated. Click Test Detection." / "Status: Detection score 0.04 — flagged as FAKE ✅".
 
-**Definition of done:** matches Fig. 20. Uses Eden's `<Waveform mode="static">`. Generated WAV plays back via an `<audio>` element on click. Deletes its blob URL on screen unmount.
+**Definition of done:** matches Fig. 20. Uses the shared `<Waveform mode="static">`. Generated WAV plays back via an `<audio>` element on click. Deletes its blob URL on screen unmount.
 
 ---
 
-## Sprint 3 — Polish
+## Sprint 3 — Backend extensions Yoav owns
 
-### Y-7. Microphone permission UX ⬜
+These tasks were Idan's; they now belong to Yoav because they feed the screens Yoav already owns.
+
+### Y-7. ID-availability endpoint ⬜
+
+```http
+GET /users/{user_id}/availability  →  { "available": true|false }
+```
+
+- No auth.
+- 200 with `{ available: bool }`. Validate `user_id` against `^[a-zA-Z0-9_\-\.]{3,32}$`. Return 422 on bad shape.
+- Backed by `VerificationStore.get_speaker(user_id) is None`.
+
+**Definition of done:** the Enroll screen (Y-3) calls it from the ID-Available pill and gets a stable `available` boolean. Add a lightweight pytest under `backend/tests/test_users.py`.
+
+### Y-8. Deepfake analysis details ⬜
+
+`detector.py` currently returns a single AASIST score. The Deepfake Result screen (Fig. 17) shows four sub-metrics. We will derive them deterministically.
+
+```python
+def analysis_details_from_score(score: float, *, seed_audio_hash: str) -> AnalysisDetails:
+    """
+    Deterministic derivation of UI-facing sub-scores from the global AASIST score.
+    Each sub-metric is anchored to `score` with seeded jitter (±0.02) so the bars
+    look richly resolved without lying about precision. The derivation is
+    documented in the research paper appendix (see Plan.md §7 risks table).
+    """
+```
+
+- Sub-metrics: `voice_naturalness`, `spectral_consistency`, `temporal_patterns`, `artifact_detection`. The first three should track `score`; `artifact_detection` should track `1 - score` (high = many artifacts found = synthetic).
+- Seed must be `seed_audio_hash` (stable per-audio) so re-asking returns the same result.
+- Bound each in `[0.0, 1.0]`.
+- Wire `analysis_details` into `VerificationResponse` (coordinated with Eden's E-7).
+- Unit test: 100 random scores produce sub-scores within ±0.02 of expectation.
+
+**Definition of done:** every `VerificationResponse.analysis_details` is populated; values are stable across repeated calls on the same audio. Document the derivation in `Plan.md` §7 risks table and in a code comment above the function.
+
+### Y-9. Spoof-test endpoint ⬜
+
+```http
+POST /me/spoof/test
+  multipart audio: WAV
+  →  { "deepfake_score": 0.04, "decision": "FAKE" | "GENUINE", "analysis_details": {...} }
+```
+
+- Auth required.
+- Reuses `DeepfakeDetectorService.detect()` and `analysis_details_from_score()`.
+- `decision = "FAKE"` if `deepfake_score < 0.5`, else `"GENUINE"`.
+- Latency must stay under 200 ms (we're not running full verification).
+
+**Definition of done:** the Test Lab "Test Detection" button (Y-6) posts the freshly generated spoof WAV and renders the result in the status footer. Include a pytest in `backend/tests/test_spoof.py`.
+
+---
+
+## Sprint 4 — Polish
+
+### Y-10. Microphone permission UX ⬜
 
 - Detect denial of mic permission and route to a small "Microphone access required" screen with a Retry button.
 - Confirm Safari and Chrome both produce the WAV the backend accepts.
 
-### Y-8. Recording-failure recovery ⬜
+### Y-11. Recording-failure recovery ⬜
 
 - If the WAV blob is < 1 s or empty, surface "Recording too short, try again" without dropping the user out of the Enroll screen.
 
 ---
 
 ## Files Yoav owns
+
+**Frontend:**
 
 - `frontend/src/lib/audio.ts`
 - `frontend/src/components/Waveform.tsx` (jointly with Eden)
@@ -134,9 +193,19 @@ This is the public testing/validation surface.
 - `frontend/src/screens/DeepfakeResultScreen.tsx`
 - `frontend/src/screens/TestLabScreen.tsx`
 
+**Backend (taken from Idan's old scope):**
+
+- `backend/app/api/routes.py` (additions: `/users/{user_id}/availability`, `/me/spoof/test`)
+- `backend/app/services/detector.py` (analysis details, hashing)
+- `backend/app/services/spoof.py` (existing — extend if needed for `/me/spoof/test` integration)
+- `backend/app/schemas.py` (additions: `AnalysisDetails`)
+- `backend/tests/test_users.py` (new)
+- `backend/tests/test_spoof.py` (new)
+
 ## Coordination notes
 
 - **Blocked by Eden's E-2** (design primitives) before screens can be styled.
-- **Blocked by Idan's I-2** for the ID-Available pill, **I-5** for the analysis details bars, **I-6** for the Test Lab "Test Detection" button.
+- **Blocked by Eden's E-9** for the shared `decision_reason` enum (the Deepfake Result screen needs it to know whether to auto-advance to Verification Result or stop on a synthetic-audio denial).
 - Audio capture rewrite (Y-1) is independent and should ship first — it unblocks every screen with a microphone.
-- Any change to the WAV encoding or sample rate must be communicated to Idan (he validates server-side).
+- Any change to the WAV encoding or sample rate must be communicated to Eden (he validates server-side via the verification flow).
+- Eden is the UI lead — defer to him on visual / UX disputes.
