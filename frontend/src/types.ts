@@ -1,14 +1,36 @@
 export type Decision = "ACCEPT" | "REJECT" | "DEEPFAKE" | "PENDING";
 
+export type DecisionReason = "accepted" | "mismatch" | "synthetic" | "not_enrolled";
+
+export type StageBreakdown = {
+  loadMs: number;
+  resampleMs: number;
+  normalizeMs: number;
+  embedMs: number;
+  detectMs: number;
+  totalMs: number;
+};
+
+export type AnalysisDetails = {
+  voiceNaturalness: number;
+  spectralConsistency: number;
+  temporalPatterns: number;
+  artifactDetection: number;
+};
+
 export type VerificationResult = {
   resultId: string;
   userId: string;
   decision: Decision;
+  decisionReason: DecisionReason;
   similarityScore: number;
   deepfakeScore: number;
   centroidSimilarity: number;
   sampleSimilarities: number[];
   message: string;
+  sessionId: string;
+  stageBreakdown: StageBreakdown;
+  analysisDetails: AnalysisDetails | null;
   createdAt: string;
 };
 

@@ -288,6 +288,36 @@ class SQLiteStore:
                 ),
             )
 
+    def get_result(self, result_id: str) -> VerificationRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT
+                result_id,
+                user_id,
+                decision,
+                similarity_score,
+                deepfake_score,
+                message,
+                created_at,
+                metadata_json
+            FROM verification_results
+            WHERE result_id = ?
+            """,
+            (result_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return VerificationRecord(
+            result_id=row["result_id"],
+            user_id=row["user_id"],
+            decision=row["decision"],
+            similarity_score=float(row["similarity_score"]),
+            deepfake_score=float(row["deepfake_score"]),
+            message=row["message"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+        )
+
     def list_results(self) -> list[VerificationRecord]:
         cursor = self._connection.execute(
             """

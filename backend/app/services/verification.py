@@ -5,14 +5,35 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 from statistics import fmean
+from time import perf_counter
 from typing import Protocol
 from uuid import uuid4
 
 from app.models import SpeakerRecord, VerificationRecord
-from app.schemas import EnrollmentResponse, SpeakerResponse, VerificationResponse
+from app.schemas import (
+    AnalysisDetails,
+    DecisionReason,
+    EnrollmentResponse,
+    SpeakerResponse,
+    StageBreakdown,
+    VerificationResponse,
+)
 from app.services.audio import AudioService
 from app.services.detector import DeepfakeDetectorService
 from app.services.speaker_encoder import SpeakerEncoder
+
+
+# Decision-logic alignment with SDD §2.5 / Fig. 13:
+#   1. Preprocess audio
+#   2. Extract embedding
+#   3. Run AASIST → if deepfake_score < deepfake_threshold → reject as synthetic
+#   4. Compute similarity → if < similarity_threshold → reject as mismatch
+#   5. Accept
+
+
+_ACCEPT_MESSAGE = "Identity verified."
+_MISMATCH_MESSAGE = "Speaker did not match the enrolled profile."
+_SYNTHETIC_MESSAGE = "Audio flagged as synthetic. Access denied."
 
 
 class VerificationStore(Protocol):
@@ -33,6 +54,8 @@ class VerificationStore(Protocol):
     def add_result(self, record: VerificationRecord) -> None: ...
 
     def list_results(self) -> list[VerificationRecord]: ...
+
+    def get_result(self, result_id: str) -> VerificationRecord | None: ...
 
 
 class VerificationService:
@@ -64,6 +87,9 @@ class VerificationService:
             )
             for record in self.store.list_users()
         ]
+
+    def is_user_id_available(self, user_id: str) -> bool:
+        return self.store.get_speaker(user_id) is None
 
     def enroll(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> EnrollmentResponse:
         payload = self.audio.decode_wav(audio_bytes)
@@ -124,9 +150,18 @@ class VerificationService:
                 f"Current count: {speaker.sample_count}."
             )
 
-        payload = self.audio.decode_wav(audio_bytes)
+        total_t0 = perf_counter()
+
+        payload, audio_timings = self.audio.decode_wav_with_timings(audio_bytes)
+
+        t0 = perf_counter()
         query_embedding = self.encoder.embed(payload.waveform)
+        embed_ms = (perf_counter() - t0) * 1000.0
+
+        t0 = perf_counter()
         deepfake_score = self.detector.detect(payload.waveform)
+        detect_ms = (perf_counter() - t0) * 1000.0
+
         sample_similarities = [
             self.encoder.cosine_similarity(sample_embedding, query_embedding)
             for sample_embedding in speaker.sample_embeddings
@@ -134,58 +169,125 @@ class VerificationService:
         centroid_similarity = self.encoder.cosine_similarity(speaker.embedding, query_embedding)
         similarity_score = self._aggregate_similarity(sample_similarities, centroid_similarity)
 
-        if deepfake_score < self.deepfake_threshold:
-            decision = "DEEPFAKE"
-            message = "Audio was flagged as synthetic or manipulated before speaker matching."
-        elif similarity_score >= self.similarity_threshold:
-            decision = "ACCEPT"
-            message = "Speaker identity matched the enrolled profile."
-        else:
-            decision = "REJECT"
-            message = "Audio was genuine enough, but the speaker did not match."
+        decision, reason, message = self._decide(similarity_score, deepfake_score)
+        analysis_details = self._derive_analysis_details(deepfake_score)
+
+        total_ms = (perf_counter() - total_t0) * 1000.0
+        stage_breakdown = StageBreakdown(
+            load_ms=audio_timings.load_ms,
+            resample_ms=audio_timings.resample_ms,
+            normalize_ms=audio_timings.normalize_ms,
+            embed_ms=embed_ms,
+            detect_ms=detect_ms,
+            total_ms=total_ms,
+        )
+
+        result_id = str(uuid4())
+        created_at = datetime.now(timezone.utc)
+        session_id = self._format_session_id(result_id, created_at)
 
         record = VerificationRecord(
-            result_id=str(uuid4()),
+            result_id=result_id,
             user_id=user_id,
             decision=decision,
             similarity_score=similarity_score,
             deepfake_score=deepfake_score,
             message=message,
-            created_at=datetime.now(timezone.utc),
+            created_at=created_at,
             metadata={
                 "filename": filename,
                 "centroid_similarity": centroid_similarity,
                 "sample_similarities": sample_similarities,
+                "decision_reason": reason,
+                "session_id": session_id,
+                "stage_breakdown": stage_breakdown.model_dump(),
+                "analysis_details": analysis_details.model_dump() if analysis_details else None,
             },
         )
         self.store.add_result(record)
+
         return VerificationResponse(
             result_id=record.result_id,
             user_id=user_id,
             decision=decision,
+            decision_reason=reason,
             similarity_score=similarity_score,
             deepfake_score=deepfake_score,
             centroid_similarity=centroid_similarity,
             sample_similarities=sample_similarities,
             message=message,
+            session_id=session_id,
+            stage_breakdown=stage_breakdown,
+            analysis_details=analysis_details,
+            created_at=created_at,
+        )
+
+    def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:
+        record = self.store.get_result(result_id)
+        if record is None or record.user_id != user_id:
+            return None
+        return self._record_to_response(record)
+
+    def list_results(self) -> list[VerificationResponse]:
+        return [self._record_to_response(record) for record in self.store.list_results()]
+
+    def _decide(
+        self, similarity_score: float, deepfake_score: float
+    ) -> tuple[str, DecisionReason, str]:
+        if deepfake_score < self.deepfake_threshold:
+            return "DEEPFAKE", "synthetic", _SYNTHETIC_MESSAGE
+        if similarity_score >= self.similarity_threshold:
+            return "ACCEPT", "accepted", _ACCEPT_MESSAGE
+        return "REJECT", "mismatch", _MISMATCH_MESSAGE
+
+    def _record_to_response(self, record: VerificationRecord) -> VerificationResponse:
+        meta = record.metadata or {}
+        analysis_dict = meta.get("analysis_details")
+        analysis_details = AnalysisDetails.model_validate(analysis_dict) if analysis_dict else None
+        stage_dict = meta.get("stage_breakdown") or {}
+        stage_breakdown = StageBreakdown.model_validate(stage_dict)
+        reason = meta.get("decision_reason") or self._reason_from_decision(record.decision)
+        session_id = meta.get("session_id") or self._format_session_id(record.result_id, record.created_at)
+
+        return VerificationResponse(
+            result_id=record.result_id,
+            user_id=record.user_id,
+            decision=record.decision,
+            decision_reason=reason,
+            similarity_score=record.similarity_score,
+            deepfake_score=record.deepfake_score,
+            centroid_similarity=float(meta.get("centroid_similarity", record.similarity_score)),
+            sample_similarities=list(meta.get("sample_similarities", [])),
+            message=record.message,
+            session_id=session_id,
+            stage_breakdown=stage_breakdown,
+            analysis_details=analysis_details,
             created_at=record.created_at,
         )
 
-    def list_results(self) -> list[VerificationResponse]:
-        return [
-            VerificationResponse(
-                result_id=result.result_id,
-                user_id=result.user_id,
-                decision=result.decision,
-                similarity_score=result.similarity_score,
-                deepfake_score=result.deepfake_score,
-                centroid_similarity=float((result.metadata or {}).get("centroid_similarity", result.similarity_score)),
-                sample_similarities=list((result.metadata or {}).get("sample_similarities", [])),
-                message=result.message,
-                created_at=result.created_at,
-            )
-            for result in self.store.list_results()
-        ]
+    @staticmethod
+    def _reason_from_decision(decision: str) -> DecisionReason:
+        if decision == "ACCEPT":
+            return "accepted"
+        if decision == "DEEPFAKE":
+            return "synthetic"
+        return "mismatch"
+
+    def _derive_analysis_details(self, deepfake_score: float) -> AnalysisDetails | None:
+        # Placeholder until Yoav's Y-8 lands the AASIST-anchored derivation in detector.py.
+        # Using the global score gives the UI something to render today; Y-8 will replace this.
+        score = max(0.0, min(1.0, deepfake_score))
+        return AnalysisDetails(
+            voice_naturalness=score,
+            spectral_consistency=score,
+            temporal_patterns=score,
+            artifact_detection=1.0 - score,
+        )
+
+    @staticmethod
+    def _format_session_id(result_id: str, created_at: datetime) -> str:
+        suffix = result_id.replace("-", "").upper()[-4:].rjust(4, "0")
+        return f"VRF-{created_at.year:04d}-{created_at.month:02d}{created_at.day:02d}-{suffix}"
 
     def _build_reference_embedding(self, sample_embeddings: list[list[float]]) -> list[float]:
         normalized_samples = [self._normalize_embedding(embedding) for embedding in sample_embeddings if embedding]
