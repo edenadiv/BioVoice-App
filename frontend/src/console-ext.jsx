@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Waveform, EmbeddingCloud } from "./visuals.jsx";
 import { useVoiceRecorder } from "./lib/audio";
+import { MicDeniedCallout } from "./lib/MicDeniedCallout";
 import { loginWithVoice, logoutSession, verifyAuthenticatedSpeaker } from "./lib/api";
 import { SESSION_STORAGE_KEY, useAppDispatch, useAppState } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
@@ -582,17 +583,28 @@ function VerificationOverlay({ profile, onClose }) {
 
           {/* Phase-specific visualization */}
           <div style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
-            {phase === 0 && (
+            {phase === 0 && recorder.state !== 'denied' && (
               <div style={{ position: 'relative', width: 720, height: 320, display: 'grid', placeItems: 'center' }}>
                 <Waveform samples={recorder.samples} width={720} height={260} bars={120} mirror={true} color={accent}/>
                 <div style={{ position: 'absolute', left: 12, top: 12 }}>
                   <span className={`pill ${recorder.state === 'recording' ? 'good' : 'warn'}`}>
                     <span className="dot"></span>
                     {recorder.state === 'recording' ? 'SAMPLING · 16 KHZ' :
-                     recorder.state === 'requesting' ? 'AWAITING MIC ACCESS' :
-                     recorder.state === 'denied' ? 'MICROPHONE BLOCKED' : 'PREPARING…'}
+                     recorder.state === 'requesting' ? 'AWAITING MIC ACCESS' : 'PREPARING…'}
                   </span>
                 </div>
+              </div>
+            )}
+            {phase === 0 && recorder.state === 'denied' && (
+              <div style={{ width: 560 }}>
+                <MicDeniedCallout
+                  context="verify"
+                  onRetry={() => {
+                    stopFiredRef.current = false;
+                    setError(null);
+                    void recorder.start();
+                  }}
+                />
               </div>
             )}
             {phase === 1 && (

@@ -5,6 +5,7 @@ import { LivePulse, Waveform } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { useVoiceRecorder } from "./lib/audio";
+import { MicDeniedCallout } from "./lib/MicDeniedCallout";
 import {
   enrollSpeaker,
   generateSpoofSample,
@@ -1080,7 +1081,15 @@ function EnrollDialog({ onClose }) {
           </div>
         </div>
 
-        {(error || statusMessage) && (
+        {recorder.state === 'denied' ? (
+          <MicDeniedCallout
+            context="enroll"
+            onRetry={() => {
+              setError(null);
+              void recorder.start();
+            }}
+          />
+        ) : (error || statusMessage) ? (
           <div style={{
             padding: 14, borderRadius: 10,
             background: error ? 'rgba(255,85,119,0.10)' : 'rgba(106,255,200,0.08)',
@@ -1090,7 +1099,7 @@ function EnrollDialog({ onClose }) {
           }}>
             {error || statusMessage}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import { LiveClock, ThreatLevel } from "./console-ext.jsx";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 import { useAppDispatch, useAppState } from "./lib/session";
 import { useVoiceRecorder } from "./lib/audio";
+import { MicDeniedCallout } from "./lib/MicDeniedCallout";
 import { enrollSpeaker, getAvailability, listSpeakers } from "./lib/api";
 
 const ENROLL_TARGET = 3;
@@ -362,7 +363,17 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
             <SampleDotsScreens count={ENROLL_TARGET} done={samplesEnrolled} active={busy ? samplesEnrolled : -1}/>
           </div>
 
-          {(error || statusMessage) && (
+          {recorder.state === 'denied' ? (
+            <div style={{ maxWidth: 540 }}>
+              <MicDeniedCallout
+                context="enroll"
+                onRetry={() => {
+                  setError(null);
+                  void recorder.start();
+                }}
+              />
+            </div>
+          ) : (error || statusMessage) ? (
             <div style={{
               padding: 12, borderRadius: 10,
               background: error ? 'rgba(255,85,119,0.08)' : 'rgba(106,255,200,0.08)',
@@ -373,7 +384,7 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
             }}>
               {error || statusMessage}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Right: live orb + waveform */}
@@ -462,7 +473,11 @@ function SampleDotsScreens({ count, done, active }) {
 // 3. PROCESSING SCREEN — the AI moment
 // =============================================================================
 function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
-  // mode: 'enroll' | 'verify'
+  // mode: 'enroll' | 'verify'. Y-14 — this screen is the transition beat
+  // between Enroll/Login and the result. The real backend work has already
+  // happened by the time we land here (POST /enroll inside EnrollScreen,
+  // POST /me/verify inside VerificationOverlay). The screen drives a fixed
+  // pipeline animation and emits onComplete once it lands.
   const stages = [
     { icon: '◐', title: 'Capture',     sub: '16 kHz PCM' },
     { icon: '⌇', title: 'Preprocess',  sub: 'normalize · mono' },
@@ -472,27 +487,52 @@ function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
     { icon: '✓', title: mode === 'enroll' ? 'Stored' : 'Decision', sub: mode === 'enroll' ? 'profile saved' : 'accept / reject' },
   ];
 
+  const { lastVerification } = useAppState();
+  const TOTAL_MS = 5400;
+  const [elapsed, setElapsed] = useState(0);
   const [active, setActive] = useState(0);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    setActive(0); setDone(false);
-    const timings = [600, 700, 900, 1100, 800, 700];
-    let t = 0;
-    const ids = [];
-    timings.forEach((d, i) => {
-      t += d;
-      ids.push(setTimeout(() => setActive(i + 1 < stages.length ? i + 1 : i), t));
-    });
-    ids.push(setTimeout(() => { setDone(true); setTimeout(onComplete, 700); }, t + 500));
-    return () => ids.forEach(clearTimeout);
+    let raf;
+    const startedAt = performance.now();
+    const tick = (now) => {
+      const e = now - startedAt;
+      setElapsed(e);
+      const ratio = Math.min(1, e / TOTAL_MS);
+      setActive(Math.min(stages.length - 1, Math.floor(ratio * stages.length)));
+      if (e >= TOTAL_MS) {
+        setActive(stages.length - 1);
+        setDone(true);
+        setTimeout(onComplete, 600);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // synthetic embedding values for the right-hand reveal
+  // The right-hand "fingerprint" reveal samples real numbers from
+  // lastVerification when available (so it feels like a real readout). On
+  // first run there's no verification yet — fall back to a deterministic
+  // pseudo-random sequence keyed off the AASIST analysis details when
+  // present, otherwise to seedRand for a stable visual.
   const embedding = useMemo(() => {
+    const details = lastVerification?.analysisDetails;
+    if (details) {
+      // Use the four sub-scores as a seed mix — different verifications
+      // produce different cloud shapes, same one is stable.
+      const seedKey = Math.floor(
+        (details.voiceNaturalness + details.spectralConsistency + details.temporalPatterns + details.artifactDetection) * 1_000_000,
+      );
+      const r = seedRand(seedKey || 1337);
+      return Array.from({ length: 192 }, () => r());
+    }
     const r = seedRand(1337);
     return Array.from({ length: 192 }, () => r());
-  }, []);
+  }, [lastVerification]);
 
   return (
     <div className="screen fade-enter">
@@ -517,7 +557,7 @@ function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
           <div style={{ textAlign: 'right' }}>
             <div className="label-mono" style={{ fontSize: 10 }}>ELAPSED</div>
             <div className="num-mono" style={{ fontSize: 44, color: 'var(--teal-2)', fontWeight: 300 }}>
-              {(active * 0.18).toFixed(2)}<span style={{ fontSize: 18, color: 'var(--ink-soft)' }}>s</span>
+              {(elapsed / 1000).toFixed(2)}<span style={{ fontSize: 18, color: 'var(--ink-soft)' }}>s</span>
             </div>
           </div>
         </div>

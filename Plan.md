@@ -65,32 +65,32 @@ Two-person team. Eden is UI lead + verification side; Yoav is audio + active scr
 
 ## 6. Phased rollout
 
-### Phase A — Foundations (parallel, both engineers, day 1) ⬜
+### Phase A — Foundations (parallel, both engineers, day 1) ✅
 
-- **Y-12** Recorder hook — keystone; blocks every screen with a mic.
-- **E-14** API client + state foundations — `getAvailability`, `spoofTest`, `lib/session.tsx`, `lib/thresholds.ts`, `lib/useResultsPolling.ts`, `lib/useCalibratedTimeline.ts`.
-- **E-15** Strip mocks — delete `PROFILES`, `ExplainScreen`, `'explain'` order entries, `seedActivity`/`makeRandomActivity`.
-- **E-16** Real counters + activity feed.
-- **Y-17** Backend `GET /users/{user_id}/availability`.
-- **Y-19** `analysis_details_from_score()` deterministic derivation.
+- **Y-12** ✅ Recorder hook — keystone; blocks every screen with a mic.
+- **E-14** ✅ API client + state foundations — `getAvailability`, `spoofTest`, `lib/session.tsx`, `lib/thresholds.ts`, `lib/useResultsPolling.ts`, `lib/useCalibratedTimeline.ts`.
+- **E-15** ✅ Strip mocks — delete `PROFILES`, `ExplainScreen`, `'explain'` order entries, `seedActivity`/`makeRandomActivity`.
+- **E-16** ✅ Real counters + activity feed.
+- **Y-17** ✅ Backend `GET /users/{user_id}/availability`.
+- **Y-19** ✅ `analysis_details_from_score()` deterministic derivation.
 
-### Phase B — Verification flow (day 2) ⬜
+### Phase B — Verification flow (day 2) ✅
 
-- **E-17** Implicit-login Run Verification.
-- **E-18** Rebuild `VerificationOverlay` around the calibrated timeline.
-- **Y-13** Wire `EnrollScreen` (depends on Y-12 + Y-17).
-- **Y-14** Wire `ProcessingScreen`.
-- **Y-18** Backend `POST /me/spoof/test`.
-- **E-20** Wire `ProfilesPage` + inline enroll dialog.
+- **E-17** ✅ Implicit-login Run Verification.
+- **E-18** ✅ Rebuild `VerificationOverlay` around the calibrated timeline.
+- **Y-13** ✅ Wire `EnrollScreen` (depends on Y-12 + Y-17).
+- **Y-14** ✅ Wire `ProcessingScreen`.
+- **Y-18** ✅ Backend `POST /me/spoof/test`.
+- **E-20** ✅ Wire `ProfilesPage` + inline enroll dialog.
 
-### Phase C — Result & lab (day 3) ⬜
+### Phase C — Result & lab (day 3) ✅
 
-- **E-19** Wire `VerifyScreen` to `state.lastVerification`.
-- **Y-15** Wire `DeepfakeScreen`.
-- **Y-16** Wire `DeepfakeLab` (depends on Y-18).
-- **Y-20** Mic-permission denial UX.
+- **E-19** ✅ Wire `VerifyScreen` to `state.lastVerification`.
+- **Y-15** ✅ Wire `DeepfakeScreen`.
+- **Y-16** ✅ Wire `DeepfakeLab` (depends on Y-18).
+- **Y-20** ✅ Mic-permission denial UX (`MicDeniedCallout` wired into Enroll/Dialog/Overlay).
 
-### Phase D — QA & ship (day 4) ⬜
+### Phase D — QA & ship (day 4) 🟡 (manual run-through pending real-mic test)
 
 - **E-21** Cross-screen manual run-through (see §9 below) + Plan.md status update.
 - Backend pytest stays green.
