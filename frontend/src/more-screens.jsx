@@ -1,9 +1,15 @@
 // Additional pages: Sidebar nav, Deepfake Creation Lab, User Settings, Profile manager.
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { LivePulse } from "./visuals.jsx";
+import { LivePulse, Waveform } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
+import { useVoiceRecorder } from "./lib/audio";
+import { enrollSpeaker, getAvailability, listSpeakers } from "./lib/api";
+import { useAppDispatch, useAppState } from "./lib/session";
+
+const ENROLLMENT_TARGET = 3;
+const USER_ID_PATTERN = /^[a-zA-Z0-9_\-\.]{3,32}$/;
 
 // ============================================================================
 // Sidebar — real-app navigation rail.
@@ -530,61 +536,134 @@ function KV({ k, v }) {
 }
 
 // ============================================================================
-// ProfilesPage — manage enrolled voice profiles (real-app feel).
+// ProfilesPage — manage enrolled voice profiles. Wired to real /users +
+// inline EnrollDialog hitting /enroll. Per-card stats derived from /results.
 // ============================================================================
 function ProfilesPage({ profiles, audio }) {
   const [hover, setHover] = useState(null);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const { results } = useAppState();
+
+  // VERIFIED count per user comes from real /results filtered by userId.
+  const verifyCountByUser = useMemo(() => {
+    const counts = new Map();
+    for (const r of results) {
+      if (r.decision !== 'ACCEPT') continue;
+      counts.set(r.userId, (counts.get(r.userId) ?? 0) + 1);
+    }
+    return counts;
+  }, [results]);
+
   return (
     <div className="screen fade-enter">
-      <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle={`${profiles.length} enrolled profiles`} screenName="PROFILES"/>
+      <Chrome
+        status="OPERATIONAL · ALL MODELS HEALTHY"
+        statusKind="good"
+        subtitle={`${profiles.length} enrolled profile${profiles.length === 1 ? '' : 's'}`}
+        screenName="PROFILES"
+      />
       <AmbientField count={40}/>
       <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
           <div>
             <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
             <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
-            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
+            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>
+              Each profile is a 192-dimensional fingerprint — not a recording.
+            </div>
           </div>
-          <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 13 }}>+ &nbsp;ENROLL NEW</button>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '12px 22px', fontSize: 13 }}
+            onClick={() => setEnrollOpen(true)}
+          >+ &nbsp;ENROLL NEW</button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
-          {profiles.map((p, i) => (
-            <div key={p.id} className="panel lift"
-              onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)}
-              style={{
-                padding: 24, position: 'relative', overflow: 'hidden',
-                animation: `fadeIn 500ms ${i * 60}ms ease both`,
-                cursor: 'pointer',
-              }}>
-              <div style={{
-                position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: '50%',
-                background: `radial-gradient(circle, ${p.color1}33, transparent)`, opacity: hover === p.id ? 1 : 0.5,
-                transition: 'opacity 300ms',
-              }}></div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                <div style={{
-                  width: 56, height: 56, borderRadius: '50%',
-                  background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
-                  display: 'grid', placeItems: 'center',
-                  color: '#04070d', fontWeight: 600, fontSize: 18,
-                  boxShadow: `0 0 20px ${p.color1}66`,
-                }}>{p.initials}</div>
-                <div>
-                  <div style={{ fontSize: 18 }}>{p.name}</div>
-                  <div className="label-mono" style={{ fontSize: 10 }}>{p.id}</div>
-                </div>
-              </div>
-              <MiniWave color={p.color1} idx={i}/>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
-                <Stat2 k="VERIFIED" v={Math.floor(120 + Math.random() * 600)}/>
-                <Stat2 k="ENROLLED" v={`${1 + Math.floor(Math.random() * 24)}d`}/>
-                <Stat2 k="QUALITY"  v={`${85 + Math.floor(Math.random() * 14)}%`}/>
-              </div>
-            </div>
-          ))}
-        </div>
+        {profiles.length === 0 ? (
+          <EmptyProfiles onEnroll={() => setEnrollOpen(true)} />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+            {profiles.map((p, i) => (
+              <ProfileCard
+                key={p.id}
+                profile={p}
+                verifyCount={verifyCountByUser.get(p.userId) ?? 0}
+                index={i}
+                hovered={hover === p.id}
+                onHover={(on) => setHover(on ? p.id : null)}
+              />
+            ))}
+          </div>
+        )}
       </div>
+
+      {enrollOpen && (
+        <EnrollDialog onClose={() => setEnrollOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ProfileCard({ profile, verifyCount, index, hovered, onHover }) {
+  const enrolledLabel = formatRelative(profile.enrolledAt);
+  const samples = profile.sampleCount ?? 0;
+  const ready = samples >= ENROLLMENT_TARGET;
+  return (
+    <div
+      className="panel lift"
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      style={{
+        padding: 24, position: 'relative', overflow: 'hidden',
+        animation: `fadeIn 500ms ${index * 60}ms ease both`,
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: '50%',
+        background: `radial-gradient(circle, ${profile.color1}33, transparent)`,
+        opacity: hovered ? 1 : 0.5,
+        transition: 'opacity 300ms',
+      }}/>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%',
+          background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`,
+          display: 'grid', placeItems: 'center',
+          color: '#04070d', fontWeight: 600, fontSize: 18,
+          boxShadow: `0 0 20px ${profile.color1}66`,
+        }}>{profile.initials}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 18 }}>{profile.name}</div>
+          <div className="label-mono" style={{ fontSize: 10 }}>{profile.id}</div>
+        </div>
+        {!ready && (
+          <span className="pill warn"><span className="dot"/>{samples}/{ENROLLMENT_TARGET}</span>
+        )}
+      </div>
+      <MiniWave color={profile.color1} idx={index}/>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
+        <Stat2 k="VERIFIED" v={verifyCount}/>
+        <Stat2 k="ENROLLED" v={enrolledLabel}/>
+        <Stat2 k="SAMPLES"  v={`${samples}/${ENROLLMENT_TARGET}`}/>
+      </div>
+    </div>
+  );
+}
+
+function EmptyProfiles({ onEnroll }) {
+  return (
+    <div className="panel" style={{
+      padding: 48, textAlign: 'center', display: 'grid', placeItems: 'center', gap: 16,
+    }}>
+      <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>NO PROFILES YET</div>
+      <div style={{ fontSize: 22, fontWeight: 300 }}>Enrol your first speaker.</div>
+      <div style={{ fontSize: 13, color: 'var(--ink-mute)', maxWidth: 480 }}>
+        Capture three short voice samples to build a 192-dimensional fingerprint.
+        Verification is unlocked once the third sample is saved.
+      </div>
+      <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 13 }} onClick={onEnroll}>
+        + &nbsp;ENROLL NEW
+      </button>
     </div>
   );
 }
@@ -596,6 +675,262 @@ function Stat2({ k, v }) {
       <div className="num-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginTop: 2 }}>{v}</div>
     </div>
   );
+}
+
+// ============================================================================
+// EnrollDialog — three-sample enrollment driven by Y-12 recorder + /enroll.
+// ============================================================================
+const RECORD_MS_ENROLL = 3000;
+
+function EnrollDialog({ onClose }) {
+  const [userId, setUserId] = useState('');
+  const [availability, setAvailability] = useState({ status: 'idle', available: null });
+  const [samplesEnrolled, setSamplesEnrolled] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [statusMessage, setStatusMessage] = useState(null);
+  const recorder = useVoiceRecorder({ minMs: 1000, maxMs: RECORD_MS_ENROLL });
+  const dispatch = useAppDispatch();
+  const recordTimerRef = useRef(null);
+
+  // Once we have at least one sample for this user, the username is locked in.
+  const lockedUserId = samplesEnrolled > 0;
+
+  const userIdValid = USER_ID_PATTERN.test(userId);
+  const userIdAvailable = availability.status === 'ready' && availability.available === true;
+  const canRecord = userIdValid && (lockedUserId || userIdAvailable) && !busy && recorder.state !== 'recording';
+
+  // Debounced availability check.
+  useEffect(() => {
+    if (lockedUserId) return;
+    if (!userId) {
+      setAvailability({ status: 'idle', available: null });
+      return;
+    }
+    if (!USER_ID_PATTERN.test(userId)) {
+      setAvailability({ status: 'invalid', available: null });
+      return;
+    }
+    setAvailability({ status: 'checking', available: null });
+    const timer = setTimeout(async () => {
+      try {
+        const available = await getAvailability(userId);
+        setAvailability({ status: 'ready', available });
+      } catch {
+        setAvailability({ status: 'error', available: null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [userId, lockedUserId]);
+
+  // Once recording is live, schedule auto-stop + save.
+  useEffect(() => {
+    if (recorder.state !== 'recording') return;
+    recordTimerRef.current = setTimeout(() => {
+      void handleStopAndSave();
+    }, RECORD_MS_ENROLL);
+    return () => {
+      if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.state]);
+
+  const handleStopAndSave = useCallback(async () => {
+    const recording = await recorder.stop();
+    if (!recording) {
+      setError(
+        recorder.state === 'denied'
+          ? 'Microphone access denied. Allow it in your browser to enrol.'
+          : 'Recording too short — try again.',
+      );
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const message = await enrollSpeaker(userId, recording.wavFile);
+      const next = samplesEnrolled + 1;
+      setSamplesEnrolled(next);
+      setStatusMessage(message);
+      // Refresh the speakers list so the page reflects the new sample_count.
+      try {
+        const speakers = await listSpeakers();
+        dispatch({ type: 'set-speakers', speakers });
+      } catch {
+        /* polling will catch up */
+      }
+      if (next >= ENROLLMENT_TARGET) {
+        setTimeout(() => onClose(), 900);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err ?? 'Enrolment failed.');
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }, [recorder, userId, samplesEnrolled, dispatch, onClose]);
+
+  const onStartClick = useCallback(() => {
+    setError(null);
+    setStatusMessage(null);
+    void recorder.start();
+  }, [recorder]);
+
+  const onCancelClick = useCallback(() => {
+    recorder.cancel();
+    onClose();
+  }, [recorder, onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget && !busy && recorder.state !== 'recording') onClose(); }}
+      style={{
+        position: 'absolute', inset: 0, zIndex: 220,
+        background: 'rgba(4,7,13,0.78)',
+        backdropFilter: 'blur(10px)',
+        display: 'grid', placeItems: 'center',
+        animation: 'fadeIn 220ms ease both',
+      }}
+    >
+      <div className="panel outline-glow" style={{
+        width: 720, padding: '36px 44px',
+        display: 'grid', gap: 22,
+        background: 'linear-gradient(180deg, rgba(10,20,34,0.96), rgba(7,11,20,0.94))',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>ENROL NEW SPEAKER</div>
+            <div style={{ fontSize: 26, fontWeight: 300, marginTop: 4 }}>Sample {Math.min(samplesEnrolled + 1, ENROLLMENT_TARGET)} of {ENROLLMENT_TARGET}</div>
+          </div>
+          <button
+            onClick={onCancelClick}
+            className="btn btn-ghost"
+            style={{ padding: '8px 16px', fontSize: 11 }}
+            disabled={recorder.state === 'recording'}
+          >✕ &nbsp;CLOSE</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <label className="label-mono" style={{ fontSize: 10 }}>USER ID</label>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <input
+              type="text"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder="3–32 chars · letters, digits, _ - ."
+              readOnly={lockedUserId}
+              autoFocus
+              style={{
+                flex: 1,
+                background: 'rgba(125,200,255,0.04)',
+                border: '1px solid var(--line)',
+                borderRadius: 10, padding: '12px 14px',
+                color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace', fontSize: 14,
+              }}
+            />
+            <AvailabilityPill availability={availability} userId={userId} userIdValid={userIdValid} locked={lockedUserId}/>
+          </div>
+        </div>
+
+        <div className="panel" style={{ padding: 20, display: 'grid', gap: 12, background: 'rgba(125,200,255,0.04)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="label-mono" style={{ fontSize: 10 }}>VOICE CAPTURE · {RECORD_MS_ENROLL / 1000}s</span>
+            <span className={`pill ${recorder.state === 'recording' ? 'good' : recorder.state === 'denied' ? 'bad' : 'warn'}`}>
+              <span className="dot"/>
+              {recorder.state === 'recording' ? 'LIVE · 16 KHZ' :
+               recorder.state === 'requesting' ? 'AWAITING MIC' :
+               recorder.state === 'denied' ? 'MIC BLOCKED' :
+               recorder.state === 'stopped' ? 'PROCESSING' : 'STANDBY'}
+            </span>
+          </div>
+          <Waveform samples={recorder.samples} width={620} height={70} bars={92} mirror={true} color="#7ef0ff"/>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <SampleDots count={ENROLLMENT_TARGET} done={samplesEnrolled} active={busy ? samplesEnrolled : -1}/>
+            <button
+              className={recorder.state === 'recording' ? 'btn' : 'btn btn-primary'}
+              onClick={onStartClick}
+              disabled={!canRecord}
+              style={{
+                padding: '12px 28px', fontSize: 13,
+                background: recorder.state === 'recording'
+                  ? 'rgba(255,85,119,0.20)'
+                  : undefined,
+                color: recorder.state === 'recording' ? 'var(--bad)' : undefined,
+                border: recorder.state === 'recording' ? '1px solid var(--bad)' : undefined,
+              }}
+            >
+              {recorder.state === 'recording' ? '● RECORDING' :
+               busy ? 'SAVING…' :
+               samplesEnrolled === 0 ? 'RECORD SAMPLE 1' : `RECORD SAMPLE ${samplesEnrolled + 1}`}
+            </button>
+          </div>
+        </div>
+
+        {(error || statusMessage) && (
+          <div style={{
+            padding: 14, borderRadius: 10,
+            background: error ? 'rgba(255,85,119,0.10)' : 'rgba(106,255,200,0.08)',
+            border: `1px solid ${error ? 'rgba(255,85,119,0.45)' : 'rgba(106,255,200,0.35)'}`,
+            color: error ? 'var(--bad)' : 'var(--good)',
+            fontSize: 12, fontFamily: 'JetBrains Mono, monospace',
+          }}>
+            {error || statusMessage}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AvailabilityPill({ availability, userId, userIdValid, locked }) {
+  if (locked) return <span className="pill good"><span className="dot"/>LOCKED</span>;
+  if (!userId) return <span className="pill"><span className="dot" style={{ background: 'var(--ink-soft)' }}/>ENTER ID</span>;
+  if (!userIdValid) return <span className="pill warn"><span className="dot"/>BAD FORMAT</span>;
+  if (availability.status === 'checking') return <span className="pill"><span className="dot" style={{ background: 'var(--teal-2)' }}/>CHECKING…</span>;
+  if (availability.status === 'error') return <span className="pill warn"><span className="dot"/>BACKEND DOWN</span>;
+  if (availability.status === 'ready' && availability.available) return <span className="pill good"><span className="dot"/>AVAILABLE</span>;
+  if (availability.status === 'ready' && !availability.available) return <span className="pill bad"><span className="dot"/>TAKEN</span>;
+  return <span className="pill"><span className="dot"/>—</span>;
+}
+
+function SampleDots({ count, done, active }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      {Array.from({ length: count }).map((_, i) => {
+        const isDone = i < done;
+        const isActive = i === active;
+        return (
+          <span key={i} style={{
+            width: 14, height: 14, borderRadius: '50%',
+            background: isDone ? 'var(--teal-2)' : 'rgba(125,200,255,0.10)',
+            border: isActive ? '1px solid var(--teal-2)' : '1px solid var(--line-2)',
+            boxShadow: isDone ? '0 0 8px rgba(126,240,255,0.6)' : 'none',
+            transition: 'all 240ms ease',
+          }}/>
+        );
+      })}
+      <span className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginLeft: 6 }}>
+        {done}/{count}
+      </span>
+    </div>
+  );
+}
+
+function formatRelative(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  const seconds = Math.max(0, (Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  const days = Math.floor(seconds / 86400);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 function MiniWave({ color, idx = 0 }) {
