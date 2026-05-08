@@ -8,15 +8,35 @@ type SpeakerResponse = {
   sample_count: number;
 };
 
+type StageBreakdownResponse = {
+  load_ms: number;
+  resample_ms: number;
+  normalize_ms: number;
+  embed_ms: number;
+  detect_ms: number;
+  total_ms: number;
+};
+
+type AnalysisDetailsResponse = {
+  voice_naturalness: number;
+  spectral_consistency: number;
+  temporal_patterns: number;
+  artifact_detection: number;
+};
+
 type VerificationResponse = {
   result_id: string;
   user_id: string;
   decision: "ACCEPT" | "REJECT" | "DEEPFAKE";
+  decision_reason: "accepted" | "mismatch" | "synthetic" | "not_enrolled";
   similarity_score: number;
   deepfake_score: number;
   centroid_similarity: number;
   sample_similarities: number[];
   message: string;
+  session_id: string;
+  stage_breakdown?: StageBreakdownResponse;
+  analysis_details?: AnalysisDetailsResponse | null;
   created_at: string;
 };
 
@@ -59,15 +79,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function toVerificationResult(response: VerificationResponse): VerificationResult {
+  const stage = response.stage_breakdown;
+  const details = response.analysis_details;
   return {
     resultId: response.result_id,
     userId: response.user_id,
     decision: response.decision,
+    decisionReason: response.decision_reason,
     similarityScore: response.similarity_score,
     deepfakeScore: response.deepfake_score,
     centroidSimilarity: response.centroid_similarity,
     sampleSimilarities: response.sample_similarities,
     message: response.message,
+    sessionId: response.session_id,
+    stageBreakdown: stage
+      ? {
+          loadMs: stage.load_ms,
+          resampleMs: stage.resample_ms,
+          normalizeMs: stage.normalize_ms,
+          embedMs: stage.embed_ms,
+          detectMs: stage.detect_ms,
+          totalMs: stage.total_ms,
+        }
+      : { loadMs: 0, resampleMs: 0, normalizeMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
+    analysisDetails: details
+      ? {
+          voiceNaturalness: details.voice_naturalness,
+          spectralConsistency: details.spectral_consistency,
+          temporalPatterns: details.temporal_patterns,
+          artifactDetection: details.artifact_detection,
+        }
+      : null,
     createdAt: response.created_at,
   };
 }
@@ -159,6 +201,15 @@ export async function getSession(sessionToken: string): Promise<Session> {
     },
   });
   return toSession(response);
+}
+
+export async function getMyVerification(sessionToken: string, resultId: string): Promise<VerificationResult> {
+  const response = await request<VerificationResponse>(`/me/verifications/${encodeURIComponent(resultId)}`, {
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
+  });
+  return toVerificationResult(response);
 }
 
 export async function logoutSession(sessionToken: string): Promise<void> {

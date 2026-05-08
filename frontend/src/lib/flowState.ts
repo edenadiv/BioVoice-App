@@ -1,4 +1,10 @@
-import type { Decision, ReferenceSample, Session, VerificationResult } from "../types";
+import type {
+  AnalysisDetails,
+  Decision,
+  ReferenceSample,
+  Session,
+  VerificationResult,
+} from "../types";
 
 export type Screen =
   | "home"
@@ -11,13 +17,6 @@ export type Screen =
   | "showcase";
 
 export type Intent = "enroll" | "verify";
-
-export type AnalysisDetails = {
-  voice_naturalness: number;
-  spectral_consistency: number;
-  temporal_patterns: number;
-  artifact_detection: number;
-};
 
 export type FlowState = {
   screen: Screen;

@@ -20,12 +20,15 @@ export function DeepfakeResultScreen({ state, dispatch }: Props) {
   const isGenuine = score >= 0.5;
   const confidence = Math.round((isGenuine ? score : 1 - score) * 1000) / 10;
 
-  // Placeholder sub-scores until Y-8.
-  const sub = state.lastDeepfakeDetails ?? {
-    voice_naturalness: isGenuine ? 0.98 : 0.30,
-    spectral_consistency: isGenuine ? 0.95 : 0.28,
-    temporal_patterns: isGenuine ? 0.99 : 0.22,
-    artifact_detection: isGenuine ? 0.02 : 0.86,
+  // Placeholder sub-scores until Y-8 (Yoav). Today the values come from
+  // `analysis_details` populated by the verification service from the AASIST score.
+  const responseDetails =
+    state.lastVerification?.analysisDetails ?? state.lastDeepfakeDetails ?? null;
+  const sub = responseDetails ?? {
+    voiceNaturalness: isGenuine ? 0.98 : 0.30,
+    spectralConsistency: isGenuine ? 0.95 : 0.28,
+    temporalPatterns: isGenuine ? 0.99 : 0.22,
+    artifactDetection: isGenuine ? 0.02 : 0.86,
   };
 
   return (
@@ -55,10 +58,10 @@ export function DeepfakeResultScreen({ state, dispatch }: Props) {
         <h1 style={{ fontSize: 14 }}>Analysis Details</h1>
       </div>
 
-      <ProgressBar layout="row" tone="success" caption="Voice Naturalness" value={Math.round(sub.voice_naturalness * 100)} />
-      <ProgressBar layout="row" tone="success" caption="Spectral Consistency" value={Math.round(sub.spectral_consistency * 100)} />
-      <ProgressBar layout="row" tone="success" caption="Temporal Patterns" value={Math.round(sub.temporal_patterns * 100)} />
-      <ProgressBar layout="row" tone="success" caption="Artifact Detection" value={Math.round(sub.artifact_detection * 100)} />
+      <ProgressBar layout="row" tone="success" caption="Voice Naturalness" value={Math.round(sub.voiceNaturalness * 100)} />
+      <ProgressBar layout="row" tone="success" caption="Spectral Consistency" value={Math.round(sub.spectralConsistency * 100)} />
+      <ProgressBar layout="row" tone="success" caption="Temporal Patterns" value={Math.round(sub.temporalPatterns * 100)} />
+      <ProgressBar layout="row" tone="success" caption="Artifact Detection" value={Math.round(sub.artifactDetection * 100)} />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14 }}>
         <Badge tone="info" leadingIcon={<span style={{ fontSize: 14 }}>🛡️</span>}>AASIST</Badge>

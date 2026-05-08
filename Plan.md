@@ -66,7 +66,7 @@ Eden is the UI leader and the final reviewer on visual / UX questions. Yoav is t
 
 Each phase is a logical, independently testable chunk. Phase numbers map to assigned tasks in `Eden.md` and `Yoav.md`.
 
-### Phase 0 — Cleanup (drop TCAV, dead code) ⬜
+### Phase 0 — Cleanup (drop TCAV, dead code) ✅
 
 - Audit the codebase for any TCAV-related imports, components, copy, routes; remove them.
 - Delete or archive `frontend/src/screens.jsx`, `more-screens.jsx`, `visuals.jsx`, `console.jsx`, `console-ext.jsx`, `audio.jsx`, `app.jsx` if they are not referenced from `main.tsx` (they are leftover prototypes).
@@ -74,7 +74,7 @@ Each phase is a logical, independently testable chunk. Phase numbers map to assi
 
 **Owner:** Eden (frontend audit + backend boot check).
 
-### Phase 1 — Design system foundation ⬜
+### Phase 1 — Design system foundation ✅
 
 - New `tokens.css` with light-theme CSS variables matching the mockups (off-white backgrounds, black text, semantic greens/reds/blues/purples for status pills, the orange "test mode" warning band, etc.).
 - New `<AppWindow>` shell with traffic-light dots and centered title.
@@ -84,7 +84,7 @@ Each phase is a logical, independently testable chunk. Phase numbers map to assi
 **Owner:** Eden.
 **Exit:** demo route (e.g., `?showcase=1`) renders one of each primitive; Yoav signs off via screenshot in the PR before screens consume the primitives.
 
-### Phase 2 — App shell + screen state machine ⬜
+### Phase 2 — App shell + screen state machine ✅
 
 - Replace existing `App.tsx` content with a new screen-state machine.
 - Screens enum: `home → enroll → processing → deepfake_result → verify_result → test_lab` plus a `login` screen for returning users.
@@ -130,7 +130,7 @@ Each phase is a logical, independently testable chunk. Phase numbers map to assi
 
 **Owner:** Yoav (UI + sub-score derivation in `detector.py`).
 
-### Phase 6 — Verification Result (Fig. 18) ⬜
+### Phase 6 — Verification Result (Fig. 18) ✅
 
 - Top banner: green "IDENTITY VERIFIED" or red "ACCESS DENIED" + "Welcome back, {name}" / reason.
 - Two metric cards side-by-side:
@@ -154,7 +154,7 @@ Each phase is a logical, independently testable chunk. Phase numbers map to assi
 
 **Owner:** Yoav (UI + `/me/spoof/test` endpoint).
 
-### Phase 8 — Backend support ⬜
+### Phase 8 — Backend support 🟡 (Eden's slice complete; Yoav's pending)
 
 Concrete endpoint additions and changes:
 

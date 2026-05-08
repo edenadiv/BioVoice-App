@@ -180,6 +180,18 @@ def logout(
     service.logout(session_token)
 
 
+@router.get("/me/verifications/{result_id}", response_model=VerificationResponse)
+def get_current_user_verification(
+    result_id: str,
+    session: SessionResponse = Depends(get_current_session),
+    service: VerificationService = Depends(get_verification_service),
+) -> VerificationResponse:
+    response = service.get_result(user_id=session.user_id, result_id=result_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="Verification result not found")
+    return response
+
+
 @router.get("/results", response_model=list[VerificationResponse])
 def list_results(service: VerificationService = Depends(get_verification_service)) -> list[VerificationResponse]:
     return service.list_results()
