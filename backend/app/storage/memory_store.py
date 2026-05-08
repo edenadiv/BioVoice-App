@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.models import ReferenceSampleRecord, SessionRecord, SpeakerRecord, VerificationRecord
 
 
@@ -12,6 +14,9 @@ class MemoryStore:
         self._reference_samples: list[ReferenceSampleRecord] = []
         self._verification_seq: dict[str, int] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        # F2.2 — login rate-limit state
+        self._login_failures: list[tuple[str, str, datetime]] = []  # (user_id, ip, when)
+        self._login_lockouts: dict[tuple[str, str], datetime] = {}
 
     def put_speaker(self, record: SpeakerRecord) -> None:
         self._speakers[record.user_id] = record
@@ -71,4 +76,33 @@ class MemoryStore:
 
     def delete_session(self, session_token: str) -> None:
         self._sessions.pop(session_token, None)
+
+    # F2.2 — login rate-limit state -----------------------------------------
+
+    def record_login_failure(self, user_id: str, ip: str, when: datetime) -> None:
+        self._login_failures.append((user_id, ip, when))
+
+    def count_recent_login_failures(
+        self, user_id: str, ip: str, since: datetime
+    ) -> int:
+        return sum(
+            1
+            for u, i, t in self._login_failures
+            if u == user_id and i == ip and t >= since
+        )
+
+    def set_login_lockout(
+        self, user_id: str, ip: str, locked_until: datetime
+    ) -> None:
+        self._login_lockouts[(user_id, ip)] = locked_until
+
+    def get_login_lockout(self, user_id: str, ip: str) -> datetime | None:
+        return self._login_lockouts.get((user_id, ip))
+
+    def clear_login_state(self, user_id: str, ip: str) -> None:
+        self._login_failures = [
+            (u, i, t) for u, i, t in self._login_failures
+            if not (u == user_id and i == ip)
+        ]
+        self._login_lockouts.pop((user_id, ip), None)
 

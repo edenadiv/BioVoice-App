@@ -73,6 +73,24 @@ class SQLiteStore:
                     day TEXT PRIMARY KEY,
                     last_value INTEGER NOT NULL DEFAULT 0
                 );
+
+                -- F2.2 — rolling failure log for /auth/login rate limiting.
+                CREATE TABLE IF NOT EXISTS login_failures (
+                    user_id TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    attempted_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS login_failures_lookup
+                    ON login_failures (user_id, ip, attempted_at);
+
+                -- F2.2 — active lockouts. Cleared on successful login or after
+                -- the deadline elapses.
+                CREATE TABLE IF NOT EXISTS login_lockouts (
+                    user_id TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    locked_until TEXT NOT NULL,
+                    PRIMARY KEY (user_id, ip)
+                );
                 """
             )
         self._ensure_user_columns()
@@ -445,4 +463,58 @@ class SQLiteStore:
             self._connection.execute(
                 "DELETE FROM sessions WHERE session_token = ?",
                 (session_token,),
+            )
+
+    # F2.2 — login rate-limit storage --------------------------------------
+
+    def record_login_failure(self, user_id: str, ip: str, when: datetime) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO login_failures (user_id, ip, attempted_at) VALUES (?, ?, ?)",
+                (user_id, ip, when.isoformat()),
+            )
+
+    def count_recent_login_failures(
+        self, user_id: str, ip: str, since: datetime
+    ) -> int:
+        row = self._connection.execute(
+            """
+            SELECT COUNT(*) AS n FROM login_failures
+            WHERE user_id = ? AND ip = ? AND attempted_at >= ?
+            """,
+            (user_id, ip, since.isoformat()),
+        ).fetchone()
+        return int(row["n"])
+
+    def set_login_lockout(
+        self, user_id: str, ip: str, locked_until: datetime
+    ) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO login_lockouts (user_id, ip, locked_until)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, ip) DO UPDATE SET locked_until = excluded.locked_until
+                """,
+                (user_id, ip, locked_until.isoformat()),
+            )
+
+    def get_login_lockout(self, user_id: str, ip: str) -> datetime | None:
+        row = self._connection.execute(
+            "SELECT locked_until FROM login_lockouts WHERE user_id = ? AND ip = ?",
+            (user_id, ip),
+        ).fetchone()
+        if row is None:
+            return None
+        return datetime.fromisoformat(row["locked_until"])
+
+    def clear_login_state(self, user_id: str, ip: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM login_failures WHERE user_id = ? AND ip = ?",
+                (user_id, ip),
+            )
+            self._connection.execute(
+                "DELETE FROM login_lockouts WHERE user_id = ? AND ip = ?",
+                (user_id, ip),
             )

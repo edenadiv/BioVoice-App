@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.models import SessionRecord
 from app.schemas import AuthSessionResponse, SessionResponse
+from app.services.rate_limit import LoginRateLimiter
 from app.services.verification import VerificationService
 
 
@@ -26,23 +27,57 @@ class AuthService:
         verification_service: VerificationService,
         *,
         idle_seconds: int = 30 * 60,
+        rate_limiter: LoginRateLimiter | None = None,
     ):
         """`idle_seconds` is the rolling expiry window. Defaults to 30 minutes;
         production passes `Settings.session_idle_seconds` from `core/config.py`.
+
+        `rate_limiter` (F2.2) gates `/auth/login` by (user_id, source IP). When
+        omitted, no rate limiting is applied — useful in unit tests that
+        exercise other paths.
         """
         self.store = store
         self.verification_service = verification_service
         self.idle_seconds = idle_seconds
+        self.rate_limiter = rate_limiter
 
     # F2.1 — Session lifecycle
     # =========================================================================
 
-    def login(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> AuthSessionResponse:
-        verification = self.verification_service.verify(
-            user_id=user_id, audio_bytes=audio_bytes, filename=filename
-        )
+    def login(
+        self,
+        user_id: str,
+        audio_bytes: bytes,
+        filename: str | None = None,
+        *,
+        ip: str = "unknown",
+    ) -> AuthSessionResponse:
+        # F2.2 — rate-limit gate runs BEFORE the (expensive) verify call so
+        # brute-force attempts pay no model cost. Raises LoginRateLimited
+        # which the route maps to HTTP 429 + Retry-After.
+        if self.rate_limiter is not None:
+            self.rate_limiter.check(user_id, ip)
+
+        try:
+            verification = self.verification_service.verify(
+                user_id=user_id, audio_bytes=audio_bytes, filename=filename
+            )
+        except Exception:
+            # Errors in verify (e.g. user not enrolled, sample count too low)
+            # also count as failures so attackers can't probe enrolment state
+            # for free.
+            if self.rate_limiter is not None:
+                self.rate_limiter.record_failure(user_id, ip)
+            raise
+
         if verification.decision != "ACCEPT":
+            if self.rate_limiter is not None:
+                self.rate_limiter.record_failure(user_id, ip)
             raise PermissionError("Voice authentication failed")
+
+        # Successful login → reset the rate-limit counters for this pair.
+        if self.rate_limiter is not None:
+            self.rate_limiter.record_success(user_id, ip)
 
         now = datetime.now(timezone.utc)
         session = SessionRecord(

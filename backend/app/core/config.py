@@ -33,6 +33,12 @@ class Settings:
     # F2.1 — idle window past which a session is rejected. Refreshed on every
     # authenticated request via AuthService.get_session.
     session_idle_seconds: int = 30 * 60  # 30 minutes
+    # F2.2 — brute-force defence on /auth/login. After `max_attempts` failures
+    # in a `window_seconds` window, the (user_id, ip) pair is locked for
+    # `lockout_seconds`. Tuned to balance demo usability vs. attack cost.
+    login_rate_window_seconds: int = 5 * 60  # 5 minutes
+    login_rate_max_attempts: int = 5
+    login_lockout_seconds: int = 15 * 60  # 15 minutes
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"

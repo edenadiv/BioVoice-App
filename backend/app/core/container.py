@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.core.config import Settings
 from app.services.auth import AuthService
 from app.services.detector import DeepfakeDetectorService
+from app.services.rate_limit import LoginRateLimiter, RateLimitConfig
 from app.services.speaker_encoder import RedimNetSpeakerEncoder
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
@@ -39,10 +40,19 @@ def build_container(settings: Settings) -> AppContainer:
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
     )
+    rate_limiter = LoginRateLimiter(
+        store=store,
+        config=RateLimitConfig(
+            window_seconds=settings.login_rate_window_seconds,
+            max_attempts=settings.login_rate_max_attempts,
+            lockout_seconds=settings.login_lockout_seconds,
+        ),
+    )
     auth_service = AuthService(
         store=store,
         verification_service=verification_service,
         idle_seconds=settings.session_idle_seconds,
+        rate_limiter=rate_limiter,
     )
     spoof_service = SpoofGenerationService(
         store=store,

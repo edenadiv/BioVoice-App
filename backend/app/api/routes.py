@@ -3,8 +3,8 @@
 from io import BytesIO
 from wave import Error as WaveError
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.dependencies import (
     get_auth_service,
@@ -23,8 +23,20 @@ from app.schemas import (
     VerificationResponse,
 )
 from app.services.auth import AuthService
+from app.services.rate_limit import LoginRateLimited
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
+
+
+def _client_ip(request: Request) -> str:
+    """Extract the source IP. Honours `X-Forwarded-For` (left-most entry) when
+    behind a reverse proxy, else falls back to the socket peer."""
+    forwarded = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
 
 router = APIRouter()
 
@@ -73,15 +85,27 @@ async def verify(
 
 @router.post("/auth/login", response_model=AuthSessionResponse)
 async def login(
+    request: Request,
     user_id: str = Form(...),
     audio: UploadFile = File(...),
     service: AuthService = Depends(get_auth_service),
-) -> AuthSessionResponse:
+):
     payload = await audio.read()
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
+    ip = _client_ip(request)
     try:
-        return service.login(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+        return service.login(
+            user_id=user_id, audio_bytes=payload, filename=audio.filename, ip=ip
+        )
+    except LoginRateLimited as exc:
+        # F2.2 — locked out. Return 429 with Retry-After so the frontend can
+        # render a real countdown.
+        return JSONResponse(
+            status_code=429,
+            content={"detail": str(exc), "retry_after_seconds": exc.retry_after_seconds},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except ValueError as exc:
