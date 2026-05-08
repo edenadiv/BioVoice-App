@@ -39,7 +39,11 @@ def build_container(settings: Settings) -> AppContainer:
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
     )
-    auth_service = AuthService(store=store, verification_service=verification_service)
+    auth_service = AuthService(
+        store=store,
+        verification_service=verification_service,
+        idle_seconds=settings.session_idle_seconds,
+    )
     spoof_service = SpoofGenerationService(
         store=store,
         model_path=settings.xtts_model_path,

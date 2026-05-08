@@ -53,6 +53,8 @@ class SQLiteStore:
                     session_token TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
+                    last_seen_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 );
 
@@ -75,6 +77,28 @@ class SQLiteStore:
             )
         self._ensure_user_columns()
         self._backfill_sample_embeddings()
+        self._ensure_session_columns()
+
+    def _ensure_session_columns(self) -> None:
+        """F2.1 — bring legacy `sessions` rows up to the new schema by adding
+        `expires_at` and `last_seen_at` columns when missing. Old rows get
+        epoch defaults; AuthService treats those as expired and forces the
+        client to log in again."""
+        columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        with self._connection:
+            if "expires_at" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN expires_at TEXT NOT NULL "
+                    "DEFAULT '1970-01-01T00:00:00+00:00'"
+                )
+            if "last_seen_at" not in columns:
+                self._connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN last_seen_at TEXT NOT NULL "
+                    "DEFAULT '1970-01-01T00:00:00+00:00'"
+                )
 
     def _ensure_user_columns(self) -> None:
         columns = {
@@ -374,23 +398,32 @@ class SQLiteStore:
         ]
 
     def put_session(self, record: SessionRecord) -> None:
+        # F2.1 — UPSERT semantics. AuthService.get_session bumps last_seen_at
+        # + expires_at on every authenticated request and re-puts; refresh
+        # rotates the token (insert new + delete old) so primary-key conflict
+        # only happens if the same token is re-stored, which is the bump path.
         with self._lock, self._connection:
             self._connection.execute(
                 """
-                INSERT INTO sessions (session_token, user_id, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO sessions (session_token, user_id, created_at, expires_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_token) DO UPDATE SET
+                    expires_at = excluded.expires_at,
+                    last_seen_at = excluded.last_seen_at
                 """,
                 (
                     record.session_token,
                     record.user_id,
                     record.created_at.isoformat(),
+                    record.expires_at.isoformat(),
+                    record.last_seen_at.isoformat(),
                 ),
             )
 
     def get_session(self, session_token: str) -> SessionRecord | None:
         cursor = self._connection.execute(
             """
-            SELECT session_token, user_id, created_at
+            SELECT session_token, user_id, created_at, expires_at, last_seen_at
             FROM sessions
             WHERE session_token = ?
             """,
@@ -403,6 +436,8 @@ class SQLiteStore:
             session_token=row["session_token"],
             user_id=row["user_id"],
             created_at=datetime.fromisoformat(row["created_at"]),
+            expires_at=datetime.fromisoformat(row["expires_at"]),
+            last_seen_at=datetime.fromisoformat(row["last_seen_at"]),
         )
 
     def delete_session(self, session_token: str) -> None:

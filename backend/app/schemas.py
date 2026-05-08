@@ -83,6 +83,7 @@ class SessionResponse(BaseModel):
     session_token: str
     user_id: str
     created_at: datetime
+    expires_at: datetime  # F2.1 — surface the deadline so the client can refresh proactively
 
 
 class AuthSessionResponse(BaseModel):

@@ -41,3 +41,9 @@ class SessionRecord:
     session_token: str
     user_id: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # F2.1 — production session expiry. `expires_at` is the absolute deadline
+    # past which the session is rejected; `last_seen_at` is bumped on every
+    # authenticated request so an actively-used session keeps rolling forward
+    # within the idle window.
+    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

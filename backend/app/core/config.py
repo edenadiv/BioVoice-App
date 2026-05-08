@@ -30,6 +30,9 @@ class Settings:
     deepfake_threshold: float = 0.50
     min_enrollment_samples: int = 3
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
+    # F2.1 — idle window past which a session is rejected. Refreshed on every
+    # authenticated request via AuthService.get_session.
+    session_idle_seconds: int = 30 * 60  # 30 minutes
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"

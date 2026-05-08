@@ -127,6 +127,24 @@ def current_session(session: SessionResponse = Depends(get_current_session)) -> 
     return session
 
 
+@router.post("/auth/refresh", response_model=SessionResponse)
+def refresh_session(
+    session_token: str = Depends(get_session_token),
+    service: AuthService = Depends(get_auth_service),
+) -> SessionResponse:
+    """F2.1 — rotate the session token + extend the idle window.
+
+    The client sends its current Bearer token; on success it receives a NEW
+    token + the new expiry. The old token is invalidated atomically. The
+    frontend's `lib/api.ts` request helper catches a 401 and tries this
+    endpoint once before giving up.
+    """
+    try:
+        return service.refresh_session(session_token)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
 @router.get("/me/reference-samples", response_model=list[ReferenceSampleResponse])
 def list_current_user_reference_samples(
     session: SessionResponse = Depends(get_current_session),
