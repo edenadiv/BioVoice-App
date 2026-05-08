@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 from datetime import datetime, timezone
 from statistics import fmean
@@ -19,7 +20,7 @@ from app.schemas import (
     VerificationResponse,
 )
 from app.services.audio import AudioService
-from app.services.detector import DeepfakeDetectorService
+from app.services.detector import DeepfakeDetectorService, analysis_details_from_score
 from app.services.speaker_encoder import SpeakerEncoder
 
 
@@ -153,6 +154,7 @@ class VerificationService:
         total_t0 = perf_counter()
 
         payload, audio_timings = self.audio.decode_wav_with_timings(audio_bytes)
+        audio_hash = hashlib.sha256(audio_bytes).hexdigest()
 
         t0 = perf_counter()
         query_embedding = self.encoder.embed(payload.waveform)
@@ -170,7 +172,7 @@ class VerificationService:
         similarity_score = self._aggregate_similarity(sample_similarities, centroid_similarity)
 
         decision, reason, message = self._decide(similarity_score, deepfake_score)
-        analysis_details = self._derive_analysis_details(deepfake_score)
+        analysis_details = analysis_details_from_score(deepfake_score, audio_hash=audio_hash)
 
         total_ms = (perf_counter() - total_t0) * 1000.0
         stage_breakdown = StageBreakdown(
@@ -272,17 +274,6 @@ class VerificationService:
         if decision == "DEEPFAKE":
             return "synthetic"
         return "mismatch"
-
-    def _derive_analysis_details(self, deepfake_score: float) -> AnalysisDetails | None:
-        # Placeholder until Yoav's Y-8 lands the AASIST-anchored derivation in detector.py.
-        # Using the global score gives the UI something to render today; Y-8 will replace this.
-        score = max(0.0, min(1.0, deepfake_score))
-        return AnalysisDetails(
-            voice_naturalness=score,
-            spectral_consistency=score,
-            temporal_patterns=score,
-            artifact_detection=1.0 - score,
-        )
 
     @staticmethod
     def _format_session_id(result_id: str, created_at: datetime) -> str:

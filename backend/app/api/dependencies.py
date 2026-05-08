@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from app.core.container import AppContainer
 from app.schemas import SessionResponse
 from app.services.auth import AuthService
+from app.services.detector import DeepfakeDetectorService
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
 
@@ -26,6 +27,10 @@ def get_auth_service(request: Request) -> AuthService:
 
 def get_spoof_generation_service(request: Request) -> SpoofGenerationService:
     return get_container(request).spoof_service
+
+
+def get_detector_service(request: Request) -> DeepfakeDetectorService:
+    return get_container(request).detector
 
 
 def get_session_token(authorization: str | None = Header(default=None)) -> str:

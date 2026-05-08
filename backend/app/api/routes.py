@@ -1,5 +1,7 @@
 """HTTP routes for enrollment, verification, and results."""
 
+import hashlib
+import re
 from io import BytesIO
 from wave import Error as WaveError
 
@@ -9,24 +11,31 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies import (
     get_auth_service,
     get_current_session,
+    get_detector_service,
     get_session_token,
     get_spoof_generation_service,
     get_verification_service,
 )
 from app.schemas import (
     AuthSessionResponse,
+    AvailabilityResponse,
     EnrollmentResponse,
     HealthResponse,
     ReferenceSampleResponse,
     SessionResponse,
     SpeakerResponse,
+    SpoofTestResponse,
     VerificationResponse,
 )
 from app.services.auth import AuthService
+from app.services.detector import DeepfakeDetectorService, analysis_details_from_score
+from app.services.audio import AudioService
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
 
 router = APIRouter()
+
+USER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.]{3,32}$")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -37,6 +46,19 @@ def health() -> HealthResponse:
 @router.get("/users", response_model=list[SpeakerResponse])
 def list_users(service: VerificationService = Depends(get_verification_service)) -> list[SpeakerResponse]:
     return service.list_users()
+
+
+@router.get("/users/{user_id}/availability", response_model=AvailabilityResponse)
+def check_user_availability(
+    user_id: str,
+    service: VerificationService = Depends(get_verification_service),
+) -> AvailabilityResponse:
+    if not USER_ID_PATTERN.match(user_id):
+        raise HTTPException(
+            status_code=422,
+            detail="user_id must be 3-32 chars (letters, digits, _, -, .)",
+        )
+    return AvailabilityResponse(available=service.is_user_id_available(user_id))
 
 
 @router.post("/enroll", response_model=EnrollmentResponse)
@@ -169,6 +191,37 @@ async def generate_spoof_sample(
             "Content-Disposition": f'attachment; filename="{result.file_name}"',
             "X-Spoof-Source": result.source_description,
         },
+    )
+
+
+@router.post("/me/spoof/test", response_model=SpoofTestResponse)
+async def test_spoof_audio(
+    audio: UploadFile = File(...),
+    session: SessionResponse = Depends(get_current_session),
+    detector: DeepfakeDetectorService = Depends(get_detector_service),
+    service: VerificationService = Depends(get_verification_service),
+) -> SpoofTestResponse:
+    """Run AASIST against an uploaded WAV. Used by DeepfakeLab "Test Detection".
+
+    No verification, no enrollment lookup; latency budget < 200 ms.
+    """
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+
+    audio_service = AudioService(target_sample_rate=service.sample_rate)
+    try:
+        decoded = audio_service.decode_wav(payload)
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    score = detector.detect(decoded.waveform)
+    audio_hash = hashlib.sha256(payload).hexdigest()
+    decision = "FAKE" if score < service.deepfake_threshold else "GENUINE"
+    return SpoofTestResponse(
+        deepfake_score=score,
+        decision=decision,
+        analysis_details=analysis_details_from_score(score, audio_hash=audio_hash),
     )
 
 

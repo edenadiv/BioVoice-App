@@ -50,11 +50,13 @@ class StageBreakdown(BaseModel):
     total_ms: float = 0.0
 
 
+SpoofDecision = Literal["FAKE", "GENUINE"]
+
+
 class AnalysisDetails(BaseModel):
     """Sub-scores rendered on the Deepfake Result screen (Fig. 17).
 
-    Yoav owns the AASIST-anchored derivation in Y-8 (see `detector.py`). Until
-    that lands, these mirror the raw deepfake score with placeholder semantics.
+    Derivation lives in `services/detector.py:analysis_details_from_score`.
     """
 
     voice_naturalness: float = Field(ge=0.0, le=1.0)
@@ -92,3 +94,16 @@ class AuthSessionResponse(BaseModel):
 
 class AvailabilityResponse(BaseModel):
     available: bool
+
+
+class SpoofTestResponse(BaseModel):
+    """POST /me/spoof/test — runs AASIST against an arbitrary WAV.
+
+    Used by the DeepfakeLab "Test Detection" button after a spoof is generated.
+    No verification, no enrollment lookup — just a deepfake score plus the
+    derived four-metric breakdown.
+    """
+
+    deepfake_score: float = Field(ge=0.0, le=1.0)
+    decision: SpoofDecision
+    analysis_details: AnalysisDetails

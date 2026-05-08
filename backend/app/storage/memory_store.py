@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.models import ReferenceSampleRecord, SpeakerRecord, VerificationRecord
+from app.models import ReferenceSampleRecord, SessionRecord, SpeakerRecord, VerificationRecord
 
 
 class MemoryStore:
@@ -10,6 +10,7 @@ class MemoryStore:
         self._speakers: dict[str, SpeakerRecord] = {}
         self._results: list[VerificationRecord] = []
         self._reference_samples: list[ReferenceSampleRecord] = []
+        self._sessions: dict[str, SessionRecord] = {}
 
     def put_speaker(self, record: SpeakerRecord) -> None:
         self._speakers[record.user_id] = record
@@ -51,4 +52,13 @@ class MemoryStore:
             if record.result_id == result_id:
                 return record
         return None
+
+    def put_session(self, record: SessionRecord) -> None:
+        self._sessions[record.session_token] = record
+
+    def get_session(self, session_token: str) -> SessionRecord | None:
+        return self._sessions.get(session_token)
+
+    def delete_session(self, session_token: str) -> None:
+        self._sessions.pop(session_token, None)
 

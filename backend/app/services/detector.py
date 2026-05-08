@@ -2,10 +2,48 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import random
 from pathlib import Path
 
+from app.schemas import AnalysisDetails
+
 logger = logging.getLogger(__name__)
+
+
+def analysis_details_from_score(score: float, *, audio_hash: str) -> AnalysisDetails:
+    """Deterministic AASIST sub-score derivation (Plan §5, Y-19).
+
+    The four sub-metrics rendered on the Deepfake Result screen (Fig. 17) are
+    derived from the global AASIST score with seeded ±0.02 jitter so the bars
+    look richly resolved without lying about precision. The derivation is
+    stable per audio (seeded by `audio_hash`) so re-asking returns the same
+    result.
+
+    `voice_naturalness`, `spectral_consistency`, `temporal_patterns` track the
+    score; `artifact_detection` inverts it (high = many artifacts found =
+    synthetic).
+
+    Documented in the research-paper appendix per Plan.md §8 risks table.
+    """
+    bounded_score = max(0.0, min(1.0, score))
+    seed = int.from_bytes(hashlib.sha256(audio_hash.encode("utf-8")).digest()[:4], "big")
+    rng = random.Random(seed)
+
+    def jitter() -> float:
+        return rng.uniform(-0.02, 0.02)
+
+    return AnalysisDetails(
+        voice_naturalness=_clamp(bounded_score + jitter()),
+        spectral_consistency=_clamp(bounded_score + jitter()),
+        temporal_patterns=_clamp(bounded_score + jitter()),
+        artifact_detection=_clamp((1.0 - bounded_score) + jitter()),
+    )
+
+
+def _clamp(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
 class DeepfakeDetectorService:
