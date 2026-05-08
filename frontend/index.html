@@ -1,14 +1,321 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BioVoice</title>
-    <meta name="description" content="Web-based voice enrollment and verification" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<head>
+<meta charset="utf-8" />
+<title>BioVoice — Voice Biometric Authentication</title>
+<meta name="viewport" content="width=1920, initial-scale=1" />
 
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@200;300;400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg-deep:   #04070d;
+    --bg-near:   #070b14;
+    --bg-card:   #0a1422;
+    --line:      rgba(125, 200, 255, 0.10);
+    --line-2:    rgba(125, 200, 255, 0.18);
+    --ink:       #e7f3ff;
+    --ink-mute:  #8aa3c2;
+    --ink-soft:  #5a7290;
+    --teal-1:    #3da9fc;
+    --teal-2:    #7ef0ff;
+    --teal-deep: #1a3a6e;
+    --teal-glow: rgba(126, 240, 255, 0.55);
+    --warn:      #ffb24a;
+    --bad:       #ff5577;
+    --good:      #6affc8;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg-deep);
+    color: var(--ink);
+    font-family: "Sora", system-ui, sans-serif;
+    font-weight: 300;
+    overflow: hidden;
+    height: 100%;
+    width: 100%;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Stage = 1920x1080 kiosk, scales to fit viewport */
+  #stage-wrap {
+    position: fixed; inset: 0;
+    display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 50%, #08111e 0%, #04070d 70%);
+  }
+  #stage {
+    width: 1920px; height: 1080px;
+    transform-origin: center center;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-deep);
+  }
+
+  /* Subtle starfield + grid backdrop everywhere */
+  .backdrop {
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  }
+  .backdrop::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(125,200,255,0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(125,200,255,0.04) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  }
+  .backdrop::after {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(61,169,252,0.08), transparent 30%),
+      radial-gradient(circle at 82% 78%, rgba(126,240,255,0.06), transparent 35%);
+  }
+
+  /* Common chrome */
+  .chrome-top, .chrome-bottom {
+    position: absolute; left: 0; right: 0;
+    padding: 28px 44px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .chrome-top { top: 0; }
+  .chrome-bottom {
+    bottom: 0;
+    background: linear-gradient(0deg, rgba(4,7,13,0.88) 0%, rgba(4,7,13,0.6) 60%, transparent 100%);
+    backdrop-filter: blur(6px);
+    padding-top: 28px;
+  }
+
+  .chrome-top .left, .chrome-top .right,
+  .chrome-bottom .left, .chrome-bottom .right { pointer-events: auto; }
+
+  .wordmark {
+    display: flex; align-items: center; gap: 16px;
+    font-family: "Sora", sans-serif;
+    letter-spacing: 0.02em;
+  }
+  .wordmark .mark {
+    width: 44px; height: 44px;
+    position: relative;
+    display: grid; place-items: center;
+  }
+  .wordmark .name {
+    font-weight: 500; font-size: 22px;
+    color: var(--ink);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .wordmark .name b { font-weight: 600; color: var(--teal-2); }
+  .wordmark .sub {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; letter-spacing: 0.18em;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .partner {
+    display: flex; align-items: center; gap: 12px;
+    color: var(--ink-mute);
+    flex-shrink: 0;
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .partner .crest {
+    width: 36px; height: 36px;
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--teal-2);
+  }
+  .partner .stack { display: flex; flex-direction: column; gap: 2px; }
+  .partner .stack .l1 { color: var(--ink); letter-spacing: 0.2em; font-weight: 500; font-size: 11px; }
+  .partner .stack .l2 { color: var(--ink-soft); font-size: 9px; letter-spacing: 0.18em; }
+
+  /* Status pills */
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    background: rgba(10, 20, 34, 0.6);
+    backdrop-filter: blur(8px);
+  }
+  .pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--teal-2);
+    box-shadow: 0 0 10px var(--teal-glow);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .pill.warn .dot { background: var(--warn); box-shadow: 0 0 10px rgba(255,178,74,0.55); }
+  .pill.bad  .dot { background: var(--bad);  box-shadow: 0 0 10px rgba(255,85,119,0.55); }
+  .pill.good .dot { background: var(--good); box-shadow: 0 0 10px rgba(106,255,200,0.55); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 18px 32px;
+    border-radius: 999px;
+    font-family: "Sora", sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 240ms ease;
+    border: none;
+    color: var(--ink);
+    background: transparent;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--teal-1), var(--teal-2));
+    color: #04070d;
+    font-weight: 500;
+    box-shadow:
+      0 0 0 1px rgba(126,240,255,0.4),
+      0 12px 40px rgba(126,240,255,0.25),
+      inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(126,240,255,0.6), 0 18px 60px rgba(126,240,255,0.4); }
+  .btn-ghost {
+    border: 1px solid var(--line-2);
+    color: var(--ink-mute);
+    background: rgba(10, 20, 34, 0.4);
+    backdrop-filter: blur(8px);
+  }
+  .btn-ghost:hover { color: var(--ink); border-color: var(--teal-1); }
+
+  /* Cards / panels */
+  .panel {
+    border: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(10,20,34,0.7), rgba(10,20,34,0.4));
+    backdrop-filter: blur(12px);
+    border-radius: 18px;
+    padding: 28px 32px;
+  }
+  .panel.outline-glow {
+    box-shadow: 0 0 0 1px var(--line-2), 0 0 60px rgba(61,169,252,0.08);
+  }
+
+  .label-mono {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .num-mono {
+    font-family: "JetBrains Mono", monospace;
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+  }
+
+  .serif { font-family: "Instrument Serif", serif; font-weight: 400; }
+
+  /* Animated tick lines for engineered feel */
+  .ticks {
+    height: 14px;
+    background: repeating-linear-gradient(
+      to right,
+      var(--line-2) 0, var(--line-2) 1px,
+      transparent 1px, transparent 12px
+    );
+    mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+  }
+
+  /* Hover lift utility */
+  .lift { transition: transform 240ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 240ms; }
+  .lift:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(126,240,255,0.35), 0 18px 40px rgba(126,240,255,0.10); }
+  kbd { font-family: "JetBrains Mono", monospace; }
+
+  /* Screen transition */
+  .screen { position: absolute; inset: 0; }
+  .screen.fade-enter { animation: fadeIn 700ms ease both; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.985); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* Scrollbar hidden anywhere */
+  ::-webkit-scrollbar { display: none; }
+
+  @keyframes scanring {
+    0% { transform: scale(0.5); opacity: 0; }
+    20% { opacity: 1; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+  /* Vertical scan line */
+  @keyframes scanY {
+    0%   { transform: translateY(0); }
+    50%  { transform: translateY(680px); }
+    100% { transform: translateY(0); }
+  }
+
+  /* Animation keyframes shared */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.04); opacity: 0.85; }
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes drift {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  @keyframes spin-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+</style>
+</head>
+
+<body>
+  <div id="stage-wrap">
+    <div id="stage">
+      <div class="backdrop"></div>
+      <div id="root"></div>
+    </div>
+  </div>
+
+  <script>
+    // Scale 1920x1080 stage to fit viewport
+    function fitStage() {
+      const stage = document.getElementById('stage');
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const scale = Math.min(w / 1920, h / 1080);
+      stage.style.transform = `scale(${scale})`;
+    }
+    window.addEventListener('resize', fitStage);
+    fitStage();
+  </script>
+
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
