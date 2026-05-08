@@ -1,4 +1,11 @@
-"""Runtime settings for the BioVoice backend."""
+"""Runtime settings for the BioVoice backend.
+
+F2.4 — every secret + every environment-specific value reads from `os.environ`.
+The committed defaults are safe for local development. Production deployments
+populate a `.env` file (or equivalent) from their secret manager — see
+`backend/README.md` for the workflow. `backend/.env.example` lists every
+recognised variable.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +30,28 @@ def _cors_origins_from_env() -> list[str]:
     return parsed or list(DEFAULT_CORS_ORIGINS)
 
 
+def _int_from_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _admin_api_key_from_env() -> str | None:
+    """F2.4 — admin API key reserved for the /admin/* routes that land in F6.
+    None when unset → admin routes are 503 unconditionally so no surface is
+    exposed without an explicit secret."""
+    value = os.environ.get("BIOVOICE_ADMIN_API_KEY", "").strip()
+    return value or None
+
+
+def _log_level_from_env() -> str:
+    return os.environ.get("LOG_LEVEL", "INFO").upper()
+
+
 @dataclass(slots=True)
 class Settings:
     sample_rate: int = 16000
@@ -32,13 +61,25 @@ class Settings:
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     # F2.1 — idle window past which a session is rejected. Refreshed on every
     # authenticated request via AuthService.get_session.
-    session_idle_seconds: int = 30 * 60  # 30 minutes
+    session_idle_seconds: int = field(
+        default_factory=lambda: _int_from_env("SESSION_IDLE_SECONDS", 30 * 60)
+    )
     # F2.2 — brute-force defence on /auth/login. After `max_attempts` failures
     # in a `window_seconds` window, the (user_id, ip) pair is locked for
     # `lockout_seconds`. Tuned to balance demo usability vs. attack cost.
-    login_rate_window_seconds: int = 5 * 60  # 5 minutes
-    login_rate_max_attempts: int = 5
-    login_lockout_seconds: int = 15 * 60  # 15 minutes
+    login_rate_window_seconds: int = field(
+        default_factory=lambda: _int_from_env("LOGIN_RATE_WINDOW_SECONDS", 5 * 60)
+    )
+    login_rate_max_attempts: int = field(
+        default_factory=lambda: _int_from_env("LOGIN_RATE_MAX_ATTEMPTS", 5)
+    )
+    login_lockout_seconds: int = field(
+        default_factory=lambda: _int_from_env("LOGIN_LOCKOUT_SECONDS", 15 * 60)
+    )
+    # F2.4 — admin API key gates the /admin/* surface added in F6. None when
+    # unset; admin routes return 503 in that case (no zero-secret access).
+    admin_api_key: str | None = field(default_factory=_admin_api_key_from_env)
+    log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"

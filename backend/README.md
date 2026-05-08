@@ -28,9 +28,21 @@ Notes:
 
 ## Environment variables
 
+Every secret + every environment-specific value is read from `os.environ`.
+Local dev: copy `backend/.env.example` to `backend/.env` and source it before
+running `uvicorn`. Production: have your secret manager populate the env at
+deploy time (see "Secrets management" below).
+
 | Var | Purpose | Example |
 |---|---|---|
-| `CORS_ORIGINS` | Comma-separated list of allowed origins for browser CORS. Defaults to `http://localhost:5173` when unset. Add the LAN IP for phone/iPad demos. | `CORS_ORIGINS=http://localhost:5173,http://10.0.0.10:5173` |
+| `CORS_ORIGINS` | Comma-separated list of allowed origins for browser CORS. Defaults to `http://localhost:5173`. Add the LAN IP for phone/iPad demos. | `CORS_ORIGINS=http://localhost:5173,http://10.0.0.10:5173` |
+| `SESSION_IDLE_SECONDS` | F2.1 — rolling idle window for `/auth/session` and refresh. Default 1800 (30 min). | `SESSION_IDLE_SECONDS=1800` |
+| `LOGIN_RATE_MAX_ATTEMPTS` | F2.2 — failures within `LOGIN_RATE_WINDOW_SECONDS` before lockout. Default 5. | `LOGIN_RATE_MAX_ATTEMPTS=5` |
+| `LOGIN_RATE_WINDOW_SECONDS` | F2.2 — rolling window. Default 300 (5 min). | `LOGIN_RATE_WINDOW_SECONDS=300` |
+| `LOGIN_LOCKOUT_SECONDS` | F2.2 — lockout duration once exceeded. Default 900 (15 min). | `LOGIN_LOCKOUT_SECONDS=900` |
+| `BIOVOICE_ADMIN_API_KEY` | F2.4 / F6 — gates the `/admin/*` surface. Unset = admin endpoints disabled (default). Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. | `BIOVOICE_ADMIN_API_KEY=...` |
+| `LOG_LEVEL` | Python `logging` level. F7.2 will switch the format to structured JSON. | `LOG_LEVEL=INFO` |
+| `DATABASE_URL` | F7.1 (planned) — Postgres connection string. Unset = SQLite at `backend/data/biovoice.sqlite3`. | `DATABASE_URL=postgres://…` |
 | `BIOVOICE_SEED_DEMO` | When set to `1`, populates the SQLite store with two bundled demo users (`alice_demo`, `bob_demo`) on startup if the store is empty. Idempotent. Off by default — production runs see an honest empty state. | `BIOVOICE_SEED_DEMO=1` |
 | `BIOVOICE_FALLBACK_SPOOF` | When set to `1` and the XTTS dependencies/weights are unavailable, `POST /me/spoof` returns the bundled `data/fallback_spoof.wav` instead of HTTP 503. Lets the DeepfakeLab demo work without XTTS. | `BIOVOICE_FALLBACK_SPOOF=1` |
 
@@ -52,6 +64,43 @@ BIOVOICE_SEED_DEMO=1 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 The `alice_demo` and `bob_demo` profiles will appear with `sampleCount: 3` in the kiosk Profiles page immediately. Removes the "Enrol your first speaker" empty state for client visits without anyone speaking into the mic first.
+
+## Secrets management (F2.4)
+
+The backend never has hardcoded secrets. The `tests/test_secret_scan.py`
+pytest scans the working tree on every CI run for high-confidence secret
+signatures (AWS keys, GitHub tokens, Slack tokens, RSA/EC private keys,
+Stripe live keys, etc.) and fails the build if any match. Try injecting a
+fake key into a `.py` file under `backend/app/` and re-running the test —
+it should fail with a precise `path:line` pointer.
+
+**Workflow**
+
+1. **Local dev** — copy `backend/.env.example` to `backend/.env`, fill in
+   placeholders, then source it:
+   ```bash
+   set -a; source backend/.env; set +a
+   .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+   ```
+2. **Cloud / production** — store secrets in **Doppler** (recommended) /
+   1Password Secrets Automation / AWS Secrets Manager / HashiCorp Vault.
+   Materialise them as env vars on the host before launching uvicorn:
+   ```bash
+   doppler run -- .venv/bin/uvicorn app.main:app
+   ```
+3. **Containers** — pass via `docker compose --env-file=.env` or k8s
+   `envFrom: [secretRef:]`. Never bake secrets into the image.
+
+**Rotation policy**
+
+- `BIOVOICE_ADMIN_API_KEY`: rotate every 90 days or on operator change.
+- Session tokens: rotate per refresh (F2.1) — automatic.
+- Bearer tokens / API keys for ANY downstream service: 90 days or on suspected
+  exposure, whichever comes first.
+
+If a secret leaks, revoke it at the source first, then rotate the env, then
+restart the service. The pre-commit secret-scan + the CI gate are
+belt-and-braces — assume both can fail and have a recovery procedure.
 
 ## XTTS spoof generation
 
