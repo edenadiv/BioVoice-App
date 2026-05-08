@@ -12,6 +12,7 @@ class Settings:
     min_enrollment_samples: int = 3
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:5173"])
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
+    redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
 
 

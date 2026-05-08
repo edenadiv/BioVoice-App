@@ -12,6 +12,7 @@ from app.models import SpeakerRecord, VerificationRecord
 from app.schemas import EnrollmentResponse, SpeakerResponse, VerificationResponse
 from app.services.audio import AudioService
 from app.services.detector import DeepfakeDetectorService
+from app.services.speaker_encoder import SpeakerEncoder
 
 
 class VerificationStore(Protocol):
@@ -26,87 +27,12 @@ class VerificationStore(Protocol):
     def list_results(self) -> list[VerificationRecord]: ...
 
 
-class SpeakerEmbeddingService:
-    """Temporary feature-based embedding service.
-
-    This provides a deterministic placeholder until the speaker encoder is ported
-    into the web backend.
-    """
-
-    def embed(self, waveform: list[float]) -> list[float]:
-        if not waveform:
-            return [0.0] * 8
-
-        mean = fmean(waveform)
-        centered = [sample - mean for sample in waveform]
-        rms = math.sqrt(fmean(sample * sample for sample in centered))
-        peak = max(abs(sample) for sample in waveform)
-        zero_crossings = self._zero_crossing_rate(centered)
-        spread = self._spread(centered)
-        first_moment = fmean(abs(sample) for sample in centered)
-        energy_proxy = fmean(abs(cur - prev) for prev, cur in zip(centered, centered[1:])) if len(centered) > 1 else 0.0
-        return [
-            mean,
-            spread,
-            rms,
-            peak,
-            first_moment,
-            self._percentile(centered, 0.25),
-            self._percentile(centered, 0.75),
-            zero_crossings + energy_proxy,
-        ]
-
-    @staticmethod
-    def cosine_similarity(a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
-        norm_a = math.sqrt(sum(x * x for x in a))
-        norm_b = math.sqrt(sum(y * y for y in b))
-        denom = norm_a * norm_b
-        if denom <= 1e-8:
-            return 0.0
-        score = dot / denom
-        return (score + 1.0) / 2.0
-
-    @staticmethod
-    def _zero_crossing_rate(waveform: list[float]) -> float:
-        if len(waveform) < 2:
-            return 0.0
-        crossings = sum(
-            1
-            for left, right in zip(waveform, waveform[1:])
-            if (left >= 0 > right) or (left < 0 <= right)
-        )
-        return crossings / (len(waveform) - 1)
-
-    @staticmethod
-    def _spread(waveform: list[float]) -> float:
-        if len(waveform) < 2:
-            return 0.0
-        mean = fmean(waveform)
-        variance = fmean((sample - mean) ** 2 for sample in waveform)
-        return math.sqrt(variance)
-
-    @staticmethod
-    def _percentile(values: list[float], percentile: float) -> float:
-        if not values:
-            return 0.0
-        ordered = sorted(values)
-        if len(ordered) == 1:
-            return ordered[0]
-        index = percentile * (len(ordered) - 1)
-        lower = math.floor(index)
-        upper = math.ceil(index)
-        if lower == upper:
-            return ordered[int(index)]
-        fraction = index - lower
-        return ordered[lower] * (1 - fraction) + ordered[upper] * fraction
-
-
 class VerificationService:
     def __init__(
         self,
         store: VerificationStore,
         detector: DeepfakeDetectorService,
+        speaker_encoder: SpeakerEncoder,
         sample_rate: int,
         similarity_threshold: float,
         deepfake_threshold: float,
@@ -119,7 +45,7 @@ class VerificationService:
         self.deepfake_threshold = deepfake_threshold
         self.min_enrollment_samples = min_enrollment_samples
         self.audio = AudioService(target_sample_rate=sample_rate)
-        self.encoder = SpeakerEmbeddingService()
+        self.encoder = speaker_encoder
 
     def list_users(self) -> list[SpeakerResponse]:
         return [
@@ -250,7 +176,7 @@ class VerificationService:
     def _build_reference_embedding(self, sample_embeddings: list[list[float]]) -> list[float]:
         normalized_samples = [self._normalize_embedding(embedding) for embedding in sample_embeddings if embedding]
         if not normalized_samples:
-            return [0.0] * 8
+            return []
 
         dimensions = len(normalized_samples[0])
         averaged = [

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.core.config import Settings
 from app.services.auth import AuthService
 from app.services.detector import DeepfakeDetectorService
+from app.services.speaker_encoder import RedimNetSpeakerEncoder
 from app.services.verification import VerificationService
 from app.storage.sqlite_store import SQLiteStore
 
@@ -23,9 +24,11 @@ class AppContainer:
 def build_container(settings: Settings) -> AppContainer:
     store = SQLiteStore(database_path=settings.database_path)
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
+    speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
     verification_service = VerificationService(
         store=store,
         detector=detector,
+        speaker_encoder=speaker_encoder,
         sample_rate=settings.sample_rate,
         similarity_threshold=settings.similarity_threshold,
         deepfake_threshold=settings.deepfake_threshold,
