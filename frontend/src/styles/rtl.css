@@ -1,0 +1,78 @@
+/* F5.3 — RTL CSS layer.
+ *
+ * The kiosk's existing stylesheets use directional properties (`left`,
+ * `margin-left`, `text-align: left`) heavily. Rather than rewrite them
+ * all (high risk + high churn), this layer flips the most-visible chrome
+ * elements when `<html dir="rtl">` is set so the layout mirrors cleanly
+ * in Hebrew without touching the existing component CSS.
+ *
+ * F5.4 — also wires the Heebo font for Hebrew. Latin text inside Hebrew
+ * pages (English usernames in a Hebrew label, e.g.) keeps falling back
+ * to Sora through the cascade.
+ */
+
+/* Heebo (Hebrew) — fetched from Google Fonts. Subset-restricted to the
+ * Hebrew range so we don't bloat the bundle with Latin glyphs the
+ * existing Sora font already covers. Falls back to system Hebrew fonts
+ * if the network's blocked. */
+@import url("https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap&subset=hebrew");
+
+html.rtl,
+html[dir="rtl"] {
+  /* Use Heebo for Hebrew text; fall back to Sora for any Latin glyphs
+   * mixed into the same line. The browser picks the right family per
+   * codepoint via the unicode-range descriptor on each @font-face. */
+  font-family: "Heebo", "Sora", system-ui, sans-serif;
+}
+
+html.rtl body,
+html[dir="rtl"] body {
+  /* Hebrew benefits from a slightly looser line-height than Latin text
+   * at the same point size — the diacritical marks need vertical room. */
+  line-height: 1.55;
+}
+
+/* Sidebar / chrome — explicit position flips for the kiosk's
+ * absolute-positioned elements. Add classes here as new chrome lands.
+ *
+ * The kiosk uses inline styles heavily. Where logical properties suffice
+ * we let CSS handle direction implicitly; where the inline style hard-
+ * codes `left:` we override here. */
+
+html[dir="rtl"] .biovoice-sidebar {
+  left: unset;
+  right: 0;
+}
+
+html[dir="rtl"] .biovoice-chrome-left {
+  left: unset;
+  right: 0;
+}
+
+html[dir="rtl"] .biovoice-chrome-right {
+  right: unset;
+  left: 0;
+}
+
+/* Mirror progress bars / sliders so they fill from the right under RTL. */
+html[dir="rtl"] .biovoice-progress-fill {
+  transform-origin: right center;
+}
+
+/* Headlines often have explicit `text-align: left` for the kiosk's
+ * editorial layout. Under RTL we want them right-aligned by default. */
+html[dir="rtl"] .biovoice-text-start {
+  text-align: right;
+}
+
+html[dir="rtl"] .biovoice-text-end {
+  text-align: left;
+}
+
+/* Number-heavy panels (latency timeline, similarity bars) should stay
+ * LTR even under Hebrew because the digits and units render naturally
+ * left-to-right. Add this class to the wrapper div. */
+.biovoice-numerals {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
