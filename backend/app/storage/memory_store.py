@@ -10,6 +10,7 @@ class MemoryStore:
         self._speakers: dict[str, SpeakerRecord] = {}
         self._results: list[VerificationRecord] = []
         self._reference_samples: list[ReferenceSampleRecord] = []
+        self._verification_seq: dict[str, int] = {}
 
     def put_speaker(self, record: SpeakerRecord) -> None:
         self._speakers[record.user_id] = record
@@ -51,4 +52,10 @@ class MemoryStore:
             if record.result_id == result_id:
                 return record
         return None
+
+    def next_verification_seq(self, day: str) -> int:
+        # F2.3 — daily monotonic counter for session-ids.
+        next_value = self._verification_seq.get(day, 0) + 1
+        self._verification_seq[day] = next_value
+        return next_value
 

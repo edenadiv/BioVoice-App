@@ -57,6 +57,15 @@ class VerificationStore(Protocol):
 
     def get_result(self, result_id: str) -> VerificationRecord | None: ...
 
+    def next_verification_seq(self, day: str) -> int:
+        """Atomic monotonic counter per day. `day` is a YYYYMMDD string.
+
+        F2.3: backs the production-stable session-id `VRF-YYYYMMDD-NNNNN`.
+        Returns 1 for the first call on a given day, 2 for the second, etc.
+        Persists across restarts.
+        """
+        ...
+
 
 class VerificationService:
     def __init__(
@@ -184,7 +193,9 @@ class VerificationService:
 
         result_id = str(uuid4())
         created_at = datetime.now(timezone.utc)
-        session_id = self._format_session_id(result_id, created_at)
+        day_key = f"{created_at.year:04d}{created_at.month:02d}{created_at.day:02d}"
+        seq = self.store.next_verification_seq(day_key)
+        session_id = self._format_session_id(seq, created_at)
 
         record = VerificationRecord(
             result_id=result_id,
@@ -247,7 +258,10 @@ class VerificationService:
         stage_dict = meta.get("stage_breakdown") or {}
         stage_breakdown = StageBreakdown.model_validate(stage_dict)
         reason = meta.get("decision_reason") or self._reason_from_decision(record.decision)
-        session_id = meta.get("session_id") or self._format_session_id(record.result_id, record.created_at)
+        # Old records persist their session_id in metadata; for legacy rows
+        # without one we synthesise a stable suffix from the result_id rather
+        # than burning a fresh counter (counter increments only on write).
+        session_id = meta.get("session_id") or self._legacy_session_id(record.result_id, record.created_at)
 
         return VerificationResponse(
             result_id=record.result_id,
@@ -285,7 +299,17 @@ class VerificationService:
         )
 
     @staticmethod
-    def _format_session_id(result_id: str, created_at: datetime) -> str:
+    def _format_session_id(seq: int, created_at: datetime) -> str:
+        """F2.3 — VRF-YYYYMMDD-NNNNN with a 5-digit zero-padded daily counter."""
+        return (
+            f"VRF-{created_at.year:04d}{created_at.month:02d}{created_at.day:02d}"
+            f"-{seq:05d}"
+        )
+
+    @staticmethod
+    def _legacy_session_id(result_id: str, created_at: datetime) -> str:
+        """Pre-F2.3 format reconstructor for historical rows without a stored
+        session_id. Reads as `VRF-YYYY-MMDD-XXXX` (last 4 of result_id)."""
         suffix = result_id.replace("-", "").upper()[-4:].rjust(4, "0")
         return f"VRF-{created_at.year:04d}-{created_at.month:02d}{created_at.day:02d}-{suffix}"
 

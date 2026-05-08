@@ -65,6 +65,12 @@ class SQLiteStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 );
+
+                -- F2.3 — daily monotonic counter for session-id (VRF-YYYYMMDD-NNNNN).
+                CREATE TABLE IF NOT EXISTS verification_seq (
+                    day TEXT PRIMARY KEY,
+                    last_value INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
         self._ensure_user_columns()
@@ -259,6 +265,25 @@ class SQLiteStore:
             source=row["source"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    def next_verification_seq(self, day: str) -> int:
+        """Atomic per-day monotonic counter for session-ids (F2.3).
+
+        Uses SQLite's INSERT … ON CONFLICT … DO UPDATE … RETURNING to bump
+        the row in a single statement, holding the connection lock so
+        concurrent verifications don't race.
+        """
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                """
+                INSERT INTO verification_seq (day, last_value)
+                VALUES (?, 1)
+                ON CONFLICT(day) DO UPDATE SET last_value = last_value + 1
+                RETURNING last_value
+                """,
+                (day,),
+            ).fetchone()
+        return int(row["last_value"])
 
     def add_result(self, record: VerificationRecord) -> None:
         with self._lock, self._connection:

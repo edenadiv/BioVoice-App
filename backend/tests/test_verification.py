@@ -71,7 +71,8 @@ def test_session_id_format(verification_service, enrolled_user, detector):
 
     result = verification_service.verify(user_id=user_id, audio_bytes=wav)
 
-    assert re.match(r"^VRF-\d{4}-\d{4}-[A-Z0-9]{4}$", result.session_id), result.session_id
+    # F2.3 — VRF-YYYYMMDD-NNNNN with a 5-digit zero-padded daily counter.
+    assert re.match(r"^VRF-\d{8}-\d{5}$", result.session_id), result.session_id
 
 
 def test_stage_breakdown_populated(verification_service, enrolled_user, detector):
