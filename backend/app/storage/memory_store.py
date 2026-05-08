@@ -17,6 +17,10 @@ class MemoryStore:
         # F2.2 — login rate-limit state
         self._login_failures: list[tuple[str, str, datetime]] = []  # (user_id, ip, when)
         self._login_lockouts: dict[tuple[str, str], datetime] = {}
+        # F6.1 / F6.2 — admin surface
+        self._deleted_users: list[dict] = []
+        self._audit_log: list[dict] = []
+        self._next_audit_id: int = 1
 
     def put_speaker(self, record: SpeakerRecord) -> None:
         self._speakers[record.user_id] = record
@@ -105,4 +109,70 @@ class MemoryStore:
             if not (u == user_id and i == ip)
         ]
         self._login_lockouts.pop((user_id, ip), None)
+
+    # F6.1 — soft-delete -----------------------------------------------------
+
+    def soft_delete_speaker(self, user_id: str, *, deleted_by: str | None, deleted_at: datetime) -> bool:
+        record = self._speakers.pop(user_id, None)
+        if record is None:
+            return False
+        self._deleted_users.append(
+            {
+                "user_id": user_id,
+                "enrolled_at": record.enrolled_at.isoformat(),
+                "deleted_at": deleted_at.isoformat(),
+                "deleted_by": deleted_by,
+            }
+        )
+        # Clear any active sessions for the deleted user.
+        self._sessions = {
+            token: sess for token, sess in self._sessions.items() if sess.user_id != user_id
+        }
+        return True
+
+    def list_deleted_users(self) -> list[dict]:
+        return list(reversed(self._deleted_users))
+
+    # F6.2 — audit log -------------------------------------------------------
+
+    def add_audit_event(
+        self,
+        *,
+        action: str,
+        actor: str | None = None,
+        ip: str | None = None,
+        target: str | None = None,
+        metadata: dict | None = None,
+        when: datetime | None = None,
+    ) -> int:
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        ts = (when or _dt.now(_tz.utc)).isoformat()
+        event_id = self._next_audit_id
+        self._next_audit_id += 1
+        self._audit_log.append(
+            {
+                "event_id": event_id,
+                "occurred_at": ts,
+                "actor": actor,
+                "ip": ip,
+                "action": action,
+                "target": target,
+                "metadata": metadata,
+            }
+        )
+        return event_id
+
+    def list_audit_events(
+        self,
+        *,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        events = list(reversed(self._audit_log))
+        if since is not None:
+            since_iso = since.isoformat()
+            events = [e for e in events if e["occurred_at"] >= since_iso]
+        return events[:limit]
 

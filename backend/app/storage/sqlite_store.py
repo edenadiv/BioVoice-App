@@ -91,6 +91,37 @@ class SQLiteStore:
                     locked_until TEXT NOT NULL,
                     PRIMARY KEY (user_id, ip)
                 );
+
+                -- F6.1 — deleted users (soft delete). Original row is removed
+                -- from `users`; metadata + the embedding stay here so an
+                -- operator can audit who was removed and (with a separate
+                -- restore tool, post-Δ-1) re-enrol them by replaying the
+                -- embedding. Foreign-key cascade keeps the verification
+                -- history intact (nullable user_id on those rows).
+                CREATE TABLE IF NOT EXISTS deleted_users (
+                    user_id TEXT PRIMARY KEY,
+                    embedding_json TEXT NOT NULL,
+                    sample_embeddings_json TEXT NOT NULL DEFAULT '[]',
+                    enrolled_at TEXT NOT NULL,
+                    deleted_at TEXT NOT NULL,
+                    deleted_by TEXT
+                );
+
+                -- F6.2 — operator-visible audit trail. Every mutating action
+                -- (login, logout, enroll, verify, delete, threshold change)
+                -- writes one row. Append-only; never UPDATE / DELETE except
+                -- through an explicit retention job (post-Δ-1).
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    occurred_at TEXT NOT NULL,
+                    actor TEXT,           -- user_id or 'admin' or 'system'
+                    ip TEXT,
+                    action TEXT NOT NULL, -- 'login.success', 'user.delete', …
+                    target TEXT,          -- the resource the action ran against
+                    metadata_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS audit_log_occurred_at_idx
+                    ON audit_log (occurred_at);
                 """
             )
         self._ensure_user_columns()
@@ -518,3 +549,143 @@ class SQLiteStore:
                 "DELETE FROM login_lockouts WHERE user_id = ? AND ip = ?",
                 (user_id, ip),
             )
+
+    # F6.1 — speaker delete + restore-friendly soft delete -----------------
+
+    def soft_delete_speaker(self, user_id: str, *, deleted_by: str | None, deleted_at: datetime) -> bool:
+        """Move a row from `users` → `deleted_users`. Returns True iff the
+        user existed. Verification history rows are preserved."""
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                """
+                SELECT user_id, embedding_json, sample_embeddings_json, enrolled_at
+                FROM users
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            self._connection.execute(
+                """
+                INSERT INTO deleted_users
+                    (user_id, embedding_json, sample_embeddings_json, enrolled_at, deleted_at, deleted_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    embedding_json = excluded.embedding_json,
+                    sample_embeddings_json = excluded.sample_embeddings_json,
+                    enrolled_at = excluded.enrolled_at,
+                    deleted_at = excluded.deleted_at,
+                    deleted_by = excluded.deleted_by
+                """,
+                (
+                    row["user_id"],
+                    row["embedding_json"],
+                    row["sample_embeddings_json"],
+                    row["enrolled_at"],
+                    deleted_at.isoformat(),
+                    deleted_by,
+                ),
+            )
+            self._connection.execute(
+                "DELETE FROM sessions WHERE user_id = ?", (user_id,)
+            )
+            self._connection.execute(
+                "DELETE FROM users WHERE user_id = ?", (user_id,)
+            )
+            return True
+
+    def list_deleted_users(self) -> list[dict]:
+        rows = self._connection.execute(
+            """
+            SELECT user_id, enrolled_at, deleted_at, deleted_by
+            FROM deleted_users
+            ORDER BY deleted_at DESC
+            """
+        ).fetchall()
+        return [
+            {
+                "user_id": r["user_id"],
+                "enrolled_at": r["enrolled_at"],
+                "deleted_at": r["deleted_at"],
+                "deleted_by": r["deleted_by"],
+            }
+            for r in rows
+        ]
+
+    # F6.2 — audit log ------------------------------------------------------
+
+    def add_audit_event(
+        self,
+        *,
+        action: str,
+        actor: str | None = None,
+        ip: str | None = None,
+        target: str | None = None,
+        metadata: dict | None = None,
+        when: datetime | None = None,
+    ) -> int:
+        """Append one row to audit_log; returns the new event_id. Callers
+        write actions like 'login.success', 'user.delete', 'threshold.set'.
+        `metadata` is JSON-serialised for free-form context (request id,
+        old/new values, etc.)."""
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        ts = (when or _dt.now(_tz.utc)).isoformat()
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO audit_log (occurred_at, actor, ip, action, target, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    actor,
+                    ip,
+                    action,
+                    target,
+                    json.dumps(metadata) if metadata else None,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def list_audit_events(
+        self,
+        *,
+        since: datetime | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        if since is not None:
+            rows = self._connection.execute(
+                """
+                SELECT event_id, occurred_at, actor, ip, action, target, metadata_json
+                FROM audit_log
+                WHERE occurred_at >= ?
+                ORDER BY event_id DESC
+                LIMIT ?
+                """,
+                (since.isoformat(), limit),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """
+                SELECT event_id, occurred_at, actor, ip, action, target, metadata_json
+                FROM audit_log
+                ORDER BY event_id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "event_id": int(r["event_id"]),
+                "occurred_at": r["occurred_at"],
+                "actor": r["actor"],
+                "ip": r["ip"],
+                "action": r["action"],
+                "target": r["target"],
+                "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else None,
+            }
+            for r in rows
+        ]

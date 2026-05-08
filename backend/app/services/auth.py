@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.models import SessionRecord
 from app.schemas import AuthSessionResponse, SessionResponse
+from app.services.audit import AuditService
 from app.services.rate_limit import LoginRateLimiter
 from app.services.verification import VerificationService
 
@@ -28,6 +29,7 @@ class AuthService:
         *,
         idle_seconds: int = 30 * 60,
         rate_limiter: LoginRateLimiter | None = None,
+        audit_service: AuditService | None = None,
     ):
         """`idle_seconds` is the rolling expiry window. Defaults to 30 minutes;
         production passes `Settings.session_idle_seconds` from `core/config.py`.
@@ -40,6 +42,8 @@ class AuthService:
         self.verification_service = verification_service
         self.idle_seconds = idle_seconds
         self.rate_limiter = rate_limiter
+        # F6.2 — optional audit hook. None in unit tests that don't care.
+        self.audit_service = audit_service
 
     # F2.1 — Session lifecycle
     # =========================================================================
@@ -73,11 +77,13 @@ class AuthService:
         if verification.decision != "ACCEPT":
             if self.rate_limiter is not None:
                 self.rate_limiter.record_failure(user_id, ip)
+            self._audit("login.fail", user_id=user_id, ip=ip, reason=verification.decision_reason)
             raise PermissionError("Voice authentication failed")
 
         # Successful login → reset the rate-limit counters for this pair.
         if self.rate_limiter is not None:
             self.rate_limiter.record_success(user_id, ip)
+        self._audit("login.success", user_id=user_id, ip=ip)
 
         now = datetime.now(timezone.utc)
         session = SessionRecord(
@@ -154,7 +160,21 @@ class AuthService:
         return self._to_response(rotated)
 
     def logout(self, session_token: str) -> None:
+        record = self.store.get_session(session_token)
         self.store.delete_session(session_token)
+        if record is not None:
+            self._audit("logout", user_id=record.user_id)
+
+    def _audit(self, action: str, *, user_id: str, ip: str | None = None, **extra) -> None:
+        if self.audit_service is None:
+            return
+        self.audit_service.record(
+            action,
+            actor=user_id,
+            ip=ip,
+            target=user_id,
+            metadata=extra or None,
+        )
 
     def _to_response(self, record: SessionRecord) -> SessionResponse:
         return SessionResponse(
