@@ -1,4 +1,13 @@
-import type { ReferenceSample, Session, Speaker, SpoofGenerationResult, VerificationResult } from "../types";
+import type {
+  AnalysisDetails,
+  ReferenceSample,
+  Session,
+  Speaker,
+  SpoofDecision,
+  SpoofGenerationResult,
+  SpoofTestResult,
+  VerificationResult,
+} from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -102,14 +111,7 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
           totalMs: stage.total_ms,
         }
       : { loadMs: 0, resampleMs: 0, normalizeMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
-    analysisDetails: details
-      ? {
-          voiceNaturalness: details.voice_naturalness,
-          spectralConsistency: details.spectral_consistency,
-          temporalPatterns: details.temporal_patterns,
-          artifactDetection: details.artifact_detection,
-        }
-      : null,
+    analysisDetails: details ? toAnalysisDetails(details) : null,
     createdAt: response.created_at,
   };
 }
@@ -201,6 +203,39 @@ export async function getSession(sessionToken: string): Promise<Session> {
     },
   });
   return toSession(response);
+}
+
+type AvailabilityResponse = { available: boolean };
+
+export async function getAvailability(userId: string): Promise<boolean> {
+  const response = await request<AvailabilityResponse>(`/users/${encodeURIComponent(userId)}/availability`);
+  return response.available;
+}
+
+type SpoofTestResponse = {
+  deepfake_score: number;
+  decision: SpoofDecision;
+  analysis_details: AnalysisDetailsResponse;
+};
+
+export async function spoofTest(sessionToken: string, file: File): Promise<SpoofTestResult> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  const response = await postAuthorizedForm<SpoofTestResponse>("/me/spoof/test", formData, sessionToken);
+  return {
+    deepfakeScore: response.deepfake_score,
+    decision: response.decision,
+    analysisDetails: toAnalysisDetails(response.analysis_details),
+  };
+}
+
+function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
+  return {
+    voiceNaturalness: payload.voice_naturalness,
+    spectralConsistency: payload.spectral_consistency,
+    temporalPatterns: payload.temporal_patterns,
+    artifactDetection: payload.artifact_detection,
+  };
 }
 
 export async function getMyVerification(sessionToken: string, resultId: string): Promise<VerificationResult> {

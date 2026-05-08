@@ -61,3 +61,11 @@ export type SpoofGenerationResult = {
   text: string;
   language: string;
 };
+
+export type SpoofDecision = "FAKE" | "GENUINE";
+
+export type SpoofTestResult = {
+  deepfakeScore: number;
+  decision: SpoofDecision;
+  analysisDetails: AnalysisDetails;
+};

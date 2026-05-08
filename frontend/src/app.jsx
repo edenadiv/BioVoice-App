@@ -3,20 +3,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useMicrophone, useSyntheticAudio } from "./audio.jsx";
 import {
-  WelcomeScreen, EnrollScreen, ProcessingScreen, VerifyScreen, DeepfakeScreen, ExplainScreen,
+  WelcomeScreen, EnrollScreen, ProcessingScreen, VerifyScreen, DeepfakeScreen,
 } from "./screens.jsx";
 import { ConsoleScreen, SettingsPanel } from "./console.jsx";
 import { Sidebar, DeepfakeLab, UserSettingsPage, ProfilesPage } from "./more-screens.jsx";
 import { VerificationOverlay } from "./console-ext.jsx";
-
-const PROFILES = [
-  { id: 'TLV-OP-104', name: 'Eden Adiv',   initials: 'EA', color1: '#7ef0ff', color2: '#3da9fc' },
-  { id: 'TLV-OP-219', name: 'Idan Shavit', initials: 'IS', color1: '#bff4ff', color2: '#3da9fc' },
-  { id: 'TLV-OP-301', name: 'Yoav Zucker', initials: 'YZ', color1: '#7ef0ff', color2: '#1a3a6e' },
-  { id: 'TLV-OP-512', name: 'Maya Levi',   initials: 'ML', color1: '#6affc8', color2: '#3da9fc' },
-  { id: 'TLV-OP-688', name: 'Ori Cohen',   initials: 'OC', color1: '#ffd577', color2: '#3da9fc' },
-  { id: 'TLV-OP-771', name: 'Tal Bergman', initials: 'TB', color1: '#ff7aa8', color2: '#3da9fc' },
-];
+import { AppStateProvider, useAppState, useDerivedCounts, useProfiles } from "./lib/session";
 
 const DEFAULT_SETTINGS = {
   matchThr: 0.75, antiSpoofThr: 0.50, aggressive: true,
@@ -25,18 +17,25 @@ const DEFAULT_SETTINGS = {
   notifySound: true, notifyDesktop: true, notifyEmail: false,
 };
 
-function App() {
+const DEMO_ORDER = ['welcome', 'enroll', 'process_enroll', 'verify', 'deepfake'];
+const DEMO_DWELLS = { welcome: 6000, enroll: 5500, process_enroll: 5800, verify: 7000, deepfake: 7000 };
+
+function AppShell() {
   // mode = expert (default sidebar/multi-page) | live | self | auto (linear demo)
   const [mode, setMode] = useState('expert');
-  const [page, setPage] = useState('console');         // expert sidebar pages
-  const [screen, setScreen] = useState('console');     // legacy demo screens
-  const [name, setName] = useState('Eden');
-  const [verifyResult, setVerifyResult] = useState({ similarity: 0.913, dfScore: 0.97 });
+  const [page, setPage] = useState('console');
+  const [screen, setScreen] = useState('console');
+  const [name, setName] = useState('');
+  // E-17 will replace these mocked numbers with real verification responses;
+  // for now they only seed the overlay's existing visual props until that ships.
+  const [verifyResult, setVerifyResult] = useState({ similarity: 0.0, dfScore: 0.0 });
   const [overlayProfile, setOverlayProfile] = useState(null);
   const [soundOn, setSoundOn] = useState(false);
-  const [verifyCount, setVerifyCount] = useState(2147);
-  const [threatCount, setThreatCount] = useState(38);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  const profiles = useProfiles();
+  const { verifyCount, threatCount } = useDerivedCounts();
+  const { lastVerification } = useAppState();
 
   const mic = useMicrophone();
   const synth = useSyntheticAudio(true, { variant: 'human' });
@@ -49,15 +48,17 @@ function App() {
     else setScreen('welcome');
   }, [mode]);
 
-  // Auto-loop scheduler (auto mode)
+  // Auto-loop scheduler (auto mode) — Explain screen removed from rotation per Plan §3.
   useEffect(() => {
     if (mode !== 'auto') return;
-    const order = ['welcome', 'enroll', 'process_enroll', 'verify', 'deepfake', 'explain'];
-    const dwells = { welcome: 6000, enroll: 5500, process_enroll: 5800, verify: 7000, deepfake: 7000, explain: 8000 };
     let i = 0;
-    setScreen(order[0]);
-    const tick = () => { i = (i + 1) % order.length; setScreen(order[i]); tid = setTimeout(tick, dwells[order[i]]); };
-    let tid = setTimeout(tick, dwells[order[0]]);
+    setScreen(DEMO_ORDER[0]);
+    const tick = () => {
+      i = (i + 1) % DEMO_ORDER.length;
+      setScreen(DEMO_ORDER[i]);
+      tid = setTimeout(tick, DEMO_DWELLS[DEMO_ORDER[i]]);
+    };
+    let tid = setTimeout(tick, DEMO_DWELLS[DEMO_ORDER[0]]);
     return () => clearTimeout(tid);
   }, [mode]);
 
@@ -68,19 +69,11 @@ function App() {
   }, [mode, screen]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setVerifyCount(c => c + 1 + Math.floor(Math.random() * 2));
-      if (Math.random() < 0.18) setThreatCount(t => t + 1);
-    }, 4500);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
       if (mode === 'expert') {
-        if (k === 'v') runVerification(PROFILES[0]);
+        if (k === 'v' && profiles[0]) runVerification(profiles[0]);
         else if (k === '1') setPage('console');
         else if (k === '2') setPage('lab');
         else if (k === '3') setPage('profiles');
@@ -89,44 +82,50 @@ function App() {
       } else {
         if (k === 'escape') setScreen('welcome');
         else if (k === 'arrowright') {
-          const order = ['welcome', 'enroll', 'process_enroll', 'verify', 'deepfake', 'explain'];
-          const i = order.indexOf(screen);
-          if (i >= 0 && i < order.length - 1) setScreen(order[i + 1]);
+          const i = DEMO_ORDER.indexOf(screen);
+          if (i >= 0 && i < DEMO_ORDER.length - 1) setScreen(DEMO_ORDER[i + 1]);
         } else if (k === 'arrowleft') {
-          const order = ['welcome', 'enroll', 'process_enroll', 'verify', 'deepfake', 'explain'];
-          const i = order.indexOf(screen);
-          if (i > 0) setScreen(order[i - 1]);
+          const i = DEMO_ORDER.indexOf(screen);
+          if (i > 0) setScreen(DEMO_ORDER[i - 1]);
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, screen, page]);
+  }, [mode, screen, page, profiles]);
 
+  // Placeholder: E-17 replaces this with the real record + auth.login / verify flow.
+  // For now it only opens the overlay against whatever lastVerification is in context
+  // (initially null — overlay falls back to its own zero state).
   const runVerification = useCallback((profile) => {
     if (mode === 'expert') {
-      setVerifyResult({ similarity: 0.880 + Math.random() * 0.07, dfScore: 0.93 + Math.random() * 0.05 });
-      setOverlayProfile(profile || PROFILES[0]);
-      setVerifyCount(c => c + 1);
+      setOverlayProfile(profile);
+      if (lastVerification) {
+        setVerifyResult({
+          similarity: lastVerification.similarityScore,
+          dfScore: lastVerification.deepfakeScore,
+        });
+      } else {
+        setVerifyResult({ similarity: 0.0, dfScore: 0.0 });
+      }
       return;
     }
-    setName(profile?.name?.split(' ')[0] || 'Eden');
-    setVerifyResult({ similarity: 0.880 + Math.random() * 0.07, dfScore: 0.93 + Math.random() * 0.05 });
+    setName(profile?.name?.split(' ')[0] || profile?.userId || '');
     setScreen('process_verify');
     setTimeout(() => setScreen('verify'), 4400);
-  }, [mode]);
+  }, [mode, lastVerification]);
 
   // Expert mode: page-based
   if (mode === 'expert') {
     let body;
     switch (page) {
-      case 'lab':      body = <DeepfakeLab audio={audio} profiles={PROFILES}/>; break;
-      case 'profiles': body = <ProfilesPage profiles={PROFILES} audio={audio}/>; break;
+      case 'lab':      body = <DeepfakeLab audio={audio} profiles={profiles}/>; break;
+      case 'profiles': body = <ProfilesPage profiles={profiles} audio={audio}/>; break;
       case 'settings': body = <UserSettingsPage settings={settings} setSettings={setSettings}/>; break;
       default:
         body = <ConsoleScreen
           audio={audio} micState={mic.state} micStart={startMic}
-          profiles={PROFILES} verifyCount={verifyCount} threatCount={threatCount}
+          profiles={profiles} verifyCount={verifyCount} threatCount={threatCount}
           onVerify={runVerification}
           onEnroll={() => setPage('profiles')}
           onShowDetails={() => setPage('lab')}
@@ -158,11 +157,14 @@ function App() {
     case 'process_verify':
       body = <ProcessingScreen mode="verify" audio={audio} onComplete={() => setScreen('verify')}/>; break;
     case 'verify':
-      body = <VerifyScreen name={name} similarity={verifyResult.similarity} dfScore={verifyResult.dfScore} samples={audio.samples} onNext={() => setScreen('deepfake')}/>; break;
+      body = <VerifyScreen
+        name={name}
+        similarity={lastVerification?.similarityScore ?? verifyResult.similarity}
+        dfScore={lastVerification?.deepfakeScore ?? verifyResult.dfScore}
+        samples={audio.samples}
+        onNext={() => setScreen('deepfake')}/>; break;
     case 'deepfake':
-      body = <DeepfakeScreen audio={audio} onNext={() => setScreen('explain')}/>; break;
-    case 'explain':
-      body = <ExplainScreen name={name} onRestart={() => setScreen('welcome')}/>; break;
+      body = <DeepfakeScreen audio={audio} onNext={() => setScreen('welcome')}/>; break;
     default:
       body = <WelcomeScreen onStart={() => setScreen('enroll')} micState={mic.state} audio={audio}/>;
   }
@@ -195,7 +197,7 @@ function LiveNav({ screen, setScreen }) {
   const order = [
     { id: 'welcome', label: 'Attract' }, { id: 'enroll', label: 'Enroll' },
     { id: 'process_enroll', label: 'Process' }, { id: 'verify', label: 'Verify' },
-    { id: 'deepfake', label: 'Deepfake' }, { id: 'explain', label: 'Explain' },
+    { id: 'deepfake', label: 'Deepfake' },
   ];
   const idx = order.findIndex(o => o.id === screen);
   const prev = idx > 0 ? order[idx - 1].id : null;
@@ -229,4 +231,10 @@ function LiveNav({ screen, setScreen }) {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AppStateProvider>
+      <AppShell />
+    </AppStateProvider>
+  );
+}
