@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { VoiceOrb, Waveform, MelSpectrogram, LivePulse } from "./visuals.jsx";
 import { AmbientField, EmbeddingConstellation, LiveFeatures } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
+import { useAppState } from "./lib/session";
 
 // ============================================================================
 // useCounter — animated count-up
@@ -227,20 +228,28 @@ function Toggle({ label, value, onChange }) {
 function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll, onShowDetails, threatCount, verifyCount }) {
   const [selectedProfile, setSelectedProfile] = useState(profiles[0]?.id);
   const [hoverProfile, setHoverProfile] = useState(null);
-  const [activity, setActivity] = useState(() => seedActivity());
   const [now, setNow] = useState(Date.now());
 
-  // Tick clock + occasionally inject new activity for liveness
+  // Tick clock for "elapsed" rendering on activity rows.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Derive the live event feed from real /results polling (E-16).
+  const { results } = useAppState();
+  const activity = useMemo(() => results.slice(0, 8).map(resultToActivity), [results]);
+
+  // Keep the selected profile in sync with the live profiles list (E-15).
   useEffect(() => {
-    const id = setInterval(() => {
-      setActivity(a => [makeRandomActivity(), ...a].slice(0, 8));
-    }, 6500);
-    return () => clearInterval(id);
-  }, []);
+    if (profiles.length === 0) {
+      setSelectedProfile(undefined);
+      return;
+    }
+    if (!selectedProfile || !profiles.some((p) => p.id === selectedProfile)) {
+      setSelectedProfile(profiles[0].id);
+    }
+  }, [profiles, selectedProfile]);
 
   const acceptedCount = useCounter(verifyCount, 1400, [verifyCount]);
   const blockedCount = useCounter(threatCount, 1400, [threatCount]);
@@ -457,9 +466,17 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <LivePulse size={8}/>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-              {activity.map((a, i) => (
-                <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
-              ))}
+              {activity.length === 0 ? (
+                <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 12, lineHeight: 1.6 }}>
+                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
+                  Verifications appear here as they happen.<br/>
+                  Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enrol your first speaker.
+                </div>
+              ) : (
+                activity.map((a, i) => (
+                  <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
+                ))
+              )}
             </div>
           </div>
 
@@ -557,28 +574,21 @@ function ActivityRow({ id, kind, name, score, ago, fresh, now, ts }) {
   );
 }
 
-function makeRandomActivity() {
-  const r = Math.random();
-  const names = ['Eden Adiv', 'Idan Shavit', 'Yoav Zucker', 'Maya Levi', 'Ori Cohen', 'Tal Bergman', 'Noa Friedman', 'Shai Mor'];
-  const name = names[Math.floor(Math.random() * names.length)];
-  if (r < 0.55) return { id: Math.random(), kind: 'accept', name, score: '0.' + (88 + Math.floor(Math.random()*10)), ts: Date.now() };
-  if (r < 0.7)  return { id: Math.random(), kind: 'reject', name, score: '0.' + (40 + Math.floor(Math.random()*30)), ts: Date.now() };
-  if (r < 0.85) return { id: Math.random(), kind: 'deepfake', name: name + ' · cloned', score: '0.' + (10 + Math.floor(Math.random()*20)), ts: Date.now() };
-  return { id: Math.random(), kind: 'enroll', name, score: 'new', ts: Date.now() };
-}
-
-function seedActivity() {
-  const now = Date.now();
-  return [
-    { id: 1, kind: 'accept', name: 'Eden Adiv',    score: '0.913', ts: now - 12_000 },
-    { id: 2, kind: 'deepfake', name: 'Yoav Z. · cloned', score: '0.18', ts: now - 38_000 },
-    { id: 3, kind: 'accept', name: 'Idan Shavit',  score: '0.892', ts: now - 71_000 },
-    { id: 4, kind: 'accept', name: 'Maya Levi',    score: '0.876', ts: now - 124_000 },
-    { id: 5, kind: 'reject', name: 'Unknown speaker', score: '0.612', ts: now - 188_000 },
-    { id: 6, kind: 'enroll', name: 'Tal Bergman',  score: 'new',   ts: now - 240_000 },
-    { id: 7, kind: 'accept', name: 'Ori Cohen',    score: '0.901', ts: now - 312_000 },
-    { id: 8, kind: 'deepfake', name: 'Eden A. · cloned', score: '0.22', ts: now - 401_000 },
-  ];
+// Map a live VerificationResult into the activity-row shape the renderer expects.
+// Decision → kind: ACCEPT → 'accept', REJECT → 'reject', DEEPFAKE → 'deepfake'.
+// `enroll` activity kind is intentionally not surfaced — /results is verify-only.
+function resultToActivity(result) {
+  const kind =
+    result.decision === 'ACCEPT' ? 'accept' :
+    result.decision === 'DEEPFAKE' ? 'deepfake' : 'reject';
+  const scoreNum = result.decision === 'DEEPFAKE' ? result.deepfakeScore : result.similarityScore;
+  return {
+    id: result.resultId,
+    kind,
+    name: result.userId,
+    score: scoreNum.toFixed(3).replace(/^0?\./, '0.'),
+    ts: new Date(result.createdAt).getTime(),
+  };
 }
 
 export {
