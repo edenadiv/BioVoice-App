@@ -15,6 +15,14 @@ class SpeakerResponse(BaseModel):
     sample_count: int
 
 
+class ReferenceSampleResponse(BaseModel):
+    sample_id: str
+    user_id: str
+    original_filename: str
+    source: str
+    created_at: datetime
+
+
 class EnrollmentResponse(BaseModel):
     user_id: str
     status: str

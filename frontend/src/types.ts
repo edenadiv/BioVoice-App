@@ -23,3 +23,19 @@ export type Session = {
   userId: string;
   createdAt: string;
 };
+
+export type ReferenceSample = {
+  sampleId: string;
+  userId: string;
+  originalFilename: string;
+  source: string;
+  createdAt: string;
+};
+
+export type SpoofGenerationResult = {
+  audioUrl: string;
+  fileName: string;
+  sourceDescription: string;
+  text: string;
+  language: string;
+};

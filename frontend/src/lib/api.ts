@@ -1,4 +1,4 @@
-import type { Session, Speaker, VerificationResult } from "../types";
+import type { ReferenceSample, Session, Speaker, SpoofGenerationResult, VerificationResult } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -30,6 +30,14 @@ type EnrollmentResponse = {
 type SessionResponse = {
   session_token: string;
   user_id: string;
+  created_at: string;
+};
+
+type ReferenceSampleResponse = {
+  sample_id: string;
+  user_id: string;
+  original_filename: string;
+  source: string;
   created_at: string;
 };
 
@@ -160,4 +168,66 @@ export async function logoutSession(sessionToken: string): Promise<void> {
       Authorization: `Bearer ${sessionToken}`,
     },
   });
+}
+
+export async function listReferenceSamples(sessionToken: string): Promise<ReferenceSample[]> {
+  const response = await request<ReferenceSampleResponse[]>("/me/reference-samples", {
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
+  });
+  return response.map((item) => ({
+    sampleId: item.sample_id,
+    userId: item.user_id,
+    originalFilename: item.original_filename,
+    source: item.source,
+    createdAt: item.created_at,
+  }));
+}
+
+function parseFileName(contentDisposition: string | null): string {
+  const match = contentDisposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? "spoof.wav";
+}
+
+export async function generateSpoofSample(
+  sessionToken: string,
+  payload: {
+    text: string;
+    language: string;
+    referenceSampleId?: string;
+    file?: File | null;
+  },
+): Promise<SpoofGenerationResult> {
+  const formData = new FormData();
+  formData.append("text", payload.text);
+  formData.append("language", payload.language);
+  if (payload.referenceSampleId) {
+    formData.append("reference_sample_id", payload.referenceSampleId);
+  }
+  if (payload.file) {
+    formData.append("audio", payload.file);
+  }
+
+  const response = await fetch(`${API_BASE}/me/spoof`, {
+    method: "POST",
+    body: formData,
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed with status ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  return {
+    audioUrl: URL.createObjectURL(blob),
+    fileName: parseFileName(response.headers.get("Content-Disposition")),
+    sourceDescription: response.headers.get("X-Spoof-Source") ?? "Reference sample",
+    text: payload.text,
+    language: payload.language,
+  };
 }

@@ -49,6 +49,23 @@ class AudioService:
         waveform = self._normalize([sample / 32768.0 for sample in samples])
         return AudioPayload(waveform=waveform, sample_rate=self.target_sample_rate)
 
+    def encode_wav(self, waveform: list[float], sample_rate: int | None = None) -> bytes:
+        target_rate = sample_rate or self.target_sample_rate
+        pcm = array(
+            "h",
+            (
+                int(max(-1.0, min(1.0, sample)) * 32767)
+                for sample in waveform
+            ),
+        )
+        buffer = BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(target_rate)
+            handle.writeframes(pcm.tobytes())
+        return buffer.getvalue()
+
     def _resample(self, samples: array, source_rate: int, target_rate: int) -> array:
         if len(samples) < 2 or source_rate == target_rate:
             return samples

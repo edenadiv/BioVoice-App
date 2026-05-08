@@ -14,6 +14,11 @@ class Settings:
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
+    reference_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
+    generated_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"
+    xtts_model_path: Path = Path(__file__).resolve().parents[3] / "XTTS-v2"
+    xtts_default_language: str = "en"
+    xtts_output_sample_rate: int = 24000
 
 
 settings = Settings()

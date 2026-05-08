@@ -22,6 +22,14 @@ class VerificationStore(Protocol):
 
     def list_users(self) -> list[SpeakerRecord]: ...
 
+    def save_reference_sample(
+        self,
+        user_id: str,
+        audio_bytes: bytes,
+        original_filename: str,
+        source: str,
+    ) -> None: ...
+
     def add_result(self, record: VerificationRecord) -> None: ...
 
     def list_results(self) -> list[VerificationRecord]: ...
@@ -82,6 +90,12 @@ class VerificationService:
             )
 
         self.store.put_speaker(record)
+        self.store.save_reference_sample(
+            user_id=user_id,
+            audio_bytes=audio_bytes,
+            original_filename=filename or f"{user_id}-enrollment.wav",
+            source="enrollment",
+        )
         remaining_samples = max(self.min_enrollment_samples - record.sample_count, 0)
         if remaining_samples > 0:
             message = (

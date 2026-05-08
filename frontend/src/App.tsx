@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   enrollSpeaker,
   enrollAuthenticatedSpeaker,
+  generateSpoofSample,
   getSession,
+  listReferenceSamples,
   listResults,
   listSpeakers,
   loginWithVoice,
@@ -13,8 +15,9 @@ import { AuthRecordingForm } from "./components/AuthRecordingForm";
 import { Panel } from "./components/Panel";
 import { ResultCard } from "./components/ResultCard";
 import { SimilarityInsights } from "./components/SimilarityInsights";
+import { SpoofStudio } from "./components/SpoofStudio";
 import { VerificationHistory } from "./components/VerificationHistory";
-import type { Session, VerificationResult, Speaker } from "./types";
+import type { ReferenceSample, Session, Speaker, SpoofGenerationResult, VerificationResult } from "./types";
 
 type Screen = "home" | "register" | "login" | "workspace";
 
@@ -27,12 +30,15 @@ function App() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>("home");
-  const [busyFlow, setBusyFlow] = useState<"register" | "login" | "workspace-enroll" | "workspace-verify" | null>(null);
+  const [busyFlow, setBusyFlow] = useState<"register" | "login" | "workspace-enroll" | "workspace-verify" | "workspace-spoof" | null>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [registerMessage, setRegisterMessage] = useState<string | null>(null);
   const [loginMessage, setLoginMessage] = useState<string | null>(null);
   const [workspaceMessage, setWorkspaceMessage] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [referenceSamples, setReferenceSamples] = useState<ReferenceSample[]>([]);
+  const [spoofMessage, setSpoofMessage] = useState<string | null>(null);
+  const [spoofResult, setSpoofResult] = useState<SpoofGenerationResult | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -78,6 +84,41 @@ function App() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadReferenceSamples() {
+      if (!session) {
+        setReferenceSamples([]);
+        return;
+      }
+
+      try {
+        const nextSamples = await listReferenceSamples(session.sessionToken);
+        if (alive) {
+          setReferenceSamples(nextSamples);
+        }
+      } catch (err) {
+        if (alive) {
+          setError(err instanceof Error ? err.message : "Unable to load saved reference samples");
+        }
+      }
+    }
+
+    void loadReferenceSamples();
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    return () => {
+      if (spoofResult?.audioUrl) {
+        URL.revokeObjectURL(spoofResult.audioUrl);
+      }
+    };
+  }, [spoofResult]);
 
   const readySpeakers = useMemo(
     () => speakers.filter((speaker) => speaker.sampleCount >= requiredEnrollmentSamples),
@@ -161,6 +202,7 @@ function App() {
       }
       const message = await enrollAuthenticatedSpeaker(session.sessionToken, payload.file);
       await refreshData();
+      setReferenceSamples(await listReferenceSamples(session.sessionToken));
       setWorkspaceMessage(message);
       return message;
     } finally {
@@ -183,6 +225,31 @@ function App() {
     }
   }
 
+  async function handleGenerateSpoof(payload: {
+    text: string;
+    language: string;
+    referenceSampleId?: string;
+    file?: File | null;
+  }) {
+    setBusyFlow("workspace-spoof");
+    setError(null);
+    try {
+      if (!session) {
+        throw new Error("No active session. Please log in again.");
+      }
+      const nextResult = await generateSpoofSample(session.sessionToken, payload);
+      setSpoofResult((current) => {
+        if (current?.audioUrl) {
+          URL.revokeObjectURL(current.audioUrl);
+        }
+        return nextResult;
+      });
+      setSpoofMessage(`Spoof sample generated from ${nextResult.sourceDescription.toLowerCase()}.`);
+    } finally {
+      setBusyFlow(null);
+    }
+  }
+
   async function resetToHome() {
     if (session) {
       try {
@@ -198,6 +265,14 @@ function App() {
     setRegisterMessage(null);
     setLoginMessage(null);
     setWorkspaceMessage(null);
+    setReferenceSamples([]);
+    setSpoofMessage(null);
+    setSpoofResult((current) => {
+      if (current?.audioUrl) {
+        URL.revokeObjectURL(current.audioUrl);
+      }
+      return null;
+    });
   }
 
   return (
@@ -419,6 +494,15 @@ function App() {
                 "Backend runs similarity and deepfake checks",
                 "Review the latest result cards below",
               ]}
+            />
+
+            <SpoofStudio
+              userId={activeUserId}
+              samples={referenceSamples}
+              onSubmit={handleGenerateSpoof}
+              busy={busyFlow === "workspace-spoof"}
+              statusMessage={spoofMessage}
+              result={spoofResult}
             />
 
             <Panel title="Current profile" subtitle="Authenticated user status and enrollment depth.">

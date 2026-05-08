@@ -7,14 +7,17 @@ import json
 from pathlib import Path
 import sqlite3
 from threading import Lock
+from uuid import uuid4
 
-from app.models import SessionRecord, SpeakerRecord, VerificationRecord
+from app.models import ReferenceSampleRecord, SessionRecord, SpeakerRecord, VerificationRecord
 
 
 class SQLiteStore:
-    def __init__(self, database_path: Path):
+    def __init__(self, database_path: Path, reference_samples_path: Path):
         self.database_path = Path(database_path)
+        self.reference_samples_path = Path(reference_samples_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.reference_samples_path.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
         self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -49,6 +52,16 @@ class SQLiteStore:
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_token TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS reference_samples (
+                    sample_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    original_filename TEXT NOT NULL,
+                    source TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 );
@@ -159,6 +172,93 @@ class SQLiteStore:
             )
             for row in cursor.fetchall()
         ]
+
+    def save_reference_sample(
+        self,
+        user_id: str,
+        audio_bytes: bytes,
+        original_filename: str,
+        source: str,
+    ) -> ReferenceSampleRecord:
+        sample_id = str(uuid4())
+        suffix = Path(original_filename).suffix or ".wav"
+        user_directory = self.reference_samples_path / user_id
+        user_directory.mkdir(parents=True, exist_ok=True)
+        file_path = user_directory / f"{sample_id}{suffix}"
+        file_path.write_bytes(audio_bytes)
+        record = ReferenceSampleRecord(
+            sample_id=sample_id,
+            user_id=user_id,
+            file_path=str(file_path),
+            original_filename=original_filename,
+            source=source,
+        )
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO reference_samples (
+                    sample_id,
+                    user_id,
+                    file_path,
+                    original_filename,
+                    source,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.sample_id,
+                    record.user_id,
+                    record.file_path,
+                    record.original_filename,
+                    record.source,
+                    record.created_at.isoformat(),
+                ),
+            )
+        return record
+
+    def list_reference_samples(self, user_id: str) -> list[ReferenceSampleRecord]:
+        cursor = self._connection.execute(
+            """
+            SELECT sample_id, user_id, file_path, original_filename, source, created_at
+            FROM reference_samples
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            """,
+            (user_id,),
+        )
+        return [
+            ReferenceSampleRecord(
+                sample_id=row["sample_id"],
+                user_id=row["user_id"],
+                file_path=row["file_path"],
+                original_filename=row["original_filename"],
+                source=row["source"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def get_reference_sample(self, user_id: str, sample_id: str) -> ReferenceSampleRecord | None:
+        cursor = self._connection.execute(
+            """
+            SELECT sample_id, user_id, file_path, original_filename, source, created_at
+            FROM reference_samples
+            WHERE user_id = ? AND sample_id = ?
+            """,
+            (user_id, sample_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return ReferenceSampleRecord(
+            sample_id=row["sample_id"],
+            user_id=row["user_id"],
+            file_path=row["file_path"],
+            original_filename=row["original_filename"],
+            source=row["source"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
 
     def add_result(self, record: VerificationRecord) -> None:
         with self._lock, self._connection:
