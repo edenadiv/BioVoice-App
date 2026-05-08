@@ -172,6 +172,239 @@ Run `uvicorn app.main:app --reload` in `backend/` and `npm run dev` in `frontend
 
 ## 11. Open questions
 
-- [ ] LAN-IP CORS for phone demos: do we want a `CORS_ORIGINS` env-var override now, or post-milestone?
+- [ ] LAN-IP CORS for phone demos: do we want a `CORS_ORIGINS` env-var override now, or post-milestone? *(scheduled for E2.2)*
 - [ ] Should the activity feed include enrollments, or stay verifications-only? (Currently /results is verify-only.)
 - [ ] Will Idan rejoin? If yes, he picks up the LAN-CORS env override + extra QA pass.
+
+---
+
+## 12. Forward execution (post wire-live milestone)
+
+> **Status legend:** ⬜ pending · 🟡 in progress · ✅ done · ⛔ blocked
+> Each step lists concrete sub-actions and a verification block. Verification = the artifact or command that proves the step landed correctly.
+
+### 12.0 Decisions in flight (defaults locked unless overridden)
+
+- **Merge order:** sequential, in the order listed in 12.E1.1. Batching is riskier; one bad PR poisons the rest.
+- **XTTS approach:** Option 1 (real install + model weights) **and** Option 2 (bundled fallback WAV). Belt-and-braces.
+- **Demo seeding:** off by default; behind `BIOVOICE_SEED_DEMO=1` env var. Honest empty state for normal use; populated for client visits only.
+- **Research-paper format:** Markdown drafts in `docs/paper/`, converted to LaTeX at the end.
+- **Yoav availability:** Eden continues solo through E2; Yoav absorbs E4 backlog if he returns.
+
+A "Decisions to confirm" checklist sits at §12.5 — Eden should explicitly OK before E2.1 begins, defaults applied otherwise.
+
+---
+
+### 12.E1 — Land the stack & verify (target: today) ⬜
+
+#### 12.E1.1 Sequential merge of the 6 PRs
+
+**Sub-actions** (in order; each merge syncs `main` before the next):
+
+1. Open `pull/new/feat/yoav-backend-completion` → review → squash & merge.
+2. `git fetch origin --prune && git checkout main && git pull --ff-only`.
+3. Merge `feat/eden-profiles-enroll` → sync.
+4. Merge `feat/eden-yoav-result-screens` → sync.
+5. Merge `feat/yoav-deepfake-lab` → sync.
+6. Merge `feat/yoav-enroll-screen` → sync.
+7. Merge `feat/yoav-processing-and-polish` → sync.
+8. Delete each merged topic branch locally + on origin.
+
+**Verification**
+
+- After every merge: `cd backend && .venv/bin/python -c "from app.main import app; print(len(app.routes))"` returns ≥ 16.
+- After every merge: `cd backend && .venv/bin/pytest tests/ -q` → 26 passed.
+- After every merge: `cd frontend && npm run build` → green.
+- After every merge: headless render check (`node /tmp/capture_errors.js`) → zero `pageerror`.
+- After step 7: `git log --oneline -10` shows all six feat-merge commits in `main`.
+
+#### 12.E1.2 Manual QA protocol (real-mic, two-user)
+
+The 12-step protocol from §9, executed against `localhost` with both servers up.
+
+**Sub-actions**
+
+1. Start backend: `cd backend && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+2. Start frontend: `cd frontend && npm run dev -- --host 0.0.0.0 --port 5173`.
+3. Console empty-state: counters `0`/`0`, "NO ACTIVITY YET" nudge.
+4. Profiles → "+ ENROLL NEW" → `eden_test` → 3 × 4 s samples → card shows `sampleCount: 3`.
+5. Console → pick `eden_test` → press `V` → speak ~3 s → overlay phase 3 with similarity ≥ 0.75, dfScore ≥ 0.5, decision = ACCEPT, real `stageBreakdown.totalMs`, real `sessionId`.
+6. Enrol `bob_test`. While `eden_test` is logged in, click `bob_test` → verify with `eden_test`'s voice → REJECT with `decisionReason: 'mismatch'`.
+7. DeepfakeLab → Generate (likely 503 until E2.1) → Test Detection on any uploaded WAV.
+8. Activity feed shows 3 events; counters reflect real ACCEPT/DEEPFAKE counts.
+9. Refresh browser → counters persist (from `/results`).
+10. Devtools Network: `/me/verify` p95 < 2 s over 10 runs.
+11. `grep -nE "Math\.random\(\)" frontend/src/*.jsx` only matches ambient/visual jitter.
+12. Devtools console: clean across every screen.
+
+**Verification**
+
+- Every step green, OR one issue filed per defect.
+- Update §6 Phase D status: 🟡 → ✅ once every step passes.
+
+---
+
+### 12.E2 — Demo readiness (target: 2–3 days post-E1) ⬜
+
+#### 12.E2.1 Re-enable XTTS for spoof generation
+
+`POST /me/spoof` returns 503 today. The DeepfakeLab is the marquee demo screen.
+
+**Sub-actions**
+
+1. Add `backend/scripts/setup_xtts.sh` — downloads XTTS-v2 weights into `XTTS-v2/` (matches `core/config.py:xtts_model_path`).
+2. Update `backend/README.md` with `bash scripts/setup_xtts.sh && .venv/bin/pip install 'TTS>=0.22,<0.23'`.
+3. Add `XTTS-v2/` to root `.gitignore`.
+4. Bundle `backend/data/fallback_spoof.wav` (~50 KB committed). Add `BIOVOICE_FALLBACK_SPOOF=1` env var.
+5. Update `services/spoof.py` to honour the env var when XTTS deps are missing.
+6. Pytest in `backend/tests/test_spoof.py` for the fallback path.
+
+**Verification**
+
+- After `setup_xtts.sh`: `curl -F text="hello" -F language=en -H "Authorization: Bearer ${TOKEN}" http://127.0.0.1:8000/me/spoof -o /tmp/out.wav` → 200 + non-empty WAV.
+- DeepfakeLab "Forge & test attack" produces audible speech; "Test Detection" returns `decision: 'FAKE'`.
+- Without XTTS + `BIOVOICE_FALLBACK_SPOOF=1`: same endpoint returns the bundled fallback.
+- `pytest backend/tests/test_spoof.py` → green.
+
+#### 12.E2.2 LAN-IP CORS override
+
+**Sub-actions**
+
+1. Edit `backend/app/core/config.py` — read `CORS_ORIGINS` (comma-separated) from env, fallback to `["http://localhost:5173"]`.
+2. Document in `backend/README.md`.
+3. Pytest covering env-var → settings flow.
+4. Append §11 follow-up note: post-demo, replace env-var with config-file or operator-settings UI.
+
+**Verification**
+
+- Start backend with `CORS_ORIGINS=http://localhost:5173,http://10.0.0.10:5173`.
+- Phone @ `http://10.0.0.10:5173` loads, devtools Network shows `Access-Control-Allow-Origin` matches origin, counters render.
+
+#### 12.E2.3 Demo data seeding (env-gated)
+
+**Sub-actions**
+
+1. Add `backend/scripts/seed_demo.py` — enrols two bundled WAVs (`backend/data/demo/alice.wav`, `bob.wav`) idempotently.
+2. Wire into `backend/app/main.py` startup if `BIOVOICE_SEED_DEMO=1` and store is empty.
+3. Bundle the two ~3 s 16 kHz WAVs (~100 KB each).
+4. Document in `backend/README.md`.
+
+**Verification**
+
+- `BIOVOICE_SEED_DEMO=1` against empty SQLite → `/users` returns 2 entries with `sampleCount: 3`.
+- Restart without env var → still 2 entries (idempotent).
+- Clear DB, restart without env → empty list (no surprise mock data).
+
+#### 12.E2.4 Latency probe + paper evidence
+
+**Sub-actions**
+
+1. Run `cd backend && .venv/bin/python scripts/bench_verify.py --user alice_demo --token <token> --wav backend/data/demo/alice.wav --runs 50`.
+2. Capture p50, p95, max, per-stage means.
+3. Append numbers to §8 risks table under the "< 2 s budget" row.
+
+**Verification**
+
+- p95 < 2000 ms.
+- Numbers committed to §8.
+
+---
+
+### 12.E3 — Research-paper evidence (target: 1 day after E2) ⬜
+
+Drafts in Markdown under `docs/paper/`; LaTeX conversion is the deliverable after this plan.
+
+#### 12.E3.1 `docs/paper/performance.md`
+- Embed E2.4 bench output (p50/p95/max + stage_breakdown).
+- Note cold-start penalty (first verify after server boot).
+
+**Verification:** file exists, numbers reference the actual `bench_verify.py` output committed in E2.4.
+
+#### 12.E3.2 `docs/paper/decision_logic.md`
+- Pull from `services/verification.py:_decide` (SDD §2.5 alignment).
+- Reference the 12 verification pytests as evidence.
+
+**Verification:** every claim has a code reference (`services/verification.py:NN`).
+
+#### 12.E3.3 `docs/paper/analysis_details.md`
+- Quote the docstring of `services/detector.py:analysis_details_from_score`.
+- Document the seeded RNG construction (`hashlib.sha256(audio_hash)[:4] → random.Random`) and the ±0.02 jitter bound.
+- Note future work: replace with native AASIST sub-classifier outputs.
+
+**Verification:** transparent about the derivation. Future work has concrete file path + function name.
+
+#### 12.E3.4 `docs/paper/testing.md`
+- Enumerate all 26 pytests grouped (verification / users / spoof / sub-score derivation).
+- Reference `MIGRATION_POSTMORTEM.md` for the "build green ≠ app works" + screenshot rules.
+- Cite `bench_verify.py` for latency methodology.
+
+**Verification:** all 26 test functions enumerated, group counts correct.
+
+#### 12.E3.5 `docs/paper/biovoice-paper.md`
+- Stitch the four appendices into a single paper draft.
+- Cite SDD-6 (`docs/SDD-6 Riva.pdf`) for architecture diagrams.
+- Ship a PR; co-author review.
+
+**Verification:** single Markdown rendering cleanly; reviewers approve.
+
+---
+
+### 12.E4 — Hardening backlog (post-demo) ⬜
+
+Not blocking the milestone. Schedule after the client demo.
+
+| Item | Why | Trigger | Effort |
+|---|---|---|---|
+| Session expiry + refresh | `auth_service.get_session` never expires (`backend/app/services/auth.py`) | Security review | 2 h |
+| Rate-limit `/auth/login` | Brute-force surface; 5 attempts / 5 min / `user_id` | Security review | 2 h |
+| Stable session-id | `result_id[-4:]` collides; switch to monotonic counter + date prefix | First post-demo collision | 1 h |
+| AudioWorklet replaces ScriptProcessor | `lib/audio.ts` uses deprecated node | When deprecation forces it | 3 h |
+| Loading skeletons | Profiles/Console flashes empty-state on first fetch | UX polish | 1 h |
+| Strip dead props | `audio` prop in `DeepfakeLab` unused after Y-16; `seedRand` import in `screens.jsx` post-Y-14 | Code review | 30 min |
+| Mobile responsive | 1920×1080 stage scales but chrome doesn't reflow on phones | Mobile demo request | 4 h |
+| Real AASIST sub-classifier | Replace seeded jitter with native model outputs | Model team produces it | TBD |
+
+Each item ships its own PR with a targeted test, screenshot (UI), or curl/pytest snippet (backend).
+
+---
+
+### 12.E5 — Out of scope, on the radar ⬜
+
+Tracked here so they don't get re-asked.
+
+- **TCAV** — explicitly dropped per §3 + `MIGRATION_POSTMORTEM.md`. Revisit only if explainability pipeline produces working concept activations. Hidden behind feature flag `BIOVOICE_ENABLE_TCAV` if revived.
+- **Settings persistence** — `UserSettingsPage` is UI-only. Add `/me/settings` endpoint + JSON schema if operator preferences become real.
+- **Multi-tenant admin views** — audit log viewer, per-user permissions, profile deletion.
+- **i18n / Hebrew RTL** — non-trivial because the kiosk uses absolute positioning. Plan a CSS rework before tackling.
+- **Replay/splice attack tiles in DeepfakeLab** — currently hidden. Bring back when backend grows handling.
+
+---
+
+### 12.5 Decisions to confirm before E2 starts
+
+Eden should explicitly OK; defaults below if no objection.
+
+1. **XTTS approach** — Option 1 + Option 2 (real install + fallback). *(Default OK?)*
+2. **Demo seeding** — env-gated, off by default, two bundled users. *(Default OK?)*
+3. **Bundled WAV identities** — whose voices in `alice.wav` / `bob.wav`? Suggest team voices.
+4. **Paper format** — Markdown drafts → LaTeX final. *(Default OK?)*
+5. **Yoav availability** — if back, owns AudioWorklet migration + reviews E2.1.
+
+If all five default, the plan is unblocked from "merge done" → "demo-ready" without further checkpoints.
+
+---
+
+### 12.6 End-to-end milestone-close checklist
+
+Closing the milestone requires every check below to be green.
+
+1. `cd backend && .venv/bin/pytest tests/ -q` → ≥ 27 passed (26 existing + new fallback test).
+2. `cd frontend && npm run build` → exit 0.
+3. `node /tmp/capture_errors.js` → no `pageerror`.
+4. Manual run-through (12.E1.2) with two real users + a real microphone → every step green.
+5. `bench_verify.py --runs 50` p95 < 2000 ms.
+6. DeepfakeLab generates real spoof audio (XTTS) AND `decision: 'FAKE'` AASIST verdict.
+7. Phone @ `http://10.0.0.10:5173` loads + makes API calls without CORS error.
+8. `BIOVOICE_SEED_DEMO=1` startup populates two demo users; without the env var, an empty DB stays empty.
+9. `docs/paper/biovoice-paper.md` exists with all four appendices.
+10. §6 Phase A/B/C/D ✅; §12 phases E1/E2/E3 ✅.
