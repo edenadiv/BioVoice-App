@@ -224,11 +224,25 @@ function Toggle({ label, value, onChange }) {
 // ============================================================================
 // ConsoleScreen — the default expert dashboard.
 // ============================================================================
-function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll, onShowDetails, threatCount, verifyCount }) {
+function ConsoleScreen({
+  audio,
+  micState,
+  micStart,
+  profiles,
+  activity,
+  onVerify,
+  onEnroll,
+  onShowDetails,
+  threatCount,
+  verifyCount,
+  homeState,
+  homeError,
+}) {
   const [selectedProfile, setSelectedProfile] = useState(profiles[0]?.id);
   const [hoverProfile, setHoverProfile] = useState(null);
-  const [activity, setActivity] = useState(() => seedActivity());
+  const [mockActivity, setMockActivity] = useState(() => seedActivity());
   const [now, setNow] = useState(Date.now());
+  const liveActivity = Array.isArray(activity);
 
   // Tick clock + occasionally inject new activity for liveness
   useEffect(() => {
@@ -236,15 +250,28 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     return () => clearInterval(id);
   }, []);
   useEffect(() => {
+    if (profiles.length === 0) {
+      return;
+    }
+    if (!selectedProfile || !profiles.some((profile) => profile.id === selectedProfile)) {
+      setSelectedProfile(profiles[0].id);
+    }
+  }, [profiles, selectedProfile]);
+  useEffect(() => {
+    if (liveActivity) {
+      return;
+    }
     const id = setInterval(() => {
-      setActivity(a => [makeRandomActivity(), ...a].slice(0, 8));
+      setMockActivity(a => [makeRandomActivity(), ...a].slice(0, 8));
     }, 6500);
     return () => clearInterval(id);
-  }, []);
+  }, [liveActivity]);
 
   const acceptedCount = useCounter(verifyCount, 1400, [verifyCount]);
   const blockedCount = useCounter(threatCount, 1400, [threatCount]);
   const profilesCount = useCounter(profiles.length, 1000, [profiles.length]);
+  const feed = liveActivity ? activity : mockActivity;
+  const showLiveNotice = homeState === 'loading' || homeState === 'error';
 
   return (
     <div className="screen fade-enter">
@@ -310,6 +337,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           <button className="btn btn-primary" onClick={() => onVerify(profiles.find(p => p.id === selectedProfile))}
+            disabled={profiles.length === 0}
             style={{ width: '100%', justifyContent: 'center', padding: '18px', fontSize: 15 }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="8" r="3" fill="#04070d"/>
@@ -457,9 +485,15 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <LivePulse size={8}/>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-              {activity.map((a, i) => (
-                <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
-              ))}
+              {feed.length === 0 ? (
+                <div style={{ padding: '20px 22px', color: 'var(--ink-soft)', fontSize: 13 }}>
+                  No verification activity yet.
+                </div>
+              ) : (
+                feed.map((a, i) => (
+                  <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
+                ))
+              )}
             </div>
           </div>
 

@@ -1,10 +1,47 @@
 // Main app — expert-default with sidebar nav, multi-page, settings + shortcuts.
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { listResults, listSpeakers } from "./lib/api";
 import { useMicrophone, useSyntheticAudio } from "./audio.jsx";
 import { ConsoleScreen, SettingsPanel } from "./console.jsx";
 import { DeepfakeLab, ProfilesPage, Sidebar, UserSettingsPage } from "./more-screens.jsx";
 import { WelcomeScreen, EnrollScreen, ProcessingScreen, VerifyScreen, DeepfakeScreen, ExplainScreen } from "./screens.jsx";
+
+const PROFILE_PALETTE = [
+  ['#7ef0ff', '#3da9fc'],
+  ['#bff4ff', '#3da9fc'],
+  ['#6affc8', '#3da9fc'],
+  ['#ffd577', '#3da9fc'],
+  ['#ff7aa8', '#3da9fc'],
+  ['#9bb7ff', '#1a3a6e'],
+];
+
+function initialsFromUserId(userId) {
+  const parts = userId.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (parts.length === 0) {
+    return userId.slice(0, 2).toUpperCase();
+  }
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
+    .slice(0, 2);
+}
+
+function paletteForUserId(userId) {
+  let hash = 0;
+  for (let index = 0; index < userId.length; index += 1) {
+    hash = (hash * 31 + userId.charCodeAt(index)) >>> 0;
+  }
+  return PROFILE_PALETTE[hash % PROFILE_PALETTE.length];
+}
+
+function formatActivityScore(result) {
+  if (result.decision === 'DEEPFAKE') {
+    return result.deepfakeScore.toFixed(2);
+  }
+  return result.similarityScore.toFixed(3);
+}
 
 const PROFILES = [
   { id: 'TLV-OP-104', name: 'Eden Adiv',   initials: 'EA', color1: '#7ef0ff', color2: '#3da9fc' },
@@ -34,12 +71,51 @@ function App() {
   const [verifyCount, setVerifyCount] = useState(2147);
   const [threatCount, setThreatCount] = useState(38);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [homeSpeakers, setHomeSpeakers] = useState([]);
+  const [homeResults, setHomeResults] = useState([]);
+  const [homeState, setHomeState] = useState('loading');
+  const [homeError, setHomeError] = useState(null);
 
   const mic = useMicrophone();
   const synth = useSyntheticAudio(true, { variant: 'human' });
   const audio = mic.state === 'live' ? mic : synth;
   const startMic = useCallback(() => mic.start(), [mic]);
   useEffect(() => { startMic(); }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadHomeData() {
+      try {
+        setHomeState('loading');
+        const [nextSpeakers, nextResults] = await Promise.all([listSpeakers(), listResults()]);
+        if (!alive) {
+          return;
+        }
+        setHomeSpeakers(nextSpeakers);
+        setHomeResults(nextResults);
+        setHomeState('ready');
+        setHomeError(null);
+      } catch (error) {
+        if (!alive) {
+          return;
+        }
+        setHomeSpeakers([]);
+        setHomeResults([]);
+        setHomeState('error');
+        setHomeError(error instanceof Error ? error.message : 'Unable to load backend data');
+      }
+    }
+
+    void loadHomeData();
+    const refreshId = window.setInterval(() => {
+      void loadHomeData();
+    }, 15000);
+    return () => {
+      alive = false;
+      window.clearInterval(refreshId);
+    };
+  }, []);
 
   useEffect(() => {
     if (mode === 'expert') setScreen('console');
@@ -77,7 +153,7 @@ function App() {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
       if (mode === 'expert') {
-        if (k === 'v') runVerification(PROFILES[0]);
+        if (k === 'v' && homeProfiles[0]) runVerification(homeProfiles[0]);
         else if (k === '1') setPage('console');
         else if (k === '2') setPage('lab');
         else if (k === '3') setPage('profiles');
@@ -113,6 +189,48 @@ function App() {
     setTimeout(() => setScreen('verify'), 4400);
   }, [mode]);
 
+  const homeProfiles = useMemo(
+    () =>
+      homeSpeakers.map((speaker) => {
+        const [color1, color2] = paletteForUserId(speaker.userId);
+        return {
+          id: speaker.userId,
+          name: speaker.userId,
+          initials: initialsFromUserId(speaker.userId),
+          color1,
+          color2,
+        };
+      }),
+    [homeSpeakers],
+  );
+
+  const homeActivity = useMemo(() => {
+    const resultFeed = homeResults.map((result) => ({
+      id: result.resultId,
+      kind: result.decision === 'DEEPFAKE' ? 'deepfake' : result.decision === 'REJECT' ? 'reject' : 'accept',
+      name: result.userId,
+      score: formatActivityScore(result),
+      ts: result.createdAt,
+    }));
+
+    const enrollmentFeed = homeSpeakers.map((speaker) => ({
+      id: `enroll-${speaker.userId}`,
+      kind: 'enroll',
+      name: speaker.userId,
+      score: `${speaker.sampleCount} sample${speaker.sampleCount === 1 ? '' : 's'}`,
+      ts: speaker.enrolledAt,
+    }));
+
+    return [...resultFeed, ...enrollmentFeed]
+      .sort((left, right) => new Date(right.ts).getTime() - new Date(left.ts).getTime())
+      .slice(0, 8);
+  }, [homeResults, homeSpeakers]);
+
+  const todayKey = new Date().toDateString();
+  const todayResults = homeResults.filter((result) => new Date(result.createdAt).toDateString() === todayKey);
+  const homeVerifyCount = todayResults.length;
+  const homeThreatCount = todayResults.filter((result) => result.decision === 'DEEPFAKE').length;
+
   // Expert mode: page-based
   if (mode === 'expert') {
     let body;
@@ -123,7 +241,12 @@ function App() {
       default:
         body = <ConsoleScreen
           audio={audio} micState={mic.state} micStart={startMic}
-          profiles={PROFILES} verifyCount={verifyCount} threatCount={threatCount}
+          profiles={homeProfiles}
+          activity={homeActivity}
+          verifyCount={homeVerifyCount}
+          threatCount={homeThreatCount}
+          homeState={homeState}
+          homeError={homeError}
           onVerify={runVerification}
           onEnroll={() => setPage('profiles')}
           onShowDetails={() => setPage('lab')}
