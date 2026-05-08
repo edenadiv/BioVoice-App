@@ -22,6 +22,7 @@ from app.schemas import (
 from app.services.audio import AudioService, SampleQualityRejectedError
 from app.services.detector import DeepfakeDetectorService
 from app.services.speaker_encoder import SpeakerEncoder
+from app.services.sub_classifier import AcousticProbe
 
 
 # Decision-logic alignment with SDD §2.5 / Fig. 13:
@@ -78,6 +79,7 @@ class VerificationService:
         similarity_threshold: float,
         deepfake_threshold: float,
         min_enrollment_samples: int,
+        acoustic_probe: AcousticProbe | None = None,
     ):
         self.store = store
         self.detector = detector
@@ -87,6 +89,9 @@ class VerificationService:
         self.min_enrollment_samples = min_enrollment_samples
         self.audio = AudioService(target_sample_rate=sample_rate)
         self.encoder = speaker_encoder
+        # F4 — replaces the seeded-jitter `_derive_analysis_details`.
+        # Heuristic mode by default; trained probe heads loaded if present.
+        self.acoustic_probe = acoustic_probe or AcousticProbe()
 
     def list_users(self) -> list[SpeakerResponse]:
         return [
@@ -207,7 +212,12 @@ class VerificationService:
         similarity_score = self._aggregate_similarity(sample_similarities, centroid_similarity)
 
         decision, reason, message = self._decide(similarity_score, deepfake_score)
-        analysis_details = self._derive_analysis_details(deepfake_score)
+        # F4 — analysis details now come from acoustic features (HNR, F0
+        # stability, spectral flatness) instead of perturbing the deepfake
+        # score. Each axis varies with the actual recording's properties.
+        analysis_details = self.acoustic_probe.score(
+            trimmed.waveform, sample_rate=trimmed.sample_rate
+        )
 
         total_ms = (perf_counter() - total_t0) * 1000.0
         stage_breakdown = StageBreakdown(
@@ -316,16 +326,9 @@ class VerificationService:
             return "synthetic"
         return "mismatch"
 
-    def _derive_analysis_details(self, deepfake_score: float) -> AnalysisDetails | None:
-        # Placeholder until Yoav's Y-8 lands the AASIST-anchored derivation in detector.py.
-        # Using the global score gives the UI something to render today; Y-8 will replace this.
-        score = max(0.0, min(1.0, deepfake_score))
-        return AnalysisDetails(
-            voice_naturalness=score,
-            spectral_consistency=score,
-            temporal_patterns=score,
-            artifact_detection=1.0 - score,
-        )
+    # `_derive_analysis_details` removed in F4 — replaced by `AcousticProbe`
+    # which computes the four axes from real acoustic features. See
+    # `app/services/sub_classifier.py` and `docs/paper/sub_classifier.md`.
 
     @staticmethod
     def _format_session_id(seq: int, created_at: datetime) -> str:

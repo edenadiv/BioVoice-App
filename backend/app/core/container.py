@@ -10,6 +10,7 @@ from app.services.detector import DeepfakeDetectorService
 from app.services.rate_limit import LoginRateLimiter, RateLimitConfig
 from app.services.speaker_encoder import RedimNetSpeakerEncoder
 from app.services.spoof import SpoofGenerationService
+from app.services.sub_classifier import AcousticProbe
 from app.services.verification import VerificationService
 from app.storage.sqlite_store import SQLiteStore
 
@@ -31,6 +32,7 @@ def build_container(settings: Settings) -> AppContainer:
     )
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
+    acoustic_probe = AcousticProbe(heads_path=settings.sub_classifier_heads_path)
     verification_service = VerificationService(
         store=store,
         detector=detector,
@@ -39,6 +41,7 @@ def build_container(settings: Settings) -> AppContainer:
         similarity_threshold=settings.similarity_threshold,
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
+        acoustic_probe=acoustic_probe,
     )
     rate_limiter = LoginRateLimiter(
         store=store,

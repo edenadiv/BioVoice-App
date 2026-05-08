@@ -93,6 +93,18 @@ class Settings:
     # (localhost:8000) are same-site — different port, same eTLD+1.
     session_cookie_name: str = "biovoice_session"
     session_cookie_secure: bool = field(default_factory=_cookie_secure_from_env)
+    # F4.4 — per-concept thresholds for the AnalysisDetails sub-axes. Used
+    # by the operator UI (F6.3) to flag recordings that pass the global
+    # decision but show suspect per-axis behaviour. Defaults are calibrated
+    # on the heuristic-mode probe; trained heads will recalibrate via the
+    # training script's `--report-thresholds` mode.
+    voice_naturalness_threshold: float = 0.45
+    spectral_consistency_threshold: float = 0.50
+    temporal_patterns_threshold: float = 0.40
+    artifact_detection_threshold: float = 0.45
+    # F4 — sub-classifier head weights. None when unset (heuristic mode);
+    # set the path via env or training-script output to enable trained heads.
+    sub_classifier_heads_path: Path | None = None
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
