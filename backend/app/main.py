@@ -11,6 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.core.container import build_container
 from app.core.config import settings
+from app.core.logging_setup import configure_logging
+
+# F7.2 — set up structured (JSON) logging before any module-level
+# logger.getLogger() side effects fire. Honour BIOVOICE_LOG_FORMAT=plain
+# for human-readable local dev.
+configure_logging()
 
 logger = logging.getLogger(__name__)
 

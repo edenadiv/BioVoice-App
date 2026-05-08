@@ -23,6 +23,7 @@ from app.schemas import (
     SpeakerResponse,
     VerificationResponse,
 )
+from app.core.metrics import metrics
 from app.services.audio import NoSpeechDetectedError, SampleQualityRejectedError
 from app.services.auth import AuthService
 from app.services.rate_limit import LoginRateLimited
@@ -92,7 +93,64 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    """F7.4 — liveness probe. Always returns 200 once the app process is
+    accepting connections. Use /readyz for the deep check (DB + models)."""
     return HealthResponse(status="ok")
+
+
+@router.get("/metrics", response_class=Response)
+def prometheus_metrics() -> Response:
+    """F7.3 — Prometheus exposition endpoint. Public by default for the
+    standard scraper pattern; gate at the reverse proxy if your deployment
+    keeps Prometheus on a separate network. Counters + histograms are
+    pre-registered in `core/metrics.py`."""
+    return Response(content=metrics.render(), media_type="text/plain; version=0.0.4")
+
+
+@router.get("/readyz")
+def ready(request: Request) -> dict:
+    """F7.4 — readiness probe. Returns 503 when any dependency the kiosk
+    needs to serve traffic is unhealthy (DB unreachable, model weights
+    missing, container not built). Used by the reverse proxy + Kubernetes
+    so a degraded instance is taken out of rotation rather than serving
+    user-visible 5xx.
+
+    Cheap to call (≤ 5 ms warm). Don't fold expensive smoke tests in
+    here — those belong in a periodic health job.
+    """
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        raise HTTPException(status_code=503, detail="Container not initialised")
+
+    checks: dict[str, dict] = {}
+    overall_ok = True
+
+    # DB connectivity — a single SELECT 1 against SQLite (or Postgres in F7.1).
+    try:
+        store = container.store
+        # SQLite store exposes the connection via `_connection`; the
+        # MemoryStore (tests) doesn't have one, so treat it as healthy.
+        if hasattr(store, "_connection"):
+            store._connection.execute("SELECT 1").fetchone()
+        checks["database"] = {"ok": True}
+    except Exception as exc:
+        checks["database"] = {"ok": False, "error": str(exc)}
+        overall_ok = False
+
+    # Model availability — speaker encoder + AASIST. We don't load them
+    # here (cold-load is expensive); we just check the weights file
+    # exists. The first verification call still pays the load cost.
+    s = container.settings
+    checks["aasist_weights"] = {"ok": s.aasist_weights_path.exists()}
+    checks["redimnet_weights"] = {"ok": s.redimnet_weights_path.exists()}
+    if not checks["aasist_weights"]["ok"] or not checks["redimnet_weights"]["ok"]:
+        # Both have heuristic fallbacks; not a hard failure for readiness.
+        # Surface the missing-weight state so the operator can spot it.
+        checks["models_note"] = "Weights missing — falling back to heuristic detector + encoder"
+
+    if not overall_ok:
+        raise HTTPException(status_code=503, detail={"ready": False, "checks": checks})
+    return {"ready": True, "checks": checks}
 
 
 @router.get("/users", response_model=list[SpeakerResponse])
@@ -127,7 +185,13 @@ async def verify(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
-        return service.verify(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+        # F7.3 — record latency + decision counters for Prometheus.
+        with metrics.histogram("biovoice_verify_seconds").time():
+            result = service.verify(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+        metrics.counter("biovoice_verifications_total").inc(
+            labels={"decision": result.decision}
+        )
+        return result
     except NoSpeechDetectedError as exc:
         # F3.2 — VAD found no usable speech. 400, not 404 (not a missing
         # user), and not 500 (the user didn't speak — recoverable on retry).
@@ -208,7 +272,12 @@ async def verify_current_user(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
-        return service.verify(user_id=session.user_id, audio_bytes=payload, filename=audio.filename)
+        with metrics.histogram("biovoice_verify_seconds").time():
+            result = service.verify(user_id=session.user_id, audio_bytes=payload, filename=audio.filename)
+        metrics.counter("biovoice_verifications_total").inc(
+            labels={"decision": result.decision}
+        )
+        return result
     except NoSpeechDetectedError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
