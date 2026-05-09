@@ -190,6 +190,11 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
 
   const start = useCallback(async () => {
     if (state === "recording" || state === "requesting") return;
+    // Marker so devtools console can confirm the new bundle is loaded.
+    // If you don't see this line, the browser is showing a cached old
+    // build — hard-refresh (Cmd-Shift-R / Ctrl-Shift-R).
+    // eslint-disable-next-line no-console
+    console.log("[biovoice] recorder.start() — MediaRecorder build");
     setLastError(null);
     setCaptureMode(null);
     setState("requesting");
@@ -295,10 +300,13 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
       };
       refs.current.raf = requestAnimationFrame(tick);
 
-      // Start MediaRecorder. Timeslice → periodic dataavailable events
-      // so we always have at least one chunk on stop, and so a force-
-      // teardown mid-recording doesn't lose everything.
-      recorder.start(TIMESLICE_MS);
+      // Start MediaRecorder WITHOUT a timeslice. Without timeslice the
+      // recorder produces one well-formed blob delivered to a single
+      // ondataavailable on stop(). With a timeslice it produces
+      // fragments that need to be re-assembled — works for webm/opus
+      // (Chrome/Firefox) but breaks on Safari where the fragments aren't
+      // self-contained mp4 boxes.
+      recorder.start();
 
       if (maxMs !== null) {
         refs.current.autoStop = window.setTimeout(() => {
@@ -349,6 +357,8 @@ export function useVoiceRecorder(opts: RecorderOptions = {}): RecorderHandle {
     });
     try { recorder.stop(); } catch { /* already stopped */ }
     await stopped;
+    // eslint-disable-next-line no-console
+    console.log("[biovoice] recorder.stop() — got", blobs.length, "blob(s)", "elapsed", elapsedMs.toFixed(0), "ms", "mime", mimeType);
 
     // Concatenate the recorded chunks into one blob.
     const blob = new Blob(blobs, { type: mimeType || "audio/webm" });
