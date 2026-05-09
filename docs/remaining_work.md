@@ -47,14 +47,14 @@ Outcome: AASIST's binary score gets explained by four sub-axes
 (naturalness / spectral / temporal / artifact) with calibrated
 weights instead of the heuristic proxies.
 
-### G3 — Real-dataset benchmarks
+### G3 — Real-dataset benchmarks (scripts ready, real run pending)
 
-No benchmark yet against ASVspoof 2019 LA / 2021 DF / WaveFake. To
-publish accuracy claims we need:
+✅ **Scripts and methodology landed in `docs/benchmarks.md`** — the eval scripts at `backend/scripts/bench_eer_voxceleb.py` and `backend/scripts/bench_spoof_detection.py` are end-to-end ready and pass a self-contained smoke run.
 
-1. Pull the dataset (eval split + protocols).
-2. Run `app.services.verification.verify` over each utterance.
-3. Compute EER + tDCF; report alongside the published baselines.
+⏭ **Pending the operator's dataset acquisition**:
+1. Register with VoxCeleb1 + Edinburgh DataShare (gated — both require a licence acceptance).
+2. Run the two scripts per `docs/benchmarks.md` §"Running the evaluations".
+3. Update the Results tables in `docs/benchmarks.md` from the produced JSON outputs.
 
 ### G4 — Multi-speaker enrolment study
 

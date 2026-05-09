@@ -40,18 +40,32 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("bench_spoof")
 
 
-def load_wav(path: Path) -> tuple[np.ndarray, int]:
-    with wave.open(str(path), "rb") as h:
-        frames = h.readframes(h.getnframes())
-        sr = h.getframerate()
-        ch = h.getnchannels()
-        sw = h.getsampwidth()
-    if sw != 2:
-        raise ValueError(f"{path}: expected 16-bit PCM")
-    samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-    if ch == 2:
-        samples = samples.reshape(-1, 2).mean(axis=1)
-    return samples, sr
+def load_audio(path: Path) -> tuple[np.ndarray, int]:
+    """Load WAV (16-bit PCM) directly via Python's wave module, or
+    delegate to torchaudio for everything else (FLAC, OGG, etc.).
+    Returns mono float32 at the file's native sample rate."""
+    if path.suffix.lower() == ".wav":
+        with wave.open(str(path), "rb") as h:
+            frames = h.readframes(h.getnframes())
+            sr = h.getframerate()
+            ch = h.getnchannels()
+            sw = h.getsampwidth()
+        if sw != 2:
+            raise ValueError(f"{path}: expected 16-bit PCM")
+        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        if ch == 2:
+            samples = samples.reshape(-1, 2).mean(axis=1)
+        return samples, sr
+    # FLAC / OGG / etc. — torchaudio handles libsndfile-backed formats.
+    import torchaudio
+    waveform, sr = torchaudio.load(str(path))  # waveform: (channels, frames)
+    samples = waveform.mean(dim=0).cpu().numpy().astype(np.float32)
+    return samples, int(sr)
+
+
+# Back-compat alias — `load_wav` was the original name; tests/imports may
+# still reference it.
+load_wav = load_audio
 
 
 def parse_asvspoof_protocol(path: Path) -> list[tuple[str, int]]:
@@ -93,11 +107,17 @@ def evaluate_asvspoof(
     labels = []
     t0 = perf_counter()
     for i, (utt_id, label) in enumerate(protocol):
-        path = audio_root / f"{utt_id}.wav"
-        if not path.exists():
+        # ASVspoof ships FLAC; some mirrors ship WAV. Try both.
+        path = None
+        for ext in (".flac", ".wav"):
+            candidate = audio_root / f"{utt_id}{ext}"
+            if candidate.exists():
+                path = candidate
+                break
+        if path is None:
             # Some protocol entries may be missing files; skip + log.
             continue
-        samples, sr = load_wav(path)
+        samples, sr = load_audio(path)
         payload = audio.decode_wav(audio.encode_wav(samples.tolist(), sr))
         score = detector.detect(payload.waveform)
         scores.append(score)
@@ -133,7 +153,7 @@ def evaluate_clones(
         flagged = 0
         sub_scores = []
         for path in clip_paths:
-            samples, sr = load_wav(path)
+            samples, sr = load_audio(path)
             payload = audio.decode_wav(audio.encode_wav(samples.tolist(), sr))
             score = detector.detect(payload.waveform)
             if score < decision_threshold:
@@ -161,21 +181,28 @@ def evaluate_clones(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--asvspoof-dir", type=Path)
-    parser.add_argument("--asvspoof-protocol", type=Path)
-    parser.add_argument("--clones-dir", type=Path)
+    parser.add_argument("--asvspoof-dir", type=Path, help="Directory containing the eval audio (FLAC or WAV files named <utt_id>.{wav,flac}).")
+    parser.add_argument("--asvspoof-protocol", type=Path, help="ASVspoof2019.LA.cm.eval.trl.txt protocol file.")
+    parser.add_argument("--clones-dir", type=Path, help="Directory of TTS subdirs (one per family) containing WAV clones.")
+    parser.add_argument("--limit", type=int, default=0, help="Cap the ASVspoof eval at the first N protocol entries (0 = all).")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     audio = AudioService(target_sample_rate=settings.sample_rate)
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
-    probe = AcousticProbe(heads_path=settings.sub_classifier_heads_path)
+    # Heuristic mode (no trained heads) — the heads_path setting was
+    # removed in the strip; the trained-heads path is a v1.1 follow-up.
+    probe = AcousticProbe()
 
     results: dict = {"deepfake_threshold": settings.deepfake_threshold}
 
     if args.asvspoof_protocol and args.asvspoof_dir:
         protocol = parse_asvspoof_protocol(args.asvspoof_protocol)
-        logger.info("ASVspoof: %d clips", len(protocol))
+        if args.limit and args.limit > 0:
+            protocol = protocol[: args.limit]
+            logger.info("ASVspoof: %d clips (limited from full protocol)", len(protocol))
+        else:
+            logger.info("ASVspoof: %d clips", len(protocol))
         results["asvspoof2019_la"] = evaluate_asvspoof(audio, detector, protocol, args.asvspoof_dir)
 
     if args.clones_dir:
