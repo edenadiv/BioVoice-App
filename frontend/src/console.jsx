@@ -106,17 +106,24 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
                 stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
         </svg>
       </button>
-      <div style={{
-        position: 'absolute', top: 0, right: 0, bottom: 0,
-        width: 420, zIndex: 109,
-        transform: open ? 'translateX(0)' : 'translateX(100%)',
-        transition: 'transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1)',
-        background: 'linear-gradient(180deg, rgba(7,11,20,0.96), rgba(10,20,34,0.92))',
-        borderLeft: '1px solid rgba(125,200,255,0.18)',
-        backdropFilter: 'blur(20px)',
-        padding: '110px 36px 40px',
-        overflowY: 'auto',
-      }}>
+      {/* G17 — settings drawer is scrollable; tabIndex makes it
+          keyboard-navigable. role+aria-label gives the region a name
+          for screen readers. */}
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Settings panel"
+        style={{
+          position: 'absolute', top: 0, right: 0, bottom: 0,
+          width: 420, zIndex: 109,
+          transform: open ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+          background: 'linear-gradient(180deg, rgba(7,11,20,0.96), rgba(10,20,34,0.92))',
+          borderLeft: '1px solid rgba(125,200,255,0.18)',
+          backdropFilter: 'blur(20px)',
+          padding: '110px 36px 40px',
+          overflowY: 'auto',
+        }}>
         <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 6 }}>SETTINGS</div>
         <div style={{ fontSize: 32, fontWeight: 200, marginBottom: 36 }}>System preferences</div>
 
@@ -287,7 +294,16 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span className="label-mono" style={{ fontSize: 10 }}>ENROLLED PROFILE · CHOOSE ONE</span>
               <span className="num-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1 }}>
+            {/* G17 — buttons inside are focusable but axe needs the
+                scrollable region itself to be reachable too. Lightweight
+                defensive tabIndex + role keeps the panel green even if
+                the button list is empty. */}
+            <div
+              style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1 }}
+              tabIndex={0}
+              role="region"
+              aria-label="Enrolled profiles"
+            >
               {profiles.map(p => (
                 <button key={p.id}
                   onClick={() => setSelectedProfile(p.id)}
@@ -465,7 +481,16 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span className="label-mono" style={{ fontSize: 10 }}>LIVE EVENT FEED</span>
               <LivePulse size={8}/>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+            {/* G17 — `tabIndex={0}` lets keyboard users scroll the live
+                event feed; without it, axe flags `scrollable-region-
+                focusable` (Safari + WCAG 2.1.1). aria-label gives the
+                feed a discoverable name in screen readers. */}
+            <div
+              style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}
+              tabIndex={0}
+              role="region"
+              aria-label="Live event feed"
+            >
               {activity.length === 0 ? (
                 <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 12, lineHeight: 1.6 }}>
                   <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>

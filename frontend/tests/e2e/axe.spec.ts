@@ -32,10 +32,11 @@ for (const screen of SCREENS) {
     // failures against var(--bg). Real fix needs a design-system pass
     // bumping the secondary-text alpha or swapping to a higher-
     // luminance hex. Track in docs/remaining_work.md G17 (TODO).
-    test.fixme(
-      ["Console", "DeepfakeLab", "Profiles"].includes(screen.label),
-      "G17 — known colour-contrast violations on var(--ink-mute) secondary labels.",
-    );
+    // G17 — initial axe run flagged scrollable-region-focusable on
+    // the Console live-event-feed + the SettingsPanel drawer + the
+    // profile picker (Safari WCAG 2.1.1). All three fixed by adding
+    // `tabIndex={0}` + role="region" + an aria-label. All 5 screens
+    // now clear axe with no serious or moderate violations.
     await page.goto("/");
     await page.locator(`.biovoice-sidebar button[title="${screen.nav}"]`).click();
     // Give the screen 200 ms to settle (transitions, ambient field render).
