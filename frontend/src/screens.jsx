@@ -178,6 +178,9 @@ function WelcomeScreen({ onStart, micState, audio }) {
 // 2. ENROLLMENT SCREEN
 // =============================================================================
 function EnrollScreen({ onComplete, audio, micState, micStart }) {
+  // F5.2 / G3.1 — chrome + headline copy through i18n. Default-name
+  // 'Eden' stays literal (it's seed data, not chrome).
+  const { t } = useTranslation();
   const [phase, setPhase] = useState('prompt'); // prompt | recording | done
   const [secs, setSecs] = useState(0);
   const [name, setName] = useState('Eden');
@@ -203,26 +206,25 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
 
   return (
     <div className="screen fade-enter">
-      <Chrome status="ENROLLMENT · NEW PROFILE" statusKind="" screenName="01 ENROLL"/>
+      <Chrome status={t('enroll.status')} statusKind="" screenName="01 ENROLL"/>
 
       <div style={{ position: 'absolute', inset: 0, padding: '160px 120px 130px', display: 'grid', gridTemplateColumns: '1fr 720px', gap: 80 }}>
 
         {/* Left: copy + form */}
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 32 }}>
           <div>
-            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 14 }}>STEP 1 · ENROLLMENT</div>
+            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 14 }}>{t('enroll.eyebrow')}</div>
             <div style={{ fontSize: 76, fontWeight: 200, lineHeight: 1.05, letterSpacing: '-0.02em' }}>
-              Let the system <br/>
-              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>learn your voice.</span>
+              {t('enroll.headlineLeft')} <br/>
+              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>{t('enroll.headlineRight')}</span>
             </div>
             <div style={{ marginTop: 22, fontSize: 19, color: 'var(--ink-mute)', maxWidth: 540, lineHeight: 1.5 }}>
-              Speak any sentence for a few seconds. We'll capture the timbre, pitch and rhythm
-              that make your voice unmistakably yours — and store it as a 192-number fingerprint.
+              {t('enroll.subhead')}
             </div>
           </div>
 
           <div className="panel outline-glow" style={{ maxWidth: 540 }}>
-            <div className="label-mono" style={{ fontSize: 10, marginBottom: 10 }}>YOUR NAME</div>
+            <div className="label-mono" style={{ fontSize: 10, marginBottom: 10 }}>{t('enroll.nameLabel')}</div>
             <input
               value={name}
               onChange={e => setName(e.target.value)}
@@ -235,7 +237,7 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
             />
             <div style={{ marginTop: 12, height: 1, background: 'linear-gradient(90deg, var(--teal-1), transparent)' }}></div>
             <div className="label-mono" style={{ fontSize: 9, marginTop: 10, color: 'var(--good)' }}>
-              ✓ NEW IDENTIFIER · NO PRIOR ENROLLMENT
+              ✓ {t('enroll.identifierStatus')}
             </div>
           </div>
 
@@ -246,19 +248,19 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
                   width: 10, height: 10, borderRadius: '50%',
                   background: '#04070d', boxShadow: '0 0 0 2px rgba(4,7,13,0.3)',
                 }}></span>
-                Record voice
+                {t('enroll.recordButton')}
               </button>
             )}
             {phase === 'recording' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span className="pill bad"><span className="dot"></span>RECORDING</span>
-                <span className="num-mono" style={{ fontSize: 24, color: 'var(--ink)' }}>
+                <span className="pill bad"><span className="dot"></span>{t('enroll.recordingPill')}</span>
+                <span className="num-mono biovoice-numerals" style={{ fontSize: 24, color: 'var(--ink)' }}>
                   00:0{secs.toFixed(1)}
                 </span>
               </div>
             )}
             {phase === 'done' && (
-              <span className="pill good"><span className="dot"></span>SAMPLE CAPTURED</span>
+              <span className="pill good"><span className="dot"></span>{t('enroll.sampleCaptured')}</span>
             )}
           </div>
         </div>
@@ -315,13 +317,18 @@ function EnrollScreen({ onComplete, audio, micState, micStart }) {
 // =============================================================================
 function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
   // mode: 'enroll' | 'verify'
+  // F5.2 / G3.4 — chrome + headlines + stage titles through i18n.
+  // Sub-labels (sample rate, model dims) stay literal — they're code-like
+  // technical specs, not localisable copy.
+  const { t } = useTranslation();
   const stages = [
-    { icon: '◐', title: 'Capture',     sub: '16 kHz PCM' },
-    { icon: '⌇', title: 'Preprocess',  sub: 'normalize · mono' },
-    { icon: '▦', title: 'Mel-spectrogram', sub: '80 bands · 100 fps' },
-    { icon: '✦', title: 'ReDimNet-B5', sub: '192-dim embedding' },
-    { icon: '◊', title: 'AASIST',      sub: 'authenticity score' },
-    { icon: '✓', title: mode === 'enroll' ? 'Stored' : 'Decision', sub: mode === 'enroll' ? 'profile saved' : 'accept / reject' },
+    { icon: '◐', title: t('processing.stageCapture'),    sub: '16 kHz PCM' },
+    { icon: '⌇', title: t('processing.stagePreprocess'), sub: 'normalize · mono' },
+    { icon: '▦', title: t('processing.stageMel'),        sub: '80 bands · 100 fps' },
+    { icon: '✦', title: 'ReDimNet-B5',                   sub: '192-dim embedding' },
+    { icon: '◊', title: 'AASIST',                        sub: t('processing.stageAasistSub') },
+    { icon: '✓', title: mode === 'enroll' ? t('processing.stageStored') : t('processing.stageDecision'),
+                 sub:   mode === 'enroll' ? t('processing.stageStoredSub') : t('processing.stageDecisionSub') },
   ];
 
   const [active, setActive] = useState(0);
@@ -348,27 +355,25 @@ function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
 
   return (
     <div className="screen fade-enter">
-      <Chrome status="PROCESSING · NEURAL INFERENCE" statusKind="warn" screenName={mode === 'enroll' ? '02 PROCESS · ENROLL' : '02 PROCESS · VERIFY'}/>
+      <Chrome status={t('processing.status')} statusKind="warn" screenName={mode === 'enroll' ? '02 PROCESS · ENROLL' : '02 PROCESS · VERIFY'}/>
 
       <div style={{ position: 'absolute', inset: 0, padding: '150px 100px 130px', display: 'flex', flexDirection: 'column', gap: 36 }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <div>
-            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 12 }}>{mode === 'enroll' ? 'STEP 2 · LEARNING' : 'STEP 3 · INFERENCE'}</div>
+            <div className="label-mono" style={{ color: 'var(--teal-2)', marginBottom: 12 }}>{mode === 'enroll' ? t('processing.eyebrowEnroll') : t('processing.eyebrowVerify')}</div>
             <div style={{ fontSize: 64, fontWeight: 200, lineHeight: 1, letterSpacing: '-0.02em' }}>
-              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>Listening</span>
-              <span style={{ color: 'var(--ink-mute)' }}> with </span>
-              <span>two minds, in parallel.</span>
+              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>{t('processing.headlineLeft')}</span>
+              <span style={{ color: 'var(--ink-mute)' }}> {t('processing.headlineMid')} </span>
+              <span>{t('processing.headlineRight')}</span>
             </div>
             <div style={{ marginTop: 18, fontSize: 18, color: 'var(--ink-mute)', maxWidth: 880, lineHeight: 1.5 }}>
-              One model — <em className="serif">ReDimNet-B5</em> — extracts your voice fingerprint.
-              Another — <em className="serif">AASIST</em> — looks for the tell-tale artefacts of synthetic audio.
-              Both finish in milliseconds.
+              {t('processing.subhead')}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div className="label-mono" style={{ fontSize: 10 }}>ELAPSED</div>
-            <div className="num-mono" style={{ fontSize: 44, color: 'var(--teal-2)', fontWeight: 300 }}>
+            <div className="label-mono" style={{ fontSize: 10 }}>{t('processing.elapsedLabel')}</div>
+            <div className="num-mono biovoice-numerals" style={{ fontSize: 44, color: 'var(--teal-2)', fontWeight: 300 }}>
               {(active * 0.18).toFixed(2)}<span style={{ fontSize: 18, color: 'var(--ink-soft)' }}>s</span>
             </div>
           </div>
@@ -428,10 +433,13 @@ function ProcessingScreen({ onComplete, audio, mode = 'enroll' }) {
 // 4. VERIFICATION RESULT
 // =============================================================================
 function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.97, samples }) {
+  // F5.2 / G3.2 — chrome + decision banners + score-card titles + button
+  // through i18n. The user's name `{name}` stays literal.
+  const { t } = useTranslation();
   const accepted = similarity >= 0.75 && dfScore >= 0.5;
   return (
     <div className="screen fade-enter">
-      <Chrome status={accepted ? "ACCESS GRANTED" : "ACCESS DENIED"} statusKind={accepted ? "good" : "bad"} screenName="04 VERIFY · RESULT"/>
+      <Chrome status={accepted ? t('verify.accessGranted') : t('verify.accessDenied')} statusKind={accepted ? "good" : "bad"} screenName="04 VERIFY · RESULT"/>
 
       <div style={{ position: 'absolute', inset: 0, padding: '150px 100px 130px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60 }}>
 
@@ -439,18 +447,16 @@ function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.9
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 40 }}>
           <div>
             <div className="label-mono" style={{ color: accepted ? 'var(--good)' : 'var(--bad)', marginBottom: 14 }}>
-              {accepted ? '✓ DECISION · ACCEPT' : '✗ DECISION · REJECT'}
+              {accepted ? t('verify.decisionAccept') : t('verify.decisionReject')}
             </div>
             <div style={{ fontSize: 92, fontWeight: 200, lineHeight: 1, letterSpacing: '-0.02em' }}>
               <span className="serif" style={{ fontStyle: 'italic', color: accepted ? 'var(--teal-2)' : 'var(--bad)' }}>
-                {accepted ? 'Welcome,' : 'Not a match.'}
+                {accepted ? t('verify.welcome') : t('verify.notAMatch')}
               </span>
               {accepted && <><br/><span style={{ color: 'var(--ink)' }}>{name}.</span></>}
             </div>
             <div style={{ marginTop: 22, fontSize: 21, color: 'var(--ink-mute)', maxWidth: 540, lineHeight: 1.5 }}>
-              {accepted
-                ? 'Your voice matched the stored profile, and the audio was confirmed as a real human speaker — not synthetic.'
-                : 'The captured voice did not match the stored profile, or the audio appeared to be synthetic.'}
+              {accepted ? t('verify.acceptedSubhead') : t('verify.rejectedSubhead')}
             </div>
           </div>
 
@@ -458,27 +464,27 @@ function VerifyScreen({ onNext, name = 'Eden', similarity = 0.913, dfScore = 0.9
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <ScoreCard
               icon="◉"
-              title="Voice match"
+              title={t('verify.voiceMatchTitle')}
               value={similarity}
               threshold={0.75}
               passed={similarity >= 0.75}
               tech="Cosine similarity · ReDimNet-B5"
-              caption={similarity >= 0.75 ? 'The voice fingerprint matches what we stored at enrollment.' : 'The fingerprints diverge beyond the safe threshold.'}
+              caption={similarity >= 0.75 ? t('verify.voiceMatchPass') : t('verify.voiceMatchFail')}
             />
             <ScoreCard
               icon="◊"
-              title="Authenticity"
+              title={t('verify.authenticityTitle')}
               value={dfScore}
               threshold={0.5}
               passed={dfScore >= 0.5}
               tech="AASIST anti-spoofing"
-              caption={dfScore >= 0.5 ? 'Spectro-temporal patterns are consistent with genuine human speech.' : 'Synthetic artefacts detected — likely AI-generated audio.'}
+              caption={dfScore >= 0.5 ? t('verify.authenticityPass') : t('verify.authenticityFail')}
             />
           </div>
 
           <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
             <button className="btn btn-primary" onClick={onNext}>
-              See why
+              {t('verify.seeWhy')}
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                 <path d="M3 9 L15 9 M10 4 L15 9 L10 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
@@ -558,6 +564,9 @@ function ScoreCard({ icon, title, value, threshold, passed, tech, caption }) {
 // 5. DEEPFAKE CATCH SCREEN
 // =============================================================================
 function DeepfakeScreen({ onNext, audio }) {
+  // F5.2 / G3.3 — chrome + decision banners + prose + artifact-row
+  // labels through i18n. Numeric scores stay as biovoice-numerals.
+  const { t } = useTranslation();
   const [phase, setPhase] = useState('analyzing'); // analyzing | flagged
   useEffect(() => {
     const id = setTimeout(() => setPhase('flagged'), 1800);
@@ -568,7 +577,7 @@ function DeepfakeScreen({ onNext, audio }) {
   return (
     <div className="screen fade-enter">
       <Chrome
-        status={phase === 'flagged' ? 'SYNTHETIC AUDIO DETECTED' : 'ANTI-SPOOFING · ANALYZING'}
+        status={phase === 'flagged' ? t('deepfake.statusFlagged') : t('deepfake.statusAnalyzing')}
         statusKind={phase === 'flagged' ? 'bad' : 'warn'}
         screenName="03 DEEPFAKE · CATCH"
       />
@@ -579,39 +588,37 @@ function DeepfakeScreen({ onNext, audio }) {
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 32 }}>
           <div>
             <div className="label-mono" style={{ color: phase === 'flagged' ? 'var(--bad)' : 'var(--warn)', marginBottom: 14 }}>
-              {phase === 'flagged' ? '⚠ DEEPFAKE FLAGGED' : '◌ ANALYZING SAMPLE'}
+              {phase === 'flagged' ? `⚠ ${t('deepfake.bannerFlagged')}` : `◌ ${t('deepfake.bannerAnalyzing')}`}
             </div>
             <div style={{ fontSize: 78, fontWeight: 200, lineHeight: 1.02, letterSpacing: '-0.02em' }}>
               {phase === 'flagged' ? (
                 <>
-                  <span className="serif" style={{ fontStyle: 'italic', color: 'var(--bad)' }}>Not a human.</span>
+                  <span className="serif" style={{ fontStyle: 'italic', color: 'var(--bad)' }}>{t('deepfake.headlineFlaggedLeft')}</span>
                   <br/>
-                  <span style={{ color: 'var(--ink)' }}>Access denied.</span>
+                  <span style={{ color: 'var(--ink)' }}>{t('deepfake.headlineFlaggedRight')}</span>
                 </>
               ) : (
                 <>
-                  <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>Is this voice</span>
+                  <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>{t('deepfake.headlineAnalyzingLeft')}</span>
                   <br/>
-                  <span style={{ color: 'var(--ink)' }}>real?</span>
+                  <span style={{ color: 'var(--ink)' }}>{t('deepfake.headlineAnalyzingRight')}</span>
                 </>
               )}
             </div>
             <div style={{ marginTop: 22, fontSize: 19, color: 'var(--ink-mute)', maxWidth: 580, lineHeight: 1.5 }}>
-              {phase === 'flagged'
-                ? 'AASIST found unnatural spectro-temporal patterns — the kind only present in AI-generated audio. The voice was a clone, not the real person.'
-                : 'AASIST examines micro-patterns in pitch, harmonic stability and temporal flow that real vocal cords leave behind. No two are quite the same.'}
+              {phase === 'flagged' ? t('deepfake.subheadFlagged') : t('deepfake.subheadAnalyzing')}
             </div>
           </div>
 
           {/* Artifact breakdown */}
           <div className="panel" style={{ padding: '22px 26px' }}>
-            <div className="label-mono" style={{ fontSize: 10, marginBottom: 14 }}>WHAT BIOVOICE NOTICED</div>
+            <div className="label-mono" style={{ fontSize: 10, marginBottom: 14 }}>{t('deepfake.artifactsLabel')}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[
-                { label: 'Voice naturalness',     val: 0.18, bad: phase === 'flagged' },
-                { label: 'Spectral consistency',  val: 0.24, bad: phase === 'flagged' },
-                { label: 'Temporal pattern',      val: 0.31, bad: phase === 'flagged' },
-                { label: 'Artifact detection',    val: 0.92, bad: phase === 'flagged', invert: true, label2: 'High artefact load' },
+                { label: t('deepfake.axisNaturalness'),  val: 0.18, bad: phase === 'flagged' },
+                { label: t('deepfake.axisSpectral'),     val: 0.24, bad: phase === 'flagged' },
+                { label: t('deepfake.axisTemporal'),     val: 0.31, bad: phase === 'flagged' },
+                { label: t('deepfake.axisArtifact'),     val: 0.92, bad: phase === 'flagged', invert: true, label2: t('deepfake.axisArtifactHigh') },
               ].map((r, i) => (
                 <ArtifactRow key={i} {...r} animate={phase === 'flagged'} delay={i*120}/>
               ))}
@@ -620,7 +627,7 @@ function DeepfakeScreen({ onNext, audio }) {
 
           <div style={{ display: 'flex', gap: 16 }}>
             <button className="btn btn-primary" onClick={onNext} disabled={phase !== 'flagged'} style={{ opacity: phase === 'flagged' ? 1 : 0.4 }}>
-              Show me why
+              {t('deepfake.showMeWhy')}
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                 <path d="M3 9 L15 9 M10 4 L15 9 L10 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
