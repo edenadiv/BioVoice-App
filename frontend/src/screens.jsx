@@ -2,6 +2,7 @@
 // Deepfake, TCAV. Each is full-bleed within the 1920x1080 stage.
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { seedRand } from "./audio.jsx";
 import {
   VoiceOrb, Waveform, MelSpectrogram, EmbeddingCloud, SimilarityGauge,
@@ -74,9 +75,12 @@ function fmtTime(d) {
 // 1. WELCOME / ATTRACT SCREEN
 // =============================================================================
 function WelcomeScreen({ onStart, micState, audio }) {
+  // F5.2 — strings extracted to i18n. Numeric labels (< 2s, 0.79%, > 95%,
+  // 192) stay literal because they're locale-neutral metric values.
+  const { t } = useTranslation();
   return (
     <div className="screen fade-enter">
-      <Chrome status="STANDBY · WAITING FOR USER" statusKind="" subtitle="Tap anywhere to begin" screenName="00 ATTRACT"/>
+      <Chrome status={t('welcome.status')} statusKind="" subtitle={t('welcome.subtitle')} screenName="00 ATTRACT"/>
 
       <div style={{
         position: 'absolute', inset: 0,
@@ -90,7 +94,7 @@ function WelcomeScreen({ onStart, micState, audio }) {
               fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
               letterSpacing: '0.4em', color: 'var(--teal-2)', textTransform: 'uppercase',
             }}>
-              <LivePulse size={8}/> &nbsp; Live demonstration
+              <LivePulse size={8}/> &nbsp; {t('welcome.eyebrow')}
             </div>
           </div>
 
@@ -113,23 +117,22 @@ function WelcomeScreen({ onStart, micState, audio }) {
               fontSize: 96, fontWeight: 200, letterSpacing: '-0.02em',
               lineHeight: 1, color: 'var(--ink)',
             }}>
-              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>Your voice</span>
-              <span style={{ color: 'var(--ink-mute)' }}> is your </span>
-              <span style={{ fontWeight: 300 }}>signature.</span>
+              <span className="serif" style={{ fontStyle: 'italic', color: 'var(--teal-2)' }}>{t('welcome.headlineLeft')}</span>
+              <span style={{ color: 'var(--ink-mute)' }}> {t('welcome.headlineMid')} </span>
+              <span style={{ fontWeight: 300 }}>{t('welcome.headlineRight')}</span>
             </div>
             <div style={{
               marginTop: 22, fontSize: 22, color: 'var(--ink-mute)',
               maxWidth: 920, fontWeight: 300, lineHeight: 1.5,
             }}>
-              BioVoice turns the way you speak into a unique biometric fingerprint —
-              and tells real humans apart from AI deepfakes in under two seconds.
+              {t('welcome.subhead')}
             </div>
           </div>
 
           {/* CTAs */}
           <div style={{ display: 'flex', gap: 18, marginTop: 8 }}>
             <button className="btn btn-primary" onClick={onStart}>
-              Begin demonstration
+              {t('welcome.begin')}
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                 <path d="M3 9 L15 9 M10 4 L15 9 L10 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
@@ -144,13 +147,13 @@ function WelcomeScreen({ onStart, micState, audio }) {
             width: 1100,
           }}>
             {[
-              ['< 2s', 'End-to-end decision'],
-              ['0.79%', 'Identity error rate'],
-              ['> 95%', 'Deepfake detection'],
-              ['192', 'Voice fingerprint dims'],
+              ['< 2s', t('welcome.metricLatency')],
+              ['0.79%', t('welcome.metricEer')],
+              ['> 95%', t('welcome.metricDeepfake')],
+              ['192', t('welcome.metricDims')],
             ].map(([n, l]) => (
               <div key={l} style={{ textAlign: 'center' }}>
-                <div className="num-mono" style={{ fontSize: 36, color: 'var(--teal-2)', fontWeight: 300 }}>{n}</div>
+                <div className="num-mono biovoice-numerals" style={{ fontSize: 36, color: 'var(--teal-2)', fontWeight: 300 }}>{n}</div>
                 <div className="label-mono" style={{ marginTop: 8, fontSize: 10 }}>{l}</div>
               </div>
             ))}
@@ -160,11 +163,11 @@ function WelcomeScreen({ onStart, micState, audio }) {
 
       {/* Caption explaining hero microphone state */}
       <div style={{ position: 'absolute', left: 56, bottom: 84, width: 280 }}>
-        <div className="label-mono" style={{ fontSize: 10, marginBottom: 6 }}>MICROPHONE</div>
+        <div className="label-mono" style={{ fontSize: 10, marginBottom: 6 }}>{t('welcome.micLabel')}</div>
         <div style={{ fontSize: 13, color: micState === 'live' ? 'var(--teal-2)' : 'var(--ink-mute)' }}>
-          {micState === 'live' ? 'Live · the orb breathes with the room' :
-           micState === 'denied' ? 'Permission denied · running on synthesized audio' :
-           'Synthesized audio · grant mic to feel it react'}
+          {micState === 'live' ? t('welcome.micLive') :
+           micState === 'denied' ? t('welcome.micDenied') :
+           t('welcome.micSynth')}
         </div>
       </div>
     </div>

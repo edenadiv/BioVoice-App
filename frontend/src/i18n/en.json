@@ -29,6 +29,24 @@
     "userCount": "Enrolled users",
     "lastEvent": "Last event"
   },
+  "welcome": {
+    "status": "STANDBY · WAITING FOR USER",
+    "subtitle": "Tap anywhere to begin",
+    "eyebrow": "Live demonstration",
+    "headlineLeft": "Your voice",
+    "headlineMid": "is your",
+    "headlineRight": "signature.",
+    "subhead": "BioVoice turns the way you speak into a unique biometric fingerprint — and tells real humans apart from AI deepfakes in under two seconds.",
+    "begin": "Begin demonstration",
+    "metricLatency": "End-to-end decision",
+    "metricEer": "Identity error rate",
+    "metricDeepfake": "Deepfake detection",
+    "metricDims": "Voice fingerprint dims",
+    "micLabel": "MICROPHONE",
+    "micLive": "Live · the orb breathes with the room",
+    "micDenied": "Permission denied · running on synthesized audio",
+    "micSynth": "Synthesized audio · grant mic to feel it react"
+  },
   "verify": {
     "title": "Verify identity",
     "tapToStart": "Tap to start",
