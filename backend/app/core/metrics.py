@@ -1,10 +1,15 @@
-"""F7.3 — Prometheus metrics surface.
+"""F7.3 — Prometheus metrics surface + JSON summary for the kiosk UI.
 
 Hand-rolled counter / histogram registry — avoids pulling
 `prometheus_client` into the dep tree. The format matches the
 text-based exposition spec at
 https://prometheus.io/docs/instrumenting/exposition_formats/ which is
 all the standard scraper needs.
+
+`_MetricsRegistry.summary()` returns a small JSON-friendly snapshot
+the frontend Console panel reads via `GET /metrics/summary` (S1.1).
+That replaces the hardcoded "11ms / 62/s / 14d" decorations the panel
+used to show.
 
 Usage:
 
@@ -23,9 +28,10 @@ network.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import math
 import threading
-from time import perf_counter
+from time import perf_counter, time as wall_time
 
 
 _LABEL_VALUE_RESERVED = ("\\", '"', "\n")
@@ -114,6 +120,27 @@ class Histogram:
             lines.append(f"{self.name}_count{_format_labels(base_labels) if base_labels else ''} {self._counts[key]}")
         return "\n".join(lines)
 
+    def percentile(self, q: float, labels: dict[str, str] | None = None) -> float | None:
+        """Approximate p{q*100} from the cumulative bucket counts.
+        Returns None when the histogram has zero observations.
+
+        Bucket-based percentiles are coarse (the value gets pinned to a
+        bucket edge) but accurate enough for the Console summary —
+        precise enough that "p50 ≈ 0.4 s" is meaningful, sloppy enough
+        that we don't lie about millisecond-level resolution."""
+        key = tuple(sorted((labels or {}).items()))
+        with self._lock:
+            counts = self._counts.get(key)
+            if not counts:
+                return None
+            target = q * counts
+            cumulative = 0
+            for i, edge in enumerate(self.buckets):
+                cumulative = self._buckets[key][i]
+                if cumulative >= target:
+                    return edge
+            return float("inf")  # observation above the largest bucket
+
 
 def _format_le(edge: float) -> str:
     if math.isinf(edge):
@@ -126,6 +153,10 @@ class _MetricsRegistry:
         self._counters: dict[str, Counter] = {}
         self._histograms: dict[str, Histogram] = {}
         self._lock = threading.Lock()
+        # Wall-clock time at module-import — used to derive uptime + a
+        # cold-start ISO timestamp surfaced by summary().
+        self._started_at = wall_time()
+        self._started_iso = datetime.now(timezone.utc).isoformat()
 
     def counter(self, name: str, help_text: str = "") -> Counter:
         with self._lock:
@@ -146,6 +177,32 @@ class _MetricsRegistry:
         for h in self._histograms.values():
             parts.append(h.render())
         return "\n".join(parts) + "\n"
+
+    def summary(self) -> dict[str, float | int | str | None]:
+        """Compact JSON snapshot for the Console panel — replaces the
+        old hardcoded "11ms / 62/s / 14d" decoration. Numbers come from
+        the live registry; uptime from the module-import timestamp."""
+        verifications = self.counter("biovoice_verifications_total")
+        verify_hist = self.histogram("biovoice_verify_seconds")
+
+        # Total verifications (sum across decision labels).
+        with verifications._lock:
+            total_verifications = sum(verifications._values.values())
+
+        uptime_sec = max(0.0, wall_time() - self._started_at)
+        throughput = (total_verifications / uptime_sec) if uptime_sec > 0 else 0.0
+
+        # p50 latency in milliseconds (None until the first /verify lands).
+        p50_sec = verify_hist.percentile(0.5)
+        p50_ms = round(p50_sec * 1000, 1) if p50_sec is not None and not math.isinf(p50_sec) else None
+
+        return {
+            "verifications_total": int(total_verifications),
+            "throughput_per_sec": round(throughput, 3),
+            "uptime_sec": int(uptime_sec),
+            "cold_start_at": self._started_iso,
+            "p50_verify_ms": p50_ms,
+        }
 
 
 metrics = _MetricsRegistry()

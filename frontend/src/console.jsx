@@ -6,6 +6,13 @@ import { VoiceOrb, Waveform, MelSpectrogram, LivePulse } from "./visuals.jsx";
 import { AmbientField, EmbeddingConstellation, LiveFeatures } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { useAppState } from "./lib/session";
+import { getReady } from "./lib/api";
+import {
+  useMetricsSummary,
+  formatLatency,
+  formatThroughput,
+  formatUptime,
+} from "./lib/useMetricsSummary";
 
 // ============================================================================
 // useCounter — animated count-up
@@ -84,6 +91,43 @@ function ParticleFlow({ width = 240, height = 60, color = '#7ef0ff', count = 8, 
 // ============================================================================
 function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
   const [open, setOpen] = useState(false);
+  // Real microphone permission state — replaces the old hardcoded "granted".
+  const [micPermission, setMicPermission] = useState("unknown");
+  useEffect(() => {
+    if (!open || typeof navigator === "undefined" || !navigator.permissions?.query) return;
+    let cancelled = false;
+    let status = null;
+    (async () => {
+      try {
+        status = await navigator.permissions.query({ name: "microphone" });
+        if (cancelled) return;
+        setMicPermission(status.state);
+        status.onchange = () => setMicPermission(status.state);
+      } catch {
+        // Some browsers (older Firefox / iOS Safari) don't expose the
+        // microphone permission descriptor. Leave the state as "unknown".
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (status) status.onchange = null;
+    };
+  }, [open]);
+  // Real model readiness from /readyz — replaces the old TCAV / F5-TTS fakes.
+  const [models, setModels] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ready = await getReady();
+        if (!cancelled) setModels(ready);
+      } catch {
+        if (!cancelled) setModels({ ready: false, databaseOk: false, aasistWeightsOk: false, redimnetWeightsOk: false });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
   return (
     <>
       <button
@@ -157,25 +201,31 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
           <Toggle label="UI sound effects" value={soundOn} onChange={setSoundOn}/>
           <div style={{ marginTop: 10 }} className="label-mono" >
             <span style={{ color: 'var(--ink-soft)' }}>MIC PERMISSION · </span>
-            <span style={{ color: 'var(--good)' }}>granted</span>
+            <span style={{ color: micPermission === "granted" ? 'var(--good)' : micPermission === "denied" ? 'var(--bad)' : 'var(--ink-mute)' }}>
+              {micPermission}
+            </span>
           </div>
         </Section>
 
-        <Section label="Models" sub="Loaded inference graphs.">
-          {[
-            ['ReDimNet-B5', '0.79% EER · 9.1 M params · loaded', 'good'],
-            ['AASIST', 'Anti-spoofing · loaded', 'good'],
-            ['TCAV STAGE-4', 'Explainability · on-demand', 'good'],
-            ['F5-TTS (test rig)', 'Synthetic generator · staged', 'warn'],
-          ].map(([n, s, k]) => (
-            <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: '1px solid var(--line)' }}>
-              <div>
-                <div style={{ fontSize: 13 }}>{n}</div>
-                <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>{s}</div>
+        <Section label="Models" sub="Live readiness from /readyz.">
+          {(() => {
+            const rows = models
+              ? [
+                  ['ReDimNet-B5', '192-d speaker embedding · vendored checkpoint', models.redimnetWeightsOk ? 'good' : 'warn'],
+                  ['AASIST', 'Anti-spoofing detector · vendored checkpoint', models.aasistWeightsOk ? 'good' : 'warn'],
+                  ['Spoof generator', 'system TTS fallback (XTTS planned for v1.1)', 'warn'],
+                ]
+              : [['Loading…', 'Probing /readyz', 'warn']];
+            return rows.map(([n, s, k]) => (
+              <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: '1px solid var(--line)' }}>
+                <div>
+                  <div style={{ fontSize: 13 }}>{n}</div>
+                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>{s}</div>
+                </div>
+                <span className={`pill ${k}`}><span className="dot"></span>{k === 'good' ? 'READY' : 'STANDBY'}</span>
               </div>
-              <span className={`pill ${k}`}><span className="dot"></span>{k === 'good' ? 'READY' : 'STANDBY'}</span>
-            </div>
-          ))}
+            ));
+          })()}
         </Section>
 
         <Section label="About">
@@ -261,6 +311,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const acceptedCount = useCounter(verifyCount, 1400, [verifyCount]);
   const blockedCount = useCounter(threatCount, 1400, [threatCount]);
   const profilesCount = useCounter(profiles.length, 1000, [profiles.length]);
+
+  // Real backend telemetry — replaces the old hardcoded "11ms / 62/s / 14d".
+  const metrics = useMetricsSummary();
 
   return (
     <div className="screen fade-enter">
@@ -420,12 +473,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             <LiveFeatures freqs={audio.freqs} samples={audio.samples} level={audio.level}/>
           </div>
 
-          {/* Health bar */}
+          {/* Health bar — real backend telemetry from /metrics/summary. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-            <Metric label="GPU latency" value="11ms" sub="p50" trend="flat"/>
-            <Metric label="Inference" value="62/s" sub="rolling" trend="up"/>
+            <Metric label="Verify p50" value={formatLatency(metrics?.p50VerifyMs ?? null)} sub="rolling" trend="flat"/>
+            <Metric label="Throughput" value={formatThroughput(metrics?.throughputPerSec ?? 0)} sub="lifetime avg" trend="up"/>
             <Metric label="Profiles" value={profilesCount.toFixed(0)} sub="enrolled" trend="up"/>
-            <Metric label="Uptime" value="14 d" sub="continuous" trend="flat"/>
+            <Metric label="Uptime" value={metrics ? formatUptime(metrics.uptimeSec) : "—"} sub="since boot" trend="flat"/>
           </div>
         </div>
 

@@ -53,6 +53,17 @@ def prometheus_metrics() -> Response:
     return Response(content=metrics.render(), media_type="text/plain; version=0.0.4")
 
 
+@router.get("/metrics/summary")
+def metrics_summary() -> dict:
+    """Compact JSON snapshot for the kiosk Console panel.
+
+    Returns real verification throughput / p50 latency / uptime derived
+    from the live metrics registry. Replaces the panel's old hardcoded
+    `11ms / 62/s / 14d` decoration. Empty histogram → `p50_verify_ms`
+    is null until the first /verify lands."""
+    return metrics.summary()
+
+
 @router.get("/readyz")
 def ready(request: Request) -> dict:
     """Deep readiness probe. Returns 503 when the database is unreachable

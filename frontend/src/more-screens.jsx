@@ -207,20 +207,39 @@ function DeepfakeLab({ audio, profiles }) {
             <Field label="ATTACK MODEL">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {[
-                  { id: 'clone-v3', label: 'Voice clone', sub: 'XTTS-v3' },
-                  { id: 'replay',   label: 'Replay', sub: 'Recorded attack' },
-                  { id: 'splice',   label: 'Splice', sub: 'Concatenative' },
+                  { id: 'clone-v3', label: 'Voice clone', sub: 'system TTS / XTTS', planned: false },
+                  { id: 'replay',   label: 'Replay',      sub: 'Recorded attack',   planned: true  },
+                  { id: 'splice',   label: 'Splice',      sub: 'Concatenative',     planned: true  },
                 ].map(m => (
-                  <button key={m.id} onClick={() => setModel(m.id)} className="lift"
+                  <button
+                    key={m.id}
+                    onClick={() => { if (!m.planned) setModel(m.id); }}
+                    disabled={m.planned}
+                    title={m.planned ? "Planned for v1.1 — currently routes to Voice clone." : undefined}
+                    className="lift"
                     style={{
-                      padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                      padding: '10px 12px', borderRadius: 10,
+                      cursor: m.planned ? 'not-allowed' : 'pointer',
                       background: model === m.id ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
                       border: model === m.id ? '1px solid rgba(255,178,74,0.5)' : '1px solid var(--line)',
-                      color: 'var(--ink)', textAlign: 'left',
+                      color: m.planned ? 'var(--ink-mute)' : 'var(--ink)',
+                      textAlign: 'left',
                       transition: 'all 200ms',
+                      position: 'relative',
+                      opacity: m.planned ? 0.55 : 1,
                     }}>
                     <div style={{ fontSize: 12 }}>{m.label}</div>
                     <div className="label-mono" style={{ fontSize: 8, marginTop: 2 }}>{m.sub}</div>
+                    {m.planned && (
+                      <div className="label-mono" style={{
+                        position: 'absolute', top: 8, right: 8,
+                        fontSize: 7, padding: '2px 6px', borderRadius: 3,
+                        background: 'rgba(125,200,255,0.08)',
+                        color: 'var(--ink-mute)',
+                        border: '1px solid rgba(125,200,255,0.2)',
+                        letterSpacing: '0.08em',
+                      }}>PLANNED</div>
+                    )}
                   </button>
                 ))}
               </div>

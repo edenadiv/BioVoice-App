@@ -75,6 +75,39 @@ type SpoofTestResponse = {
   analysis_details: AnalysisDetailsResponse;
 };
 
+type MetricsSummaryResponse = {
+  verifications_total: number;
+  throughput_per_sec: number;
+  uptime_sec: number;
+  cold_start_at: string;
+  p50_verify_ms: number | null;
+};
+
+type ReadyzResponse = {
+  ready: boolean;
+  checks: {
+    database?: { ok: boolean };
+    aasist_weights?: { ok: boolean; path?: string };
+    redimnet_weights?: { ok: boolean; path?: string };
+  };
+  models_note?: string;
+};
+
+export type MetricsSummary = {
+  verificationsTotal: number;
+  throughputPerSec: number;
+  uptimeSec: number;
+  coldStartAt: string;
+  p50VerifyMs: number | null;
+};
+
+export type ReadyState = {
+  ready: boolean;
+  databaseOk: boolean;
+  aasistWeightsOk: boolean;
+  redimnetWeightsOk: boolean;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     // Kiosk + backend are same-origin in production (nginx fronts both)
@@ -236,5 +269,28 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     deepfakeScore: response.deepfake_score,
     decision: response.decision,
     analysisDetails: toAnalysisDetails(response.analysis_details),
+  };
+}
+
+// -- Operational telemetry ----------------------------------------------------
+
+export async function getMetricsSummary(): Promise<MetricsSummary> {
+  const response = await request<MetricsSummaryResponse>("/metrics/summary");
+  return {
+    verificationsTotal: response.verifications_total,
+    throughputPerSec: response.throughput_per_sec,
+    uptimeSec: response.uptime_sec,
+    coldStartAt: response.cold_start_at,
+    p50VerifyMs: response.p50_verify_ms,
+  };
+}
+
+export async function getReady(): Promise<ReadyState> {
+  const response = await request<ReadyzResponse>("/readyz");
+  return {
+    ready: response.ready,
+    databaseOk: response.checks.database?.ok ?? false,
+    aasistWeightsOk: response.checks.aasist_weights?.ok ?? false,
+    redimnetWeightsOk: response.checks.redimnet_weights?.ok ?? false,
   };
 }
