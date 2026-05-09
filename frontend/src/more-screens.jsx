@@ -19,6 +19,10 @@ function Sidebar({ page, setPage }) {
     { id: 'lab',      label: t('nav.deepfakeLab'),   icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
     { id: 'profiles', label: t('nav.profiles'),      icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
     { id: 'settings', label: t('nav.settings'),      icon: <><circle cx="10" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
+    // F6 — operator admin (gated by BIOVOICE_ADMIN_API_KEY at the
+    // backend; the screen itself shows a disabled state until the
+    // operator pastes the key).
+    { id: 'admin',    label: t('nav.admin', 'Admin'), icon: <><path d="M10 2L3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5l-7-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M7 10l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></> },
   ];
   return (
     <div className="biovoice-sidebar" style={{

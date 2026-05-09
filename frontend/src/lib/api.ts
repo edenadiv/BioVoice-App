@@ -278,6 +278,89 @@ function parseFileName(contentDisposition: string | null): string {
   return match?.[1] ?? "spoof.wav";
 }
 
+// F6 frontend — admin surface helpers.
+//
+// Every call passes the admin key via the X-Admin-API-Key header. Unlike
+// the user-session cookie path, the key never touches a cookie — the
+// admin UI stores it in localStorage and replays per request. That keeps
+// the admin and user sessions independently revocable.
+
+export type AdminThresholds = {
+  similarity_threshold: number;
+  deepfake_threshold: number;
+  voice_naturalness_threshold: number;
+  spectral_consistency_threshold: number;
+  temporal_patterns_threshold: number;
+  artifact_detection_threshold: number;
+};
+
+export type AdminAuditEvent = {
+  event_id: number;
+  occurred_at: string;
+  actor: string | null;
+  ip: string | null;
+  action: string;
+  target: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+async function adminRequest<T>(adminKey: string, path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("X-Admin-API-Key", adminKey);
+  if (init?.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    // Admin routes are key-gated, not cookie-gated; sending credentials is
+    // harmless but unnecessary.
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Admin request failed (${response.status})`);
+  }
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+export async function adminGetThresholds(adminKey: string): Promise<AdminThresholds> {
+  return adminRequest<AdminThresholds>(adminKey, "/admin/settings/thresholds");
+}
+
+export async function adminUpdateThresholds(
+  adminKey: string,
+  patch: Partial<AdminThresholds>,
+): Promise<AdminThresholds> {
+  return adminRequest<AdminThresholds>(adminKey, "/admin/settings/thresholds", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function adminListAudit(
+  adminKey: string,
+  options: { since?: string; limit?: number } = {},
+): Promise<AdminAuditEvent[]> {
+  const params = new URLSearchParams();
+  if (options.since) params.set("since", options.since);
+  if (options.limit) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return adminRequest<AdminAuditEvent[]>(
+    adminKey,
+    `/admin/audit${query ? `?${query}` : ""}`,
+  );
+}
+
+export async function adminDeleteUser(adminKey: string, userId: string): Promise<void> {
+  await adminRequest<void>(adminKey, `/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function generateSpoofSample(payload: {
   text: string;
   language: string;

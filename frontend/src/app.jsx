@@ -8,6 +8,7 @@ import {
 import { ConsoleScreen, SettingsPanel } from "./console.jsx";
 import { Sidebar, DeepfakeLab, UserSettingsPage, ProfilesPage } from "./more-screens.jsx";
 import { VerificationOverlay } from "./console-ext.jsx";
+import { AdminScreen } from "./admin-screen.jsx";
 import { AppStateProvider, useAppState, useDerivedCounts, useProfiles } from "./lib/session";
 
 const DEFAULT_SETTINGS = {
@@ -75,6 +76,7 @@ function AppShell() {
         else if (k === '2') setPage('lab');
         else if (k === '3') setPage('profiles');
         else if (k === '4') setPage('settings');
+        else if (k === '5') setPage('admin');
         else if (k === 'escape') setOverlayProfile(null);
       } else {
         if (k === 'escape') setScreen('welcome');
@@ -110,6 +112,7 @@ function AppShell() {
       case 'lab':      body = <DeepfakeLab audio={audio} profiles={profiles}/>; break;
       case 'profiles': body = <ProfilesPage profiles={profiles} audio={audio}/>; break;
       case 'settings': body = <UserSettingsPage settings={settings} setSettings={setSettings}/>; break;
+      case 'admin':    body = <AdminScreen/>; break;
       default:
         body = <ConsoleScreen
           audio={audio} micState={mic.state} micStart={startMic}
