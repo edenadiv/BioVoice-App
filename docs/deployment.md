@@ -1,18 +1,20 @@
-# Deployment guide (F7)
+# Deployment guide
+
+> Single-kiosk Mac/Linux field deployment. No auth surface (operator-driven physical environment); see `docs/operator-guide.md` for day-to-day usage and `docs/hardware.md` for procurement specs.
 
 ## TL;DR
 
-```
+```bash
 git clone https://github.com/edenadiv/BioVoice-App.git
 cd BioVoice-App
 
-# 1. Provision secrets
+# 1. Provision optional config
 cp backend/.env.example backend/.env
-# edit backend/.env — at minimum set BIOVOICE_ADMIN_API_KEY
+# (edit if you need non-default CORS_ORIGINS or LOG_LEVEL)
 
-# 2. Provision TLS certs
+# 2. Provision TLS certs (optional for closed-network kiosks)
 mkdir -p deploy/certs
-# drop fullchain.pem + privkey.pem here
+# drop fullchain.pem + privkey.pem here, OR use self-signed for closed networks
 
 # 3. Build the frontend
 cd frontend && npm ci && npm run build && cd ..
@@ -30,30 +32,24 @@ The full kiosk should now be reachable at `https://<host>/`.
 
 | Component | Image | Port | Purpose |
 |---|---|---|---|
-| `backend` | `biovoice-backend:latest` (built from `Dockerfile`) | internal :8000 | FastAPI app + SQLite |
-| `frontend` | `nginx:1.27-alpine` | internal :80 | Static SPA bundle |
+| `backend` | `biovoice-backend:latest` (built from `Dockerfile`) | internal :8000 | FastAPI app + SQLite + ReDimNet + AASIST |
+| `frontend` | `nginx:1.27-alpine` | internal :80 | Static SPA bundle (Vite output from `frontend/dist`) |
 | `nginx` | `nginx:1.27-alpine` | host :80 + :443 | TLS + HSTS + edge rate-limit |
 
 All traffic flows in through `nginx` → `frontend` (for `/`) or `backend` (for `/api/*`, `/readyz`, `/healthz`). The backend container has no host-published port.
 
-## Required environment variables
+## Environment variables
 
-See `backend/.env.example` for the full list. The non-defaultable ones:
-
-| Var | Why |
-|---|---|
-| `BIOVOICE_ADMIN_API_KEY` | Gates the `/admin/*` surface (F6). Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Without this, every admin route returns 503. |
-| `CORS_ORIGINS` | Comma-separated allow-list for the browser. Must include the public URL — e.g. `CORS_ORIGINS=https://kiosk.example.com`. |
-
-Optional but commonly set:
+The kiosk is auth-free by design (operator-driven physical environment). All env vars are optional with sensible defaults.
 
 | Var | Default | Use |
 |---|---|---|
-| `SESSION_IDLE_SECONDS` | 1800 | F2.1 — session lifetime. |
-| `LOGIN_RATE_MAX_ATTEMPTS` / `_WINDOW_SECONDS` / `LOGIN_LOCKOUT_SECONDS` | 5 / 300 / 900 | F2.2 — brute-force gate. |
-| `LOG_LEVEL` | INFO | Standard Python logging level. |
-| `BIOVOICE_LOG_FORMAT` | json | F7.2 — `plain` for human-readable dev. |
-| `BIOVOICE_COOKIE_INSECURE` | unset | F2.5 — drop `Secure` cookie flag for HTTP local dev. **Never set in production.** |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list for the browser. Set to your kiosk hostname in production: `CORS_ORIGINS=https://kiosk.example.com`. |
+| `LOG_LEVEL` | `INFO` | Standard Python logging level. |
+| `BIOVOICE_LOG_FORMAT` | `json` | F7.2 — `plain` for human-readable dev. |
+| `DATABASE_URL` | (SQLite at `./data/biovoice.db`) | Reserved for the v1.1 Postgres migration (see below). |
+
+See `backend/.env.example` for the canonical reference.
 
 ## TLS certificates
 
@@ -67,15 +63,15 @@ The `nginx` container expects the cert files at:
 Mounted from `./deploy/certs/` on the host. Three common provisioning paths:
 
 1. **Let's Encrypt** with `certbot` on the host: `certbot certonly --standalone -d kiosk.example.com`, then symlink `/etc/letsencrypt/live/<domain>/{fullchain,privkey}.pem` into `./deploy/certs/`. Reload nginx after each renewal.
-2. **Managed cert from the cloud vendor**: terminate TLS at the cloud LB (ALB / Cloud Load Balancer / Front Door) instead of in the `nginx` container. The compose setup keeps the per-host nginx config for HSTS + rate limit even when TLS termination is upstream.
+2. **Self-signed** for closed-network kiosks: `openssl req -x509 -newkey rsa:4096 -keyout privkey.pem -out fullchain.pem -days 825 -nodes -subj "/CN=biovoice-kiosk.local"`. The browser will prompt the operator to accept the cert once.
 3. **Customer PKI**: drop their fullchain + key directly into `./deploy/certs/` and document the renewal cadence.
 
 ## ML weights
 
-`backend/models/aasist.pt` and `backend/models/redimnet_b5.pt` are large binaries (~150 MB each) and are **not** committed to the repo. The container expects them at `/app/models/`. Two ways to provision:
+`backend/models/aasist.pt` (~1.2 MB) and `backend/models/redimnet_b5.pt` (~30 MB) are the production checkpoints.
 
-1. **Bake into the image** — add `COPY models /app/models` to the Dockerfile (rebuild on every weight update). Increases image size but simplifies deploys.
-2. **Mount at runtime** — keep the weights on the host (or an object store) and mount as a read-only volume. The compose file ships option 2 by default; populate the `biovoice-models` named volume:
+- **Bake into the image**: add `COPY models /app/models` to the `Dockerfile` (rebuild on every weight update). Increases image size but simplifies deploys.
+- **Mount at runtime** (default in `docker-compose.yml`): keep the weights on the host (or an object store) and mount as a read-only volume:
 
 ```bash
 docker run --rm -v biovoice_biovoice-models:/models -v "$(pwd)/backend/models:/src" alpine \
@@ -84,6 +80,14 @@ docker run --rm -v biovoice_biovoice-models:/models -v "$(pwd)/backend/models:/s
 
 If the weights are missing, `/readyz` reports `models_note` and the backend falls back to its heuristic detector + encoder. Verification still works but accuracy degrades — production must serve real weights.
 
+## Spoof generation engine
+
+The `/spoof` route uses the system text-to-speech as the default engine:
+- macOS containers: `say` (bundled with the OS, no extra config)
+- Linux containers: install `espeak-ng` via `apt-get install -y espeak-ng` in the Dockerfile (or use the macOS host directly)
+
+XTTS-v2 voice cloning is **planned for v1.1** — see `Plan.md` §S2 for the migration steps (Py 3.12 venv switch + 1.8 GB checkpoint + docker-compose volume mount). The current kiosk's spoof verdicts on system-TTS audio are documented as a known limitation in `docs/operator-guide.md`.
+
 ## Operational checks
 
 | Check | Command |
@@ -91,7 +95,7 @@ If the weights are missing, `/readyz` reports `models_note` and the backend fall
 | Liveness | `curl https://kiosk.example.com/healthz` → `{"status":"ok"}` |
 | Readiness (deep) | `curl https://kiosk.example.com/readyz` → `{"ready":true,"checks":{...}}` |
 | Prometheus metrics | `curl https://kiosk.example.com/api/metrics` |
-| Audit log | `curl -H "X-Admin-API-Key: $KEY" https://kiosk.example.com/api/admin/audit?limit=20` |
+| Operator summary | `curl https://kiosk.example.com/api/metrics/summary` (powers the Console panel — same numbers visible in the UI) |
 
 ### What `/readyz` checks
 
@@ -113,25 +117,22 @@ Retention: 30 days, configurable inside `backup.sh`.
 
 To restore: stop the backend, run `./deploy/restore.sh <archive>`, restart. Existing data is moved aside (not deleted) so the restore is reversible.
 
-## Postgres migration (F7.1 — planned)
+## Postgres migration (v1.1 — planned)
 
 The current SQLite store is functional for single-instance deployments up to a few thousand enrolled users. Beyond that — or for a multi-instance HA setup — migrate to Postgres:
 
-1. Implement `app/storage/postgres_store.py` against the existing `VerificationStore` Protocol (and the rate-limit / session / audit Protocols added in F2 / F6).
+1. Implement `app/storage/postgres_store.py` against the existing `VerificationStore` Protocol.
 2. Add `DATABASE_URL=postgres://…` env var; `core/container.py` chooses store based on the URL scheme.
 3. Alembic migration that creates the schema documented in `app/storage/sqlite_store.py:_ensure_schema`.
-4. Cutover: stop traffic, `pg_dump` the SQLite via `sqlite3 → CSV → COPY` script (commit under `scripts/migrate_sqlite_to_postgres.py`), redeploy with `DATABASE_URL` set.
+4. Cutover: stop traffic, run `scripts/migrate_sqlite_to_postgres.py`, redeploy with `DATABASE_URL` set.
 
-The Protocol-driven storage layer means no service code changes — only the store implementation and the container wiring.
+The Protocol-driven storage layer means no service code changes — only the store implementation and the container wiring. See `docs/postgres_migration.md` for the full playbook.
 
-## Pentest scope (F9.4)
+## Hardening checklist
 
-When booking the pentest, scope:
+For closed-network single-kiosk deployments, the threat model is mostly local (operator misuse + physical access). For wider exposure, revisit:
 
-- `/auth/login` (F2.2 rate limit, F2.5 cookie auth) — brute-force, replay, session fixation.
-- `/admin/*` (F6) — admin-key bypass, IDOR on user delete, threshold-update race.
-- `/me/*` (F2.5 cookie auth) — CSRF (despite SameSite=Strict), cookie theft via XSS.
-- File upload paths (`/enroll`, `/verify`, `/me/spoof`) — multipart parser exploits, file-content tricks.
-- TLS config — A+ on SSL Labs is the floor.
-
-Provide the pentester with a fresh `BIOVOICE_ADMIN_API_KEY` and a non-admin enrolment account.
+- File upload paths (`/enroll`, `/verify`, `/spoof`, `/spoof/test`) — multipart parser limits configured in nginx (10 MB body limit). Verify on your nginx version.
+- TLS config — A+ on SSL Labs is the floor. The bundled `deploy/nginx.conf` aims for Mozilla "intermediate" profile.
+- Rate-limit at the edge: 50 r/s per IP, burst 100, configured in `deploy/nginx.conf`.
+- If the kiosk becomes network-reachable beyond the operator console, **add an auth layer** — the v1.0 strip removed cookie sessions because the kiosk was operator-controlled. See `docs/remaining_work.md` G8.

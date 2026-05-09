@@ -3,6 +3,10 @@
 A single page that walks you from a fresh checkout to a working
 voice-verification round-trip.
 
+> Hardware spec + procurement: see [`hardware.md`](hardware.md).
+> Production deploy via Docker: see [`deployment.md`](deployment.md).
+> Real model benchmarks: see [`benchmarks.md`](benchmarks.md).
+
 ## Boot the stack
 
 You'll want two terminals.
