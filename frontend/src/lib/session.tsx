@@ -194,3 +194,31 @@ export function useDerivedCounts(): { verifyCount: number; threatCount: number }
     return { verifyCount, threatCount };
   }, [results]);
 }
+
+// G15 — per-profile verification counts derived from state.results. Used
+// by the ProfilesPage stat row to replace the previous Math.random()
+// VERIFIED count. Returns a Record<userId, count> so ProfilesPage looks
+// up a single profile's number without re-walking the array per card.
+export function usePerProfileVerifyCounts(): Record<string, number> {
+  const { results } = useAppState();
+  return useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of results) {
+      if (r.decision === "ACCEPT") {
+        counts[r.userId] = (counts[r.userId] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [results]);
+}
+
+// G15 — days elapsed between an ISO timestamp and now. Returns 0 for
+// future dates / unparseable input so the stat-card renderer never
+// shows a negative day count.
+export function daysSince(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 0;
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  return Math.max(0, days);
+}
