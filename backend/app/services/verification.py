@@ -38,6 +38,18 @@ _MISMATCH_MESSAGE = "Speaker did not match the enrolled profile."
 _SYNTHETIC_MESSAGE = "Audio flagged as synthetic. Access denied."
 
 
+def _clamp_unit(value: float) -> float:
+    """Clamp a [0, 1]-domain score to the boundary, defending the
+    Pydantic Field(ge=0.0, le=1.0) constraint against float-precision
+    drift (cosine similarity of identical embeddings can return
+    1.0000000000000002 on some Python versions)."""
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
 class VerificationStore(Protocol):
     def put_speaker(self, record: SpeakerRecord) -> None: ...
 
@@ -204,12 +216,23 @@ class VerificationService:
         deepfake_score = self.detector.detect(trimmed.waveform)
         detect_ms = (perf_counter() - t0) * 1000.0
 
+        # G1 / Python 3.11/3.12 fix — cosine similarity can return
+        # 1.0000000000000002 due to float-precision noise when two
+        # embeddings are numerically identical. The schema constraint
+        # is `Field(ge=0.0, le=1.0)`, so clamp at the boundary before
+        # the value reaches Pydantic. No semantic change for any score
+        # already inside [0, 1].
         sample_similarities = [
-            self.encoder.cosine_similarity(sample_embedding, query_embedding)
+            _clamp_unit(self.encoder.cosine_similarity(sample_embedding, query_embedding))
             for sample_embedding in speaker.sample_embeddings
         ]
-        centroid_similarity = self.encoder.cosine_similarity(speaker.embedding, query_embedding)
-        similarity_score = self._aggregate_similarity(sample_similarities, centroid_similarity)
+        centroid_similarity = _clamp_unit(
+            self.encoder.cosine_similarity(speaker.embedding, query_embedding)
+        )
+        similarity_score = _clamp_unit(
+            self._aggregate_similarity(sample_similarities, centroid_similarity)
+        )
+        deepfake_score = _clamp_unit(deepfake_score)
 
         decision, reason, message = self._decide(similarity_score, deepfake_score)
         # F4 — analysis details now come from acoustic features (HNR, F0
