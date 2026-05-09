@@ -22,7 +22,9 @@ class DeepfakeDetectorService:
 
         try:
             import torch
-            from biovoice.core.vendor.aasist.aasist_model import AASISTModel, AASIST_CONFIG
+            # G1 — locally vendored under `app/vendor/aasist/` (was a stale
+            # `biovoice.core.vendor.aasist` namespace that never resolved).
+            from app.vendor.aasist.aasist_model import AASISTModel, AASIST_CONFIG
         except Exception as exc:  # pragma: no cover - optional dependency path
             logger.warning("AASIST optional dependencies unavailable: %s", exc)
             self.model = None

@@ -149,10 +149,15 @@ function AppShell() {
     case 'process_verify':
       body = <ProcessingScreen mode="verify" audio={audio} onComplete={() => setScreen('verify')}/>; break;
     case 'verify':
+      // G2 — `verifyResult` was undefined here (a ReferenceError when
+      // `lastVerification` is null, e.g. on first paint of demo mode
+      // before any real verification has run). Default to 0 — the
+      // VerifyScreen renders the gauges from these values, and 0 maps
+      // to a sensible "no signal yet" visual instead of crashing.
       body = <VerifyScreen
         name={name}
-        similarity={lastVerification?.similarityScore ?? verifyResult.similarity}
-        dfScore={lastVerification?.deepfakeScore ?? verifyResult.dfScore}
+        similarity={lastVerification?.similarityScore ?? 0}
+        dfScore={lastVerification?.deepfakeScore ?? 0}
         samples={audio.samples}
         onNext={() => setScreen('deepfake')}/>; break;
     case 'deepfake':
