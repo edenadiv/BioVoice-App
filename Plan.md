@@ -23,9 +23,10 @@ Decisions locked from the user:
 | Topic | Choice |
 |---|---|
 | Deploy target | Single kiosk on Mac/Linux box, operator-driven |
-| XTTS | Migrate to Py 3.12 + install real XTTS-v2 for real cloning |
+| XTTS | **Deferred** — system-TTS fallback (`say` / `espeak-ng`) is the v1.0 spoof engine. XTTS-v2 + voice cloning lands in v1.1. |
 | Eval rigour | Published benchmarks: ASVspoof 2019 LA (AASIST), VoxCeleb1-O (ReDimNet) |
 | Cosmetic fakes | Replace with real `/metrics` values; keep attack-picker tiles but mark replay/splice as `PLANNED` |
+| Future-app shape | v1.1 wraps the kiosk as a **Tauri** native installer (Mac `.dmg` / Win `.msi` / Linux `.deb`) with the FastAPI backend bundled as a sidecar. Same backend code; new shell. |
 
 Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen number traces to the live backend, real voice cloning works, and we can cite real EER numbers when asked.
 
@@ -72,45 +73,11 @@ Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen 
 - `frontend/src/more-screens.jsx` — DeepfakeLab picker + result panel
 - `frontend/src/lib/useMetricsSummary.test.ts` — new
 
-## Phase S2 — Real XTTS voice cloning (Py 3.12 backend)
+## Phase S2 — DEFERRED to v1.1 (Real XTTS voice cloning)
 
-**Goal**: `/spoof` produces real voice-cloned audio, not a generic `say` voice. AASIST catches it as FAKE.
+The v1.0 spoof engine is the system-TTS fallback (`say` on macOS, `espeak-ng` on Linux). It produces real synthetic audio that goes through the real AASIST detector — the lab is mechanically functional today. The known caveat (AASIST doesn't reliably catch macOS Siri voices) is documented in `docs/operator-guide.md`.
 
-### S2.1 Switch the dev venv to Py 3.12
-- `backend/.python-version` — pin to 3.12.
-- Re-create venv: `pyenv install 3.12.10 && pyenv local 3.12.10 && python -m venv .venv && .venv/bin/pip install -e ".[model,spoof,test]"`.
-- Verify: `.venv/bin/python -c "import TTS; print(TTS.__version__)"` → `0.22.x`.
-- Update `docs/operator-guide.md` quick-start to specify Py 3.12 (currently silent on the version).
-
-### S2.2 XTTS-v2 checkpoint
-- Download `XTTS-v2/config.json` + `XTTS-v2/model.pth` (and `vocab.json`, `speakers_xtts.pth` if used) from Coqui's HuggingFace mirror. ~1.8 GB.
-- Place at `<repo>/XTTS-v2/` (matches `Settings.xtts_model_path` default at `backend/app/core/config.py:50`).
-- Add the path to `.gitignore` (don't commit 1.8 GB).
-- Add a `scripts/download_xtts.sh` helper (curl + sha256 verify).
-
-### S2.3 End-to-end XTTS smoke
-- `_xtts_available()` (already in `backend/app/services/spoof.py`) returns true once both the package and the checkpoint dir are present.
-- Smoke: enrol `e2e_xtts` with 3 real samples (use `say` to produce input, or operator records manually), then POST `/spoof` with `target_user_id=e2e_xtts` + arbitrary text. Response WAV should sound like the operator's voice, not Siri.
-- Run the resulting WAV through `/spoof/test` — AASIST should score it < 0.5 → DEEPFAKE. **This is the criterion for "XTTS works"**.
-- If AASIST still misses the XTTS clone, log it as a separate finding (see Phase S3 — benchmarks should expose this anyway).
-
-### S2.4 Production Docker image
-- Backend Dockerfile already targets Py 3.12 (`Dockerfile:25 FROM python:3.12-slim AS build`).
-- Add the XTTS checkpoint mount to `docker-compose.yml` (read-only volume from host `XTTS-v2/` → container `/app/XTTS-v2`).
-- Verify the image still builds + boots: `docker compose build && docker compose up -d && curl https://localhost/readyz`.
-
-### S2.5 Tests
-- `backend/tests/test_xtts_spoof.py` (skip if `_xtts_available()` is false in CI) — 2 cases: real cloning produces WAV (>10 s of audio), the WAV decodes via wave.open without error.
-- Don't bench AASIST-on-XTTS in unit tests (slow, model-dependent) — that's S3's job.
-
-**Files**:
-- `backend/.python-version` — new
-- `scripts/download_xtts.sh` — new
-- `.gitignore` — add `XTTS-v2/`
-- `docker-compose.yml` — add XTTS volume mount
-- `docs/operator-guide.md` — Py 3.12 + XTTS-install steps
-- `docs/deployment.md` — same
-- `backend/tests/test_xtts_spoof.py` — new
+XTTS-v2 voice cloning needs Py 3.12 + a 1.8 GB checkpoint + a venv rebuild. That's a v1.1 enhancement, not a v1.0 blocker. See **Out of scope** below for the v1.1 plan stub.
 
 ## Phase S3 — Published benchmarks (real numbers)
 
@@ -159,7 +126,7 @@ Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen 
 
 ### S4.1 docs/deployment.md
 - Strip references to `BIOVOICE_ADMIN_API_KEY`, `SESSION_IDLE_SECONDS`, `LOGIN_RATE_*`, `BIOVOICE_COOKIE_INSECURE` (all deleted in the strip).
-- Add: Py 3.12 + XTTS install instructions (link to S2.2's `download_xtts.sh`).
+- Note: spoof generation uses the system-TTS fallback (`say` / `espeak-ng`) by default. Mention XTTS as a v1.1 upgrade path; don't include install steps yet.
 - Update the env-var table: only the surfaces that exist now (CORS_ORIGINS, LOG_LEVEL, BIOVOICE_LOG_FORMAT, DATABASE_URL).
 - Add: production cert provisioning (Let's Encrypt via certbot for the kiosk hostname, or self-signed for closed-network deploys).
 
@@ -232,19 +199,46 @@ Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen 
 - Draft a GitHub release with the changelog excerpt + links to the docs.
 - (No binary artefacts — single-kiosk doesn't need them.)
 
+## Phase S7 — DEFERRED to v1.1 (Native installer via Tauri)
+
+**Goal**: ship the kiosk as a single native installer (`.dmg` / `.msi` / `.deb`) that bundles the FastAPI backend as a sidecar binary. No Docker required on the operator machine. Same backend code; new shell.
+
+### Stack
+- **Tauri** (Rust + system webview, ~15 MB shell binary). The React frontend builds into the Tauri bundle as static assets.
+- **PyInstaller** packages the backend into a single executable with the model weights baked in (~600 MB AASIST + ReDimNet, ~2 GB if XTTS is also included).
+- **Tauri sidecar API** spawns the backend on app launch, kills it on quit. The webview points at `localhost:8000`.
+
+### Sub-phases
+1. **S7.1** — Build the React app inside Tauri (`tauri init`, copy `frontend/dist` into the bundle).
+2. **S7.2** — PyInstaller spec for the backend. Include `models/aasist.pt` + `models/redimnet_b5.pt` as data files. Handle dynamic libs (libsndfile, torch deps).
+3. **S7.3** — Tauri config: declare the Python binary as a sidecar, spawn it on app start, kill on quit. Health-check the `/readyz` endpoint before the webview navigates.
+4. **S7.4** — Auto-update: Tauri's built-in updater pointed at GitHub Releases.
+5. **S7.5** — Code-signing (Apple Developer cert + Windows EV cert) to avoid SmartScreen / Gatekeeper warnings.
+6. **S7.6** — Three platform builds (macOS arm64 + Linux amd64 + Windows amd64) wired to a CI workflow that produces installer artefacts on tag push.
+
+### Effort
+~5 engineer-days. Big chunks:
+- 1 day: Tauri scaffold + sidecar spawn
+- 1 day: PyInstaller spec (model paths, dynamic libs)
+- 1 day: Three-platform CI workflow
+- 1 day: Code-signing (mostly cert procurement)
+- 1 day: Auto-update + smoke on real hardware
+
+### Open decisions to revisit at v1.1 kickoff
+- Whether to bundle XTTS into the installer (~+2 GB) or keep the system-TTS fallback for the offline app too.
+- Whether to ship one mega-installer (model weights + Python + Tauri shell, ~3 GB) or download weights on first launch.
+- Whether to support headless install (CLI argument to skip the webview, run as a system service).
+
 ---
 
 ## Critical files (paths to touch)
 
 ### Backend
-- `backend/.python-version` — new
 - `backend/app/api/routes.py` — `/metrics/summary` route
 - `backend/app/core/metrics.py` — `summary()` extractor
-- `backend/app/services/spoof.py` — verified XTTS path is healthy (no code changes if `_xtts_available` already covers it)
 - `backend/scripts/eval_aasist.py` — new
 - `backend/scripts/eval_redimnet.py` — new
 - `backend/tests/test_metrics_summary.py` — new
-- `backend/tests/test_xtts_spoof.py` — new (skipped if XTTS missing)
 
 ### Frontend
 - `frontend/src/console.jsx` — Metric panel + SettingsPanel rewires (kill `11ms / 62/s / 14d`)
@@ -264,17 +258,15 @@ Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen 
 - `docs/remaining_work.md` — mark G1, G3 done; defer G2/G4 to v1.1
 
 ### Ops
-- `scripts/download_xtts.sh` — new
-- `docker-compose.yml` — XTTS volume mount
-- `.gitignore` — XTTS-v2/ + benchmark artefacts
+- `.gitignore` — benchmark artefacts (datasets, CSV outputs)
 
 ## Verification (run end-to-end before tagging v1.0.0)
 
-1. **Unit + integration**: `cd backend && .venv/bin/pytest -q` → ≥ 78 pass (76 today + S1 metrics test + S2 XTTS test).
+1. **Unit + integration**: `cd backend && .venv/bin/pytest -q` → ≥ 79 pass (76 today + 3 metrics-summary tests).
 2. **Frontend unit**: `cd frontend && npm test` → ≥ 17 pass (14 today + 3 useMetricsSummary tests).
 3. **Frontend bundle**: `cd frontend && npm run build` → bundle ≤ 80 KB gzipped (some headroom for new metric helpers).
 4. **E2E**: `cd frontend && npx playwright test --project=chromium-desktop` → ≥ 8 pass (7 today + an updated enroll.spec asserting real metric values).
-5. **XTTS smoke**: enrol a profile, `/spoof` returns a WAV that's audibly the same speaker, `/spoof/test` flags it ≥ 50 % of the time as DEEPFAKE.
+5. **Spoof smoke**: enrol a profile, `/spoof` returns a real synthetic WAV via `say` fallback, `/spoof/test` returns a verdict (whatever it is — fallback's AASIST behaviour is documented as a known limitation).
 6. **Bench**: `python backend/scripts/eval_aasist.py --eval ASVspoof2019.LA.cm.eval.trl.txt` produces a CSV + EER number; same for ReDimNet. Numbers landed in `docs/benchmarks.md`.
 7. **Cold deploy**: fresh `git clone` on a wiped box, follow `docs/deployment.md`, kiosk live in < 30 min.
 8. **Cross-browser**: 10-step QA passes on Chrome/Safari/Firefox/iOS/Android.
@@ -286,20 +278,25 @@ Outcome: a single-command deploy on a clean Mac/Linux box where every on-screen 
 | Phase | Engineer-days |
 |---|---|
 | S1 — UI truth (kill cosmetic fakes) | 1.0 |
-| S2 — Real XTTS (Py 3.12 + checkpoint + smoke) | 1.5 (most of it is download + venv switch) |
 | S3 — Published benchmarks (ASVspoof + VoxCeleb) | 2.0 |
 | S4 — Stale docs + hardware runbook | 0.5 |
 | S5 — Cross-browser QA + cold deploy | 1.0 |
 | S6 — Release v1.0.0 | 0.4 |
-| **Total** | **~6.5 engineer-days** |
+| **v1.0 total** | **~5 engineer-days** |
+| S2 — Real XTTS (deferred to v1.1) | 1.5 |
+| S7 — Tauri native installer (deferred to v1.1) | 5.0 |
+| **v1.1 total** | **~6.5 engineer-days** |
 
-Stack as 4 sequential PRs off `feat/strip-scaffolding`:
-- PR-A: S1 (UI truth)
-- PR-B: S2 + S4 (XTTS + docs)
-- PR-C: S3 (benchmarks — separate because it touches dataset paths and is heavy)
-- PR-D: S5 + S6 (deploy verification + release tag)
+Stack as 3 sequential PRs off `feat/strip-scaffolding` for v1.0:
+- PR-A: S1 + S4 (UI truth + doc cleanup)
+- PR-B: S3 (benchmarks — separate because it touches dataset paths and is heavy)
+- PR-C: S5 + S6 (deploy verification + release tag)
 
-Out of scope (deferred to v1.1):
+Deferred to v1.1 (in order of likely value):
+- **S2** — Real XTTS voice cloning (Py 3.12 venv switch + 1.8 GB checkpoint). Lifts the spoof from "audibly Siri" to "sounds like the operator". The whole point of the deepfake lab is sharper if we have this.
+- **S7** — Tauri native installer (`.dmg` / `.msi` / `.deb`). Removes the Docker prerequisite for operators. Single-click install on the kiosk hardware.
+
+Out of scope for both v1.0 and v1.1 unless explicitly re-prioritised:
 - G2 trained sub-classifier heads (research-grade work).
 - G4 10-speaker volunteer study (multi-week recruitment).
 - G5 Postgres migration (single-kiosk doesn't need HA).
