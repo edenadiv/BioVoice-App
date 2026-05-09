@@ -6,6 +6,8 @@ import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { LanguageSwitcher } from "./components/LanguageSwitcher.tsx";
+import { generateSpoofSample, spoofTest } from "./lib/api";
+import { useAppState } from "./lib/session";
 
 // ============================================================================
 // Sidebar — real-app navigation rail.
@@ -74,61 +76,100 @@ function Sidebar({ page, setPage }) {
 }
 
 // ============================================================================
-// DeepfakeLab — interactive deepfake creation/detection demo.
+// DeepfakeLab — interactive deepfake creation/detection.
+//
+// G14 — replaced the setTimeout/Math.random simulation with real backend
+// calls. The "Forge & test attack" button now does a two-step round-trip:
+//
+//   1. POST /me/spoof  → backend XTTS clones the LOGGED-IN user's voice
+//      reading the supplied text. Returns audio/wav (the clone).
+//   2. POST /me/spoof/test → backend runs that clone through the real
+//      AASIST detector + the F4 sub-classifier and returns deepfake
+//      score + decision (FAKE/GENUINE) + the four sub-axis scores.
+//
+// The "target voice" picker is visual context only — the real clone
+// always targets the authenticated user's enrolled voice, since
+// /me/spoof is keyed off the session cookie. Until we add an
+// admin-only "clone any user" endpoint, the operator must log in as
+// the target via the Console verify flow first.
+//
+// XTTS missing on the server (503) and not-logged-in (401) both surface
+// as actionable error banners in the result panel.
 // ============================================================================
 function DeepfakeLab({ audio, profiles }) {
-  const [target, setTarget] = useState(profiles[0].id);
+  const { session } = useAppState();
+  const [target, setTarget] = useState(profiles[0]?.id ?? null);
   const [text, setText] = useState("Authorize transfer of two million dollars.");
   const [model, setModel] = useState('clone-v3');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState(0); // 0 idle, 1 cloning, 2 synthesizing, 3 detecting, 4 done
+  const [error, setError] = useState(null);
+  const [stage, setStage] = useState(0); // 0 idle, 1 cloning, 2 detecting, 3 done
 
   const targetProfile = profiles.find(p => p.id === target) || profiles[0];
 
-  const generate = () => {
-    setGenerating(true); setResult(null); setProgress(0); setStage(1);
-    const stages = [
-      { ms: 1400, next: 2 },
-      { ms: 1600, next: 3 },
-      { ms: 1400, next: 4 },
-    ];
-    let i = 0;
+  const generate = useCallback(async () => {
+    if (!session) {
+      setError("Log in via the Console first — the lab clones the authenticated user's voice.");
+      return;
+    }
+    setError(null);
+    setResult(null);
+    setGenerating(true);
+    setStage(1);
     const startedAt = performance.now();
-    let raf;
-    const totalMs = stages.reduce((a, b) => a + b.ms, 0);
-    const tick = (now) => {
-      const el = now - startedAt;
-      setProgress(Math.min(1, el / totalMs));
-      let cum = 0; let s = 1;
-      for (const st of stages) { cum += st.ms; if (el < cum) break; s = st.next; }
-      setStage(s);
-      if (el >= totalMs) {
-        setGenerating(false);
-        setResult({
-          dfScore: 0.04 + Math.random() * 0.06,
-          confidence: 0.96 + Math.random() * 0.03,
-          model,
-          time: (totalMs / 1000).toFixed(2),
-          artifacts: [
-            { name: 'Spectral discontinuities', strength: 0.81 + Math.random() * 0.1 },
-            { name: 'Phase coherence loss', strength: 0.74 + Math.random() * 0.1 },
-            { name: 'Vocoder fingerprint', strength: 0.91 + Math.random() * 0.05 },
-            { name: 'Micro-prosody drift', strength: 0.62 + Math.random() * 0.15 },
-          ],
-        });
-        return;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-  };
 
+    try {
+      // Step 1 — XTTS clone of the logged-in user's voice. Returns an
+      // audio blob URL we can play AND a fileName for the spoof-test
+      // round-trip.
+      const generation = await generateSpoofSample({
+        text,
+        language: 'en',
+      });
+      setStage(2);
+
+      // Step 2 — fetch the blob, convert to File, run /me/spoof/test on it.
+      // The endpoint runs AASIST + the F4 sub-classifier and returns
+      // deepfake score + decision + the four sub-axis scores.
+      const blob = await (await fetch(generation.audioUrl)).blob();
+      const cloneFile = new File([blob], generation.fileName, { type: 'audio/wav' });
+      const detection = await spoofTest(cloneFile);
+      setStage(3);
+
+      const elapsedMs = performance.now() - startedAt;
+      setResult({
+        audioUrl: generation.audioUrl,
+        fileName: generation.fileName,
+        sourceDescription: generation.sourceDescription,
+        dfScore: detection.deepfakeScore,
+        decision: detection.decision,        // 'FAKE' | 'GENUINE'
+        analysisDetails: detection.analysisDetails,
+        time: (elapsedMs / 1000).toFixed(2),
+        model,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Map backend-known failure modes to actionable messages.
+      let friendly = msg;
+      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
+        friendly = 'Spoof generation requires XTTS-v2. Install it on the backend (see backend/README.md §XTTS spoof generation).';
+      } else if (msg.includes('401')) {
+        friendly = 'Session expired. Log in again via the Console.';
+      } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol')) {
+        friendly = 'No reference sample for this voice — enrol the user first via the Profiles page.';
+      }
+      setError(friendly);
+      setStage(0);
+    } finally {
+      setGenerating(false);
+    }
+  }, [session, text, model]);
+
+  // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
-    { label: 'Cloning voice timbre', sub: 'XTTS-v3 embedding from 6s reference' },
-    { label: 'Synthesizing speech', sub: 'Neural vocoder · 24 kHz waveform' },
-    { label: 'Running BioVoice detector', sub: 'AASIST anti-spoof · 192-d fingerprint' },
+    { label: 'Cloning voice timbre', sub: 'XTTS-v2 → 24 kHz waveform' },
+    { label: 'Running BioVoice detector', sub: 'AASIST + F4 sub-classifier' },
   ];
 
   return (
@@ -213,8 +254,15 @@ function DeepfakeLab({ audio, profiles }) {
             <button onClick={generate} disabled={generating} className="btn btn-primary"
               style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,
                 opacity: generating ? 0.7 : 1, cursor: generating ? 'wait' : 'pointer' }}>
-              {generating ? `Generating · ${(progress * 100).toFixed(0)}%` : <>⚡  Forge & test attack</>}
+              {generating
+                ? (stage === 1 ? 'Cloning voice…' : 'Running detector…')
+                : <>⚡  Forge & test attack</>}
             </button>
+            {!session && (
+              <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 4 }}>
+                Log in via Console to enable real XTTS clone of your voice.
+              </div>
+            )}
           </div>
         </div>
 
@@ -264,7 +312,7 @@ function DeepfakeLab({ audio, profiles }) {
 
           {/* Verdict */}
           <div className="panel outline-glow" style={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
-            {!result && !generating && (
+            {!result && !generating && !error && (
               <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                 <div>
                   <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>◌</div>
@@ -278,34 +326,91 @@ function DeepfakeLab({ audio, profiles }) {
                 <ScanRings/>
               </div>
             )}
+            {error && !generating && (
+              <div style={{
+                display: 'grid', placeItems: 'center', flex: 1, padding: 24,
+                color: '#ff8080', textAlign: 'center',
+              }}>
+                <div>
+                  <div className="label-mono" style={{ fontSize: 10, marginBottom: 10, color: '#ff8080' }}>FORGE FAILED</div>
+                  <div style={{ fontSize: 13, fontFamily: 'JetBrains Mono, monospace', maxWidth: 380, lineHeight: 1.5 }}>
+                    {error}
+                  </div>
+                </div>
+              </div>
+            )}
             {result && (
               <div style={{ animation: 'fadeIn 600ms ease both' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                  <div style={{
-                    padding: '6px 14px', borderRadius: 999,
-                    border: '1px solid rgba(255,85,119,0.5)',
-                    background: 'rgba(255,85,119,0.10)',
-                    color: '#ff5577', fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
-                  }}>⚠  DEEPFAKE DETECTED</div>
-                  <div className="label-mono" style={{ fontSize: 9 }}>BLOCKED IN {result.time}s</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
+                  {/* G14 — banner reflects the REAL detector decision instead of
+                       always-DEEPFAKE. If AASIST flagged the clone (FAKE), the
+                       gate caught it; if not (GENUINE), the clone slipped past
+                       and the operator should know it. */}
+                  {result.decision === 'FAKE' ? (
+                    <div style={{
+                      padding: '6px 14px', borderRadius: 999,
+                      border: '1px solid rgba(255,85,119,0.5)',
+                      background: 'rgba(255,85,119,0.10)',
+                      color: '#ff5577', fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
+                    }}>⚠  DEEPFAKE DETECTED</div>
+                  ) : (
+                    <div style={{
+                      padding: '6px 14px', borderRadius: 999,
+                      border: '1px solid rgba(255,178,74,0.55)',
+                      background: 'rgba(255,178,74,0.10)',
+                      color: '#ffb24a', fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
+                    }}>⚠  CLONE PASSED THE GATE</div>
+                  )}
+                  <div className="label-mono" style={{ fontSize: 9 }}>
+                    ROUND-TRIP {result.time}s · {result.sourceDescription}
+                  </div>
                 </div>
+
+                {/* Real audio playback of the generated clone — closes the
+                     loop on "did the synthesis actually work?". */}
+                <audio src={result.audioUrl} controls style={{
+                  width: '100%', marginBottom: 16, borderRadius: 8,
+                  background: 'rgba(0,0,0,0.4)',
+                }}/>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                  <div style={{ padding: 14, borderRadius: 10, background: 'rgba(255,85,119,0.06)', border: '1px solid rgba(255,85,119,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>AUTHENTICITY</div>
-                    <div className="num-mono" style={{ fontSize: 30, color: '#ff5577', marginTop: 4, fontWeight: 200 }}>{result.dfScore.toFixed(2)}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--bad)' }}>BELOW 0.50 · SYNTHETIC</div>
+                  <div style={{
+                    padding: 14, borderRadius: 10,
+                    background: result.decision === 'FAKE' ? 'rgba(255,85,119,0.06)' : 'rgba(255,178,74,0.06)',
+                    border: '1px solid ' + (result.decision === 'FAKE' ? 'rgba(255,85,119,0.2)' : 'rgba(255,178,74,0.25)'),
+                  }}>
+                    <div className="label-mono" style={{ fontSize: 9 }}>AASIST AUTHENTICITY</div>
+                    <div className="num-mono biovoice-numerals" style={{
+                      fontSize: 30, marginTop: 4, fontWeight: 200,
+                      color: result.decision === 'FAKE' ? '#ff5577' : '#ffb24a',
+                    }}>{result.dfScore.toFixed(3)}</div>
+                    <div className="label-mono" style={{
+                      fontSize: 8, marginTop: 2,
+                      color: result.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)',
+                    }}>
+                      {result.decision === 'FAKE' ? 'BELOW 0.50 · SYNTHETIC' : 'ABOVE 0.50 · GATE FAILED TO CATCH'}
+                    </div>
                   </div>
                   <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>DETECTOR CONFIDENCE</div>
-                    <div className="num-mono" style={{ fontSize: 30, color: '#7ef0ff', marginTop: 4, fontWeight: 200 }}>{(result.confidence * 100).toFixed(1)}%</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--good)' }}>HIGH CONFIDENCE</div>
+                    <div className="label-mono" style={{ fontSize: 9 }}>ATTACK MODEL</div>
+                    <div style={{ fontSize: 18, marginTop: 6, fontWeight: 300 }}>{result.model}</div>
+                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2 }}>VIA /me/spoof + /me/spoof/test</div>
                   </div>
                 </div>
-                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>FORENSIC ARTIFACTS DETECTED</div>
+
+                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>F4 SUB-CLASSIFIER · PER-AXIS SCORES</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {result.artifacts.map((a, i) => (
-                    <ArtifactBar key={i} {...a} delay={i * 120}/>
+                  {/* G14 — real F4 sub-axis values from AcousticProbe instead
+                       of four `0.81 + Math.random() * 0.1` placeholders. */}
+                  {[
+                    { name: 'Voice naturalness',     strength: result.analysisDetails.voiceNaturalness },
+                    { name: 'Spectral consistency',  strength: result.analysisDetails.spectralConsistency },
+                    { name: 'Temporal patterns',     strength: result.analysisDetails.temporalPatterns },
+                    { name: 'Artifact detection',    strength: result.analysisDetails.artifactDetection },
+                  ].map((a, i) => (
+                    <ArtifactBar key={a.name} {...a} delay={i * 120}/>
                   ))}
                 </div>
               </div>
