@@ -14,13 +14,15 @@ from app.schemas import (
     AnalysisDetails,
     DecisionReason,
     EnrollmentResponse,
+    SampleQuality,
     SpeakerResponse,
     StageBreakdown,
     VerificationResponse,
 )
-from app.services.audio import AudioService
+from app.services.audio import AudioService, SampleQualityRejectedError
 from app.services.detector import DeepfakeDetectorService
 from app.services.speaker_encoder import SpeakerEncoder
+from app.services.sub_classifier import AcousticProbe
 
 
 # Decision-logic alignment with SDD §2.5 / Fig. 13:
@@ -57,6 +59,15 @@ class VerificationStore(Protocol):
 
     def get_result(self, result_id: str) -> VerificationRecord | None: ...
 
+    def next_verification_seq(self, day: str) -> int:
+        """Atomic monotonic counter per day. `day` is a YYYYMMDD string.
+
+        F2.3: backs the production-stable session-id `VRF-YYYYMMDD-NNNNN`.
+        Returns 1 for the first call on a given day, 2 for the second, etc.
+        Persists across restarts.
+        """
+        ...
+
 
 class VerificationService:
     def __init__(
@@ -68,6 +79,7 @@ class VerificationService:
         similarity_threshold: float,
         deepfake_threshold: float,
         min_enrollment_samples: int,
+        acoustic_probe: AcousticProbe | None = None,
     ):
         self.store = store
         self.detector = detector
@@ -77,6 +89,9 @@ class VerificationService:
         self.min_enrollment_samples = min_enrollment_samples
         self.audio = AudioService(target_sample_rate=sample_rate)
         self.encoder = speaker_encoder
+        # F4 — replaces the seeded-jitter `_derive_analysis_details`.
+        # Heuristic mode by default; trained probe heads loaded if present.
+        self.acoustic_probe = acoustic_probe or AcousticProbe()
 
     def list_users(self) -> list[SpeakerResponse]:
         return [
@@ -93,7 +108,20 @@ class VerificationService:
 
     def enroll(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> EnrollmentResponse:
         payload = self.audio.decode_wav(audio_bytes)
-        embedding = self.encoder.embed(payload.waveform)
+        # F3.3 — score the sample BEFORE trimming so noise estimates are
+        # taken from the raw recording (post-trim there's no silence to
+        # anchor SNR against). Reject low-quality samples here so they
+        # never enter the centroid; the route layer maps the typed
+        # exception to HTTP 400 + the operator-friendly explanation.
+        quality = self.audio.score_quality(payload)
+        if not quality.acceptable:
+            raise SampleQualityRejectedError(quality.reason, quality)
+        # F3.2 — trim silence before embedding so the centroid is built on
+        # speech frames, not background noise. ValueError surfaces as 400
+        # at the route layer with the operator-friendly message from
+        # AudioService.trim_to_voice.
+        trimmed, _ = self.audio.trim_to_voice(payload)
+        embedding = self.encoder.embed(trimmed.waveform)
         existing = self.store.get_speaker(user_id)
 
         if existing is None:
@@ -138,6 +166,13 @@ class VerificationService:
             status="enrolled",
             message=message,
             enrolled_at=record.enrolled_at,
+            quality=SampleQuality(
+                score=quality.score,
+                snr_db=quality.snr_db,
+                clipping_pct=quality.clipping_pct,
+                speech_ratio=quality.speech_ratio,
+                acceptable=quality.acceptable,
+            ),
         )
 
     def verify(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> VerificationResponse:
@@ -154,12 +189,19 @@ class VerificationService:
 
         payload, audio_timings = self.audio.decode_wav_with_timings(audio_bytes)
 
+        # F3.2 — strip leading/trailing silence so the embedding + spoof
+        # detection both run on speech frames. trim_to_voice raises
+        # ValueError if there's < 1 s of speech; the route layer maps that
+        # to 400 with the user-facing message.
+        trimmed, vad_ms = self.audio.trim_to_voice(payload)
+        audio_timings.vad_ms = vad_ms
+
         t0 = perf_counter()
-        query_embedding = self.encoder.embed(payload.waveform)
+        query_embedding = self.encoder.embed(trimmed.waveform)
         embed_ms = (perf_counter() - t0) * 1000.0
 
         t0 = perf_counter()
-        deepfake_score = self.detector.detect(payload.waveform)
+        deepfake_score = self.detector.detect(trimmed.waveform)
         detect_ms = (perf_counter() - t0) * 1000.0
 
         sample_similarities = [
@@ -170,13 +212,19 @@ class VerificationService:
         similarity_score = self._aggregate_similarity(sample_similarities, centroid_similarity)
 
         decision, reason, message = self._decide(similarity_score, deepfake_score)
-        analysis_details = self._derive_analysis_details(deepfake_score)
+        # F4 — analysis details now come from acoustic features (HNR, F0
+        # stability, spectral flatness) instead of perturbing the deepfake
+        # score. Each axis varies with the actual recording's properties.
+        analysis_details = self.acoustic_probe.score(
+            trimmed.waveform, sample_rate=trimmed.sample_rate
+        )
 
         total_ms = (perf_counter() - total_t0) * 1000.0
         stage_breakdown = StageBreakdown(
             load_ms=audio_timings.load_ms,
             resample_ms=audio_timings.resample_ms,
             normalize_ms=audio_timings.normalize_ms,
+            vad_ms=audio_timings.vad_ms,
             embed_ms=embed_ms,
             detect_ms=detect_ms,
             total_ms=total_ms,
@@ -184,7 +232,9 @@ class VerificationService:
 
         result_id = str(uuid4())
         created_at = datetime.now(timezone.utc)
-        session_id = self._format_session_id(result_id, created_at)
+        day_key = f"{created_at.year:04d}{created_at.month:02d}{created_at.day:02d}"
+        seq = self.store.next_verification_seq(day_key)
+        session_id = self._format_session_id(seq, created_at)
 
         record = VerificationRecord(
             result_id=result_id,
@@ -247,7 +297,10 @@ class VerificationService:
         stage_dict = meta.get("stage_breakdown") or {}
         stage_breakdown = StageBreakdown.model_validate(stage_dict)
         reason = meta.get("decision_reason") or self._reason_from_decision(record.decision)
-        session_id = meta.get("session_id") or self._format_session_id(record.result_id, record.created_at)
+        # Old records persist their session_id in metadata; for legacy rows
+        # without one we synthesise a stable suffix from the result_id rather
+        # than burning a fresh counter (counter increments only on write).
+        session_id = meta.get("session_id") or self._legacy_session_id(record.result_id, record.created_at)
 
         return VerificationResponse(
             result_id=record.result_id,
@@ -273,19 +326,22 @@ class VerificationService:
             return "synthetic"
         return "mismatch"
 
-    def _derive_analysis_details(self, deepfake_score: float) -> AnalysisDetails | None:
-        # Placeholder until Yoav's Y-8 lands the AASIST-anchored derivation in detector.py.
-        # Using the global score gives the UI something to render today; Y-8 will replace this.
-        score = max(0.0, min(1.0, deepfake_score))
-        return AnalysisDetails(
-            voice_naturalness=score,
-            spectral_consistency=score,
-            temporal_patterns=score,
-            artifact_detection=1.0 - score,
+    # `_derive_analysis_details` removed in F4 — replaced by `AcousticProbe`
+    # which computes the four axes from real acoustic features. See
+    # `app/services/sub_classifier.py` and `docs/paper/sub_classifier.md`.
+
+    @staticmethod
+    def _format_session_id(seq: int, created_at: datetime) -> str:
+        """F2.3 — VRF-YYYYMMDD-NNNNN with a 5-digit zero-padded daily counter."""
+        return (
+            f"VRF-{created_at.year:04d}{created_at.month:02d}{created_at.day:02d}"
+            f"-{seq:05d}"
         )
 
     @staticmethod
-    def _format_session_id(result_id: str, created_at: datetime) -> str:
+    def _legacy_session_id(result_id: str, created_at: datetime) -> str:
+        """Pre-F2.3 format reconstructor for historical rows without a stored
+        session_id. Reads as `VRF-YYYY-MMDD-XXXX` (last 4 of result_id)."""
         suffix = result_id.replace("-", "").upper()[-4:].rjust(4, "0")
         return f"VRF-{created_at.year:04d}-{created_at.month:02d}{created_at.day:02d}-{suffix}"
 

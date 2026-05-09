@@ -1,0 +1,70 @@
+{
+  "app": {
+    "title": "ביו-קול",
+    "tagline": "אימות זהות ביומטרי לפי קול"
+  },
+  "nav": {
+    "console": "מסוף",
+    "profiles": "פרופילים",
+    "deepfakeLab": "מעבדת זיופים",
+    "settings": "הגדרות",
+    "history": "היסטוריה"
+  },
+  "common": {
+    "loading": "טוען…",
+    "retry": "נסה שוב",
+    "cancel": "ביטול",
+    "ok": "אישור",
+    "back": "חזרה",
+    "next": "הבא",
+    "save": "שמירה",
+    "delete": "מחיקה",
+    "rename": "שינוי שם",
+    "logout": "התנתקות"
+  },
+  "console": {
+    "verifyCount": "אימותים היום",
+    "threatCount": "איומים שנחסמו",
+    "userCount": "משתמשים רשומים",
+    "lastEvent": "אירוע אחרון"
+  },
+  "verify": {
+    "title": "אימות זהות",
+    "tapToStart": "הקש להתחלה",
+    "speakNow": "דבר עכשיו…",
+    "processing": "מעבד…",
+    "accepted": "הזהות אומתה",
+    "rejected": "הדובר לא תואם לפרופיל הרשום",
+    "deepfake": "האודיו מסומן כסינתטי. הגישה נדחתה",
+    "retryHint": "נסה שוב או החלף משתמש."
+  },
+  "enroll": {
+    "title": "הוספת משתמש חדש",
+    "userIdLabel": "מזהה משתמש",
+    "userIdPlaceholder": "alice_demo",
+    "samplesProgress": "{{current}} מתוך {{required}} דגימות נקלטו",
+    "tapToRecord": "הקש להקלטת דגימה",
+    "qualityScore": "ציון איכות: {{score}}",
+    "rejected": "הדגימה נדחתה: {{reason}}"
+  },
+  "profiles": {
+    "empty": "אין משתמשים רשומים עדיין.",
+    "ctaEnrol": "רשום את המשתמש הראשון",
+    "deleteConfirm": "למחוק את הפרופיל {{userId}}?",
+    "deleteIrreversible": "פעולה זו אינה הפיכה."
+  },
+  "deepfakeLab": {
+    "title": "מעבדת זיופים",
+    "selectVoice": "בחר קול לשכפול",
+    "scriptLabel": "תסריט",
+    "scriptPlaceholder": "הקלד את הטקסט לסינתזה…",
+    "forge": "צור התקפה",
+    "testAttack": "בחן את ההתקפה מול המסוף"
+  },
+  "errors": {
+    "noSpeech": "לא זוהה דיבור. ודא שהמיקרופון פעיל ושדיברת בזמן ההקלטה.",
+    "rateLimited": "יותר מדי ניסיונות כושלים. נסה שוב בעוד {{seconds}} שניות.",
+    "sessionExpired": "תוקף החיבור פג. אנא התחבר שוב.",
+    "network": "שגיאת רשת. בדוק את החיבור."
+  }
+}

@@ -27,11 +27,25 @@ class ReferenceSampleResponse(BaseModel):
     created_at: datetime
 
 
+class SampleQuality(BaseModel):
+    """F3.3 — per-sample audio quality summary surfaced on
+    EnrollmentResponse so operators can show a quality score on the kiosk
+    sample dots and explain rejected samples without digging through logs.
+    """
+
+    score: float = Field(ge=0.0, le=100.0)
+    snr_db: float
+    clipping_pct: float = Field(ge=0.0, le=100.0)
+    speech_ratio: float = Field(ge=0.0, le=1.0)
+    acceptable: bool
+
+
 class EnrollmentResponse(BaseModel):
     user_id: str
     status: str
     message: str
     enrolled_at: datetime
+    quality: SampleQuality | None = None
 
 
 class StageBreakdown(BaseModel):
@@ -40,11 +54,15 @@ class StageBreakdown(BaseModel):
     Per Plan §4 architectural decision 5: timings reflect what the server actually
     measures. mel_ms is rolled into embed_ms because ReDimNet handles mel-spec
     extraction internally and we don't separate it.
+
+    F3.2 added `vad_ms` for the Voice Activity Detection trim that runs
+    between normalize and embed.
     """
 
     load_ms: float = 0.0
     resample_ms: float = 0.0
     normalize_ms: float = 0.0
+    vad_ms: float = 0.0
     embed_ms: float = 0.0
     detect_ms: float = 0.0
     total_ms: float = 0.0
@@ -83,6 +101,7 @@ class SessionResponse(BaseModel):
     session_token: str
     user_id: str
     created_at: datetime
+    expires_at: datetime  # F2.1 — surface the deadline so the client can refresh proactively
 
 
 class AuthSessionResponse(BaseModel):

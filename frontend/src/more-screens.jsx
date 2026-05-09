@@ -1,22 +1,27 @@
 // Additional pages: Sidebar nav, Deepfake Creation Lab, User Settings, Profile manager.
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
+import { LanguageSwitcher } from "./components/LanguageSwitcher.tsx";
 
 // ============================================================================
 // Sidebar — real-app navigation rail.
 // ============================================================================
 function Sidebar({ page, setPage }) {
+  // F5.2 — labels come through i18next so the chrome flips with the
+  // language switch. The icons themselves stay literal SVG.
+  const { t } = useTranslation();
   const items = [
-    { id: 'console',  label: 'Console',   icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
-    { id: 'lab',      label: 'DF Lab',    icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
-    { id: 'profiles', label: 'Profiles',  icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
-    { id: 'settings', label: 'Settings',  icon: <><circle cx="10" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
+    { id: 'console',  label: t('nav.console'),       icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
+    { id: 'lab',      label: t('nav.deepfakeLab'),   icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
+    { id: 'profiles', label: t('nav.profiles'),      icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
+    { id: 'settings', label: t('nav.settings'),      icon: <><circle cx="10" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
   ];
   return (
-    <div style={{
+    <div className="biovoice-sidebar" style={{
       position: 'absolute', top: 110, left: 24, bottom: 80, width: 76, zIndex: 50,
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
       padding: '14px 0',
@@ -48,6 +53,10 @@ function Sidebar({ page, setPage }) {
         );
       })}
       <div style={{ flex: 1 }}></div>
+      {/* F5.1 — language switcher in the sidebar. Sits above the
+          operator avatar so it's discoverable but out of the main
+          interaction path. */}
+      <LanguageSwitcher />
       {/* Avatar at the bottom */}
       <div style={{
         width: 44, height: 44, borderRadius: '50%',

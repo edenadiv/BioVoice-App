@@ -220,10 +220,27 @@ function LiveNav({ screen, setScreen }) {
   );
 }
 
+// F5.5 — phone breakpoint listener. Toggles a body-level class so the
+// responsive.css rules can linearise the kiosk stage on small viewports.
+function useMobileViewportClass() {
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 767px)");
+    const apply = () => document.body.classList.toggle("biovoice-mobile", mql.matches);
+    apply();
+    mql.addEventListener("change", apply);
+    return () => mql.removeEventListener("change", apply);
+  }, []);
+}
+
+function AppRoot() {
+  useMobileViewportClass();
+  return <AppShell />;
+}
+
 export default function App() {
   return (
     <AppStateProvider>
-      <AppShell />
+      <AppRoot />
     </AppStateProvider>
   );
 }

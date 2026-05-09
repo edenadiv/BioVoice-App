@@ -1,0 +1,107 @@
+/* F5.5 + F5.6 — responsive layout + touch interactions.
+ *
+ * The kiosk's primary stage is a fixed 1920×1080 box that is
+ * proportionally scaled to fit the viewport (CSS transform). On phones
+ * + tablets that scaling becomes the wrong choice — the touch targets
+ * shrink below the 44 × 44 px WCAG minimum and reading the text becomes
+ * impractical. This stylesheet intercepts at three breakpoints:
+ *
+ *   ≥ 1440 px : desktop kiosk, original 1920×1080 stage scaled to fit.
+ *   768–1439  : tablet, stage capped at viewport dimensions, components
+ *               re-flow into a single column where they were two-up.
+ *   < 768 px  : phone, fully linear layout, hamburger nav.
+ *
+ * The strategy: rather than rewrite every screen for mobile, we apply a
+ * `body.biovoice-mobile` class (set by app.jsx via a media-query
+ * listener) that adds linearising rules. The desktop stage stays as-is
+ * for ≥ 1440 px so the demo experience is unchanged.
+ */
+
+/* Touch-friendly defaults — apply on every viewport so a touchscreen
+ * laptop also benefits. WCAG 2.5.5 requires interactive targets ≥
+ * 24 × 24 px (level AA) or ≥ 44 × 44 px (level AAA). We aim for AAA. */
+button,
+[role="button"],
+a.biovoice-link {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* iOS double-tap-to-zoom is annoying on a kiosk — disable but keep
+ * pinch-zoom (accessibility). */
+html {
+  touch-action: manipulation;
+}
+
+@media (max-width: 1439px) {
+  /* Tablet — collapse two-column grids into one. */
+  .biovoice-two-column {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Phone — linearise the kiosk stage. */
+  body.biovoice-mobile .biovoice-stage {
+    /* Stop forcing a 1920px width; let it follow the viewport. */
+    width: 100% !important;
+    height: auto !important;
+    transform: none !important;
+    /* The original stage uses absolute-positioned children. Switch the
+     * container to flow layout so they stack naturally. */
+    position: relative !important;
+  }
+
+  body.biovoice-mobile .biovoice-stage > * {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    margin-block-end: 12px;
+  }
+
+  body.biovoice-mobile .biovoice-three-column,
+  body.biovoice-mobile .biovoice-two-column {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.biovoice-mobile .biovoice-sidebar {
+    /* Replace fixed sidebar with a top-row hamburger panel. */
+    position: relative !important;
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    overflow-x: auto;
+  }
+
+  body.biovoice-mobile .biovoice-hide-on-mobile {
+    display: none !important;
+  }
+
+  /* Bigger tap targets for phone. */
+  body.biovoice-mobile button,
+  body.biovoice-mobile [role="button"] {
+    min-height: 48px;
+    padding-inline: 16px;
+  }
+
+  /* Recording overlay — let it take the full screen on phone. */
+  body.biovoice-mobile .biovoice-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+  }
+}
+
+/* When the OS reports `prefers-reduced-motion`, suppress the kiosk's
+ * waveform animations + pulsing dots. WCAG 2.3.3 + accessibility
+ * baseline. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

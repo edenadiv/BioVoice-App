@@ -21,6 +21,7 @@ type StageBreakdownResponse = {
   load_ms: number;
   resample_ms: number;
   normalize_ms: number;
+  vad_ms: number;
   embed_ms: number;
   detect_ms: number;
   total_ms: number;
@@ -49,17 +50,27 @@ type VerificationResponse = {
   created_at: string;
 };
 
+type SampleQualityResponse = {
+  score: number;
+  snr_db: number;
+  clipping_pct: number;
+  speech_ratio: number;
+  acceptable: boolean;
+};
+
 type EnrollmentResponse = {
   user_id: string;
   status: string;
   message: string;
   enrolled_at: string;
+  quality?: SampleQualityResponse | null;
 };
 
 type SessionResponse = {
   session_token: string;
   user_id: string;
   created_at: string;
+  expires_at: string;
 };
 
 type ReferenceSampleResponse = {
@@ -75,8 +86,15 @@ type AuthSessionResponse = {
   verification: VerificationResponse;
 };
 
+// F2.5 — every request opts into cookie auth. The `biovoice_session` cookie
+// is HttpOnly so this code can never read it; the browser sends it for us
+// when we set `credentials: "include"` and the server echoes
+// `Access-Control-Allow-Credentials: true` (CORS config in backend/app/main.py).
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const response = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...init,
+  });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `Request failed with status ${response.status}`);
@@ -106,11 +124,12 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
           loadMs: stage.load_ms,
           resampleMs: stage.resample_ms,
           normalizeMs: stage.normalize_ms,
+          vadMs: stage.vad_ms ?? 0,
           embedMs: stage.embed_ms,
           detectMs: stage.detect_ms,
           totalMs: stage.total_ms,
         }
-      : { loadMs: 0, resampleMs: 0, normalizeMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
+      : { loadMs: 0, resampleMs: 0, normalizeMs: 0, vadMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
     analysisDetails: details ? toAnalysisDetails(details) : null,
     createdAt: response.created_at,
   };
@@ -145,22 +164,17 @@ async function postForm<T>(path: string, formData: FormData): Promise<T> {
   });
 }
 
-async function postAuthorizedForm<T>(path: string, formData: FormData, sessionToken: string): Promise<T> {
-  return request<T>(path, {
-    method: "POST",
-    body: formData,
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
-  });
-}
+export type EnrollResult = {
+  message: string;
+  quality: SampleQualityResponse | null;
+};
 
-export async function enrollSpeaker(userId: string, file: File): Promise<string> {
+export async function enrollSpeaker(userId: string, file: File): Promise<EnrollResult> {
   const formData = new FormData();
   formData.append("user_id", userId);
   formData.append("audio", file);
   const response = await postForm<EnrollmentResponse>("/enroll", formData);
-  return response.message;
+  return { message: response.message, quality: response.quality ?? null };
 }
 
 export async function verifySpeaker(userId: string, file: File): Promise<VerificationResult> {
@@ -171,17 +185,17 @@ export async function verifySpeaker(userId: string, file: File): Promise<Verific
   return toVerificationResult(response);
 }
 
-export async function enrollAuthenticatedSpeaker(sessionToken: string, file: File): Promise<string> {
+export async function enrollAuthenticatedSpeaker(file: File): Promise<EnrollResult> {
   const formData = new FormData();
   formData.append("audio", file);
-  const response = await postAuthorizedForm<EnrollmentResponse>("/me/enroll", formData, sessionToken);
-  return response.message;
+  const response = await postForm<EnrollmentResponse>("/me/enroll", formData);
+  return { message: response.message, quality: response.quality ?? null };
 }
 
-export async function verifyAuthenticatedSpeaker(sessionToken: string, file: File): Promise<VerificationResult> {
+export async function verifyAuthenticatedSpeaker(file: File): Promise<VerificationResult> {
   const formData = new FormData();
   formData.append("audio", file);
-  const response = await postAuthorizedForm<VerificationResponse>("/me/verify", formData, sessionToken);
+  const response = await postForm<VerificationResponse>("/me/verify", formData);
   return toVerificationResult(response);
 }
 
@@ -189,6 +203,9 @@ export async function loginWithVoice(userId: string, file: File): Promise<{ sess
   const formData = new FormData();
   formData.append("user_id", userId);
   formData.append("audio", file);
+  // The server pins the session cookie on the response. The body still
+  // carries the session token for the sake of the typed `Session` we surface
+  // upward — the cookie is the source of truth for subsequent requests.
   const response = await postForm<AuthSessionResponse>("/auth/login", formData);
   return {
     session: toSession(response.session),
@@ -196,12 +213,8 @@ export async function loginWithVoice(userId: string, file: File): Promise<{ sess
   };
 }
 
-export async function getSession(sessionToken: string): Promise<Session> {
-  const response = await request<SessionResponse>("/auth/session", {
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
-  });
+export async function getSession(): Promise<Session> {
+  const response = await request<SessionResponse>("/auth/session");
   return toSession(response);
 }
 
@@ -218,10 +231,10 @@ type SpoofTestResponse = {
   analysis_details: AnalysisDetailsResponse;
 };
 
-export async function spoofTest(sessionToken: string, file: File): Promise<SpoofTestResult> {
+export async function spoofTest(file: File): Promise<SpoofTestResult> {
   const formData = new FormData();
   formData.append("audio", file);
-  const response = await postAuthorizedForm<SpoofTestResponse>("/me/spoof/test", formData, sessionToken);
+  const response = await postForm<SpoofTestResponse>("/me/spoof/test", formData);
   return {
     deepfakeScore: response.deepfake_score,
     decision: response.decision,
@@ -238,30 +251,19 @@ function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
   };
 }
 
-export async function getMyVerification(sessionToken: string, resultId: string): Promise<VerificationResult> {
-  const response = await request<VerificationResponse>(`/me/verifications/${encodeURIComponent(resultId)}`, {
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
-  });
+export async function getMyVerification(resultId: string): Promise<VerificationResult> {
+  const response = await request<VerificationResponse>(
+    `/me/verifications/${encodeURIComponent(resultId)}`,
+  );
   return toVerificationResult(response);
 }
 
-export async function logoutSession(sessionToken: string): Promise<void> {
-  await request("/auth/session", {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
-  });
+export async function logoutSession(): Promise<void> {
+  await request("/auth/session", { method: "DELETE" });
 }
 
-export async function listReferenceSamples(sessionToken: string): Promise<ReferenceSample[]> {
-  const response = await request<ReferenceSampleResponse[]>("/me/reference-samples", {
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
-  });
+export async function listReferenceSamples(): Promise<ReferenceSample[]> {
+  const response = await request<ReferenceSampleResponse[]>("/me/reference-samples");
   return response.map((item) => ({
     sampleId: item.sample_id,
     userId: item.user_id,
@@ -276,15 +278,12 @@ function parseFileName(contentDisposition: string | null): string {
   return match?.[1] ?? "spoof.wav";
 }
 
-export async function generateSpoofSample(
-  sessionToken: string,
-  payload: {
-    text: string;
-    language: string;
-    referenceSampleId?: string;
-    file?: File | null;
-  },
-): Promise<SpoofGenerationResult> {
+export async function generateSpoofSample(payload: {
+  text: string;
+  language: string;
+  referenceSampleId?: string;
+  file?: File | null;
+}): Promise<SpoofGenerationResult> {
   const formData = new FormData();
   formData.append("text", payload.text);
   formData.append("language", payload.language);
@@ -298,9 +297,7 @@ export async function generateSpoofSample(
   const response = await fetch(`${API_BASE}/me/spoof`, {
     method: "POST",
     body: formData,
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
+    credentials: "include",
   });
 
   if (!response.ok) {

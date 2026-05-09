@@ -1,0 +1,70 @@
+{
+  "app": {
+    "title": "BioVoice",
+    "tagline": "Voice biometric authentication"
+  },
+  "nav": {
+    "console": "Console",
+    "profiles": "Profiles",
+    "deepfakeLab": "Deepfake Lab",
+    "settings": "Settings",
+    "history": "History"
+  },
+  "common": {
+    "loading": "Loading…",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "ok": "OK",
+    "back": "Back",
+    "next": "Next",
+    "save": "Save",
+    "delete": "Delete",
+    "rename": "Rename",
+    "logout": "Log out"
+  },
+  "console": {
+    "verifyCount": "Verifications today",
+    "threatCount": "Threats blocked",
+    "userCount": "Enrolled users",
+    "lastEvent": "Last event"
+  },
+  "verify": {
+    "title": "Verify identity",
+    "tapToStart": "Tap to start",
+    "speakNow": "Speak now…",
+    "processing": "Processing…",
+    "accepted": "Identity verified",
+    "rejected": "Speaker did not match the enrolled profile",
+    "deepfake": "Audio flagged as synthetic. Access denied",
+    "retryHint": "Try again or switch user."
+  },
+  "enroll": {
+    "title": "Enrol new user",
+    "userIdLabel": "User ID",
+    "userIdPlaceholder": "alice_demo",
+    "samplesProgress": "{{current}} of {{required}} samples captured",
+    "tapToRecord": "Tap to record sample",
+    "qualityScore": "Quality score: {{score}}",
+    "rejected": "Sample rejected: {{reason}}"
+  },
+  "profiles": {
+    "empty": "No enrolled users yet.",
+    "ctaEnrol": "Enrol your first user",
+    "deleteConfirm": "Delete profile {{userId}}?",
+    "deleteIrreversible": "This cannot be undone."
+  },
+  "deepfakeLab": {
+    "title": "Deepfake Lab",
+    "selectVoice": "Select a voice to clone",
+    "scriptLabel": "Script",
+    "scriptPlaceholder": "Type the text to synthesise…",
+    "forge": "Forge attack",
+    "testAttack": "Test attack against the kiosk"
+  },
+  "errors": {
+    "noSpeech": "No speech detected. Check that your microphone is on and you spoke during the capture.",
+    "rateLimited": "Too many failed attempts. Try again in {{seconds}} s.",
+    "sessionExpired": "Session expired. Please log in again.",
+    "network": "Network error. Check your connection."
+  }
+}

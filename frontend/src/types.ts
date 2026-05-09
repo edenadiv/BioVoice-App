@@ -6,6 +6,7 @@ export type StageBreakdown = {
   loadMs: number;
   resampleMs: number;
   normalizeMs: number;
+  vadMs: number;
   embedMs: number;
   detectMs: number;
   totalMs: number;

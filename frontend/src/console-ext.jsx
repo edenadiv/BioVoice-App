@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Waveform, EmbeddingCloud } from "./visuals.jsx";
 import { useVoiceRecorder } from "./lib/audio";
 import { loginWithVoice, logoutSession, verifyAuthenticatedSpeaker } from "./lib/api";
-import { SESSION_STORAGE_KEY, useAppDispatch, useAppState } from "./lib/session";
+import { useAppDispatch, useAppState } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 
@@ -406,7 +406,7 @@ function ThreatLevel({ level = 'green' }) {
 //   1. Mount  → start the recorder (Y-12).
 //   2. After RECORD_MS (or recorder.maxMs) → stop, encode WAV, kick the API.
 //        - No session            → loginWithVoice(userId, file)
-//        - Session for same user → verifyAuthenticatedSpeaker(token, file)
+//        - Session for same user → verifyAuthenticatedSpeaker(file)   (cookie auth — F2.5)
 //        - Session for different → logout, then loginWithVoice
 //   3. While the API is in flight → animate phases 1 (Embed) and 2 (Match)
 //        on a calibrated 1.5 s timeline (Plan §5).
@@ -452,15 +452,15 @@ function VerificationOverlay({ profile, onClose }) {
     if (!session) {
       promise = loginWithVoice(userId, recording.wavFile);
     } else if (session.userId === userId) {
-      promise = verifyAuthenticatedSpeaker(session.sessionToken, recording.wavFile);
+      // F2.5 — cookie carries the session; no token argument needed.
+      promise = verifyAuthenticatedSpeaker(recording.wavFile);
     } else {
       promise = (async () => {
         try {
-          await logoutSession(session.sessionToken);
+          await logoutSession();
         } catch {
           /* ignore — we're replacing the session anyway */
         }
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
         dispatch({ type: "set-session", session: null });
         return loginWithVoice(userId, recording.wavFile);
       })();
@@ -471,10 +471,10 @@ function VerificationOverlay({ profile, onClose }) {
     promise
       .then((response) => {
         let verification;
-        // loginWithVoice returns { session, verification }; verifyAuthenticatedSpeaker
-        // returns the VerificationResult directly.
+        // loginWithVoice returns { session, verification }; the backend has
+        // already pinned the rotated session cookie before we ever see this
+        // response, so we just stash the typed Session for UI state.
         if (response && typeof response === "object" && "session" in response && "verification" in response) {
-          window.localStorage.setItem(SESSION_STORAGE_KEY, response.session.sessionToken);
           dispatch({ type: "set-session", session: response.session });
           verification = response.verification;
         } else {
