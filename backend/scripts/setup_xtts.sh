@@ -7,10 +7,11 @@
 #
 #     .venv/bin/pip install 'TTS>=0.22,<0.23'
 #
-# If TTS won't install on your Python version (Python 3.13+ is unsupported by
-# the upstream package today), set BIOVOICE_FALLBACK_SPOOF=1 instead — the
-# `/me/spoof` endpoint will serve `backend/data/fallback_spoof.wav` so the lab
-# demo still works.
+# If TTS won't install on your Python version (Python 3.13+ is currently
+# unsupported by the upstream package), use a pinned 3.12 venv:
+#
+#     python3.12 -m venv .venv-xtts
+#     .venv-xtts/bin/pip install -e '.[model,spoof]' --no-build-isolation
 
 set -euo pipefail
 
