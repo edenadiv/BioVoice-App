@@ -48,11 +48,14 @@ Settings + Admin are intentionally absent — this is a single-purpose operator 
 1. Sidebar → **Profiles**.
 2. Click **+ ENROLL NEW**.
 3. Type a user ID — `2–32 chars, lowercase letters / digits / `_` / `-`. The ✓ valid hint appears once it matches.
-4. Click **Record sample 1 / 3** and speak for the full 3 seconds.
-5. The backend scores the sample on SNR / clipping / speech ratio. If it passes, the dot fills green and the next sample button enables.
-6. Repeat for samples 2 + 3. After the third accepted sample, the modal closes and the new profile appears in the list with `3/3 samples`.
+4. **Pick a microphone** from the dropdown (or stick with browser default). The first time, click "Enable labels" if device names are blank — this triggers a one-time mic permission probe so the browser will reveal device labels.
+5. Add samples — two ways, mix freely:
+   - **Record**: press **START RECORDING** → speak for as long as you like → press **STOP**. There's no time limit; the modal shows a live waveform, level meter, and elapsed timer.
+   - **Upload**: press **UPLOAD AUDIO** → pick one or more files (.wav/.mp3/.m4a/.ogg/.flac). Each file is decoded in-browser to 16 kHz mono WAV before posting.
+6. Each sample posts to `/enroll`. Backend scores it on SNR / clipping / speech ratio. The captured-samples list shows the verdict — green check ✓ for accepted, red × for rejected with the reason inline.
+7. Once **3 samples are accepted**, the **DONE** button enables. Press it whenever you're satisfied — there's no upper cap. More samples = better verification accuracy.
 
-If a sample fails the quality gate, the dot stays empty and the inline `LAST SAMPLE QUALITY` panel tells you why (low SNR, too much silence, clipping). Try again — the backend hasn't lost the previous good samples.
+If a sample fails the quality gate, just record/upload another. The backend keeps the good ones.
 
 ## Verify a profile
 
@@ -77,7 +80,11 @@ The verification lands in the activity feed at the bottom of the Console.
 5. The backend uses XTTS to synthesise a clone of that profile's voice speaking the text, then runs the synthesised audio through the deepfake detector.
 6. The result panel shows the verdict (`GENUINE` or `FAKE`) and the four sub-axis scores.
 
-XTTS isn't bundled — if you haven't installed the `[model]` extra (`pip install -e ".[model]"`), the lab returns a 503 and explains what's missing.
+**Engine choice:**
+- If XTTS is installed (Py 3.11/3.12 venv only — see [README §Spoof generation](../backend/README.md)), the lab uses voice-cloning XTTS conditioned on the target's enrolled samples. Real cloning attack.
+- Otherwise it falls back to the system's text-to-speech (`say` on macOS, `espeak-ng` on Linux). The `X-Spoof-Source` header on the response says which engine ran.
+
+**AASIST limitation:** the bundled AASIST checkpoint is trained on certain TTS systems (mostly older Tacotron + WaveNet variants) and doesn't reliably catch macOS Siri-quality `say` output — those samples often score 0.95+ ("genuine"). XTTS-v2 cloning artefacts and most known attacks WILL register. To benchmark detection on a wider attack surface, retrain AASIST on a dataset that includes modern TTS (out of scope for this kiosk).
 
 ## Delete a profile
 

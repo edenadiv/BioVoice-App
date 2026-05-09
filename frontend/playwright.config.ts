@@ -82,10 +82,10 @@ export default defineConfig({
 
   webServer: [
     {
-      // Backend — uvicorn with the same env vars used in local dev.
+      // Backend — uvicorn. Auth + admin env vars dropped after the strip;
+      // the kiosk has no auth surface left.
       command:
-        "cd ../backend && BIOVOICE_COOKIE_INSECURE=1 BIOVOICE_LOG_FORMAT=plain " +
-        "BIOVOICE_ADMIN_API_KEY=playwright-admin-key " +
+        "cd ../backend && BIOVOICE_LOG_FORMAT=plain " +
         ".venv/bin/uvicorn app.main:app --host localhost --port 8000",
       url: "http://localhost:8000/readyz",
       reuseExistingServer: !process.env.CI,

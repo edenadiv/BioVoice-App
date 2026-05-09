@@ -18,7 +18,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = "http://localhost:8000";
-const FIXTURE_WAV = path.join(__dirname, "fixtures", "test-audio.wav");
+// Reuse the same WAV the playwright fake-mic flag points at — keeps
+// the fixture set down to one file.
+const FIXTURE_WAV = path.join(__dirname, "..", "fixtures", "test-audio.wav");
 
 async function enrolViaApi(request: APIRequestContext, userId: string) {
   const wav = fs.readFileSync(FIXTURE_WAV);
