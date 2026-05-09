@@ -5,10 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.services.audit import AuditService
-from app.services.auth import AuthService
 from app.services.detector import DeepfakeDetectorService
-from app.services.rate_limit import LoginRateLimiter, RateLimitConfig
 from app.services.speaker_encoder import RedimNetSpeakerEncoder
 from app.services.spoof import SpoofGenerationService
 from app.services.sub_classifier import AcousticProbe
@@ -22,9 +19,7 @@ class AppContainer:
     store: SQLiteStore
     detector: DeepfakeDetectorService
     verification_service: VerificationService
-    auth_service: AuthService
     spoof_service: SpoofGenerationService
-    audit_service: AuditService
 
 
 def build_container(settings: Settings) -> AppContainer:
@@ -34,7 +29,7 @@ def build_container(settings: Settings) -> AppContainer:
     )
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
-    acoustic_probe = AcousticProbe(heads_path=settings.sub_classifier_heads_path)
+    acoustic_probe = AcousticProbe()
     verification_service = VerificationService(
         store=store,
         detector=detector,
@@ -44,22 +39,6 @@ def build_container(settings: Settings) -> AppContainer:
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
         acoustic_probe=acoustic_probe,
-    )
-    rate_limiter = LoginRateLimiter(
-        store=store,
-        config=RateLimitConfig(
-            window_seconds=settings.login_rate_window_seconds,
-            max_attempts=settings.login_rate_max_attempts,
-            lockout_seconds=settings.login_lockout_seconds,
-        ),
-    )
-    audit_service = AuditService(store=store)
-    auth_service = AuthService(
-        store=store,
-        verification_service=verification_service,
-        idle_seconds=settings.session_idle_seconds,
-        rate_limiter=rate_limiter,
-        audit_service=audit_service,
     )
     spoof_service = SpoofGenerationService(
         store=store,
@@ -73,7 +52,5 @@ def build_container(settings: Settings) -> AppContainer:
         store=store,
         detector=detector,
         verification_service=verification_service,
-        auth_service=auth_service,
         spoof_service=spoof_service,
-        audit_service=audit_service,
     )

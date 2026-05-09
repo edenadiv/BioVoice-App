@@ -1,4 +1,7 @@
-"""SQLite-backed persistence for speakers and verification results."""
+"""SQLite-backed persistence for speakers, reference samples, and
+verification results. Auth/session/audit/admin tables removed in the
+"strip the scaffolding" pass — the kiosk is unauthenticated and
+operator-controlled."""
 
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ import sqlite3
 from threading import Lock
 from uuid import uuid4
 
-from app.models import ReferenceSampleRecord, SessionRecord, SpeakerRecord, VerificationRecord
+from app.models import ReferenceSampleRecord, SpeakerRecord, VerificationRecord
 
 
 class SQLiteStore:
@@ -45,17 +48,7 @@ class SQLiteStore:
                     deepfake_score REAL NOT NULL,
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    metadata_json TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users(user_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_token TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
-                    last_seen_at TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00',
-                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                    metadata_json TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS reference_samples (
@@ -64,40 +57,18 @@ class SQLiteStore:
                     file_path TEXT NOT NULL,
                     original_filename TEXT NOT NULL,
                     source TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                    created_at TEXT NOT NULL
                 );
 
-                -- F2.3 — daily monotonic counter for session-id (VRF-YYYYMMDD-NNNNN).
+                -- Daily monotonic counter for the VRF-YYYYMMDD-NNNNN session id.
                 CREATE TABLE IF NOT EXISTS verification_seq (
                     day TEXT PRIMARY KEY,
                     last_value INTEGER NOT NULL DEFAULT 0
                 );
 
-                -- F2.2 — rolling failure log for /auth/login rate limiting.
-                CREATE TABLE IF NOT EXISTS login_failures (
-                    user_id TEXT NOT NULL,
-                    ip TEXT NOT NULL,
-                    attempted_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS login_failures_lookup
-                    ON login_failures (user_id, ip, attempted_at);
-
-                -- F2.2 — active lockouts. Cleared on successful login or after
-                -- the deadline elapses.
-                CREATE TABLE IF NOT EXISTS login_lockouts (
-                    user_id TEXT NOT NULL,
-                    ip TEXT NOT NULL,
-                    locked_until TEXT NOT NULL,
-                    PRIMARY KEY (user_id, ip)
-                );
-
-                -- F6.1 — deleted users (soft delete). Original row is removed
-                -- from `users`; metadata + the embedding stay here so an
-                -- operator can audit who was removed and (with a separate
-                -- restore tool, post-Δ-1) re-enrol them by replaying the
-                -- embedding. Foreign-key cascade keeps the verification
-                -- history intact (nullable user_id on those rows).
+                -- Soft-deleted profiles. Removed from `users`; embedding +
+                -- metadata stay here so the operator can audit removals and
+                -- (with a follow-up restore tool) re-enrol.
                 CREATE TABLE IF NOT EXISTS deleted_users (
                     user_id TEXT PRIMARY KEY,
                     embedding_json TEXT NOT NULL,
@@ -106,48 +77,10 @@ class SQLiteStore:
                     deleted_at TEXT NOT NULL,
                     deleted_by TEXT
                 );
-
-                -- F6.2 — operator-visible audit trail. Every mutating action
-                -- (login, logout, enroll, verify, delete, threshold change)
-                -- writes one row. Append-only; never UPDATE / DELETE except
-                -- through an explicit retention job (post-Δ-1).
-                CREATE TABLE IF NOT EXISTS audit_log (
-                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    occurred_at TEXT NOT NULL,
-                    actor TEXT,           -- user_id or 'admin' or 'system'
-                    ip TEXT,
-                    action TEXT NOT NULL, -- 'login.success', 'user.delete', …
-                    target TEXT,          -- the resource the action ran against
-                    metadata_json TEXT
-                );
-                CREATE INDEX IF NOT EXISTS audit_log_occurred_at_idx
-                    ON audit_log (occurred_at);
                 """
             )
         self._ensure_user_columns()
         self._backfill_sample_embeddings()
-        self._ensure_session_columns()
-
-    def _ensure_session_columns(self) -> None:
-        """F2.1 — bring legacy `sessions` rows up to the new schema by adding
-        `expires_at` and `last_seen_at` columns when missing. Old rows get
-        epoch defaults; AuthService treats those as expired and forces the
-        client to log in again."""
-        columns = {
-            row["name"]
-            for row in self._connection.execute("PRAGMA table_info(sessions)").fetchall()
-        }
-        with self._connection:
-            if "expires_at" not in columns:
-                self._connection.execute(
-                    "ALTER TABLE sessions ADD COLUMN expires_at TEXT NOT NULL "
-                    "DEFAULT '1970-01-01T00:00:00+00:00'"
-                )
-            if "last_seen_at" not in columns:
-                self._connection.execute(
-                    "ALTER TABLE sessions ADD COLUMN last_seen_at TEXT NOT NULL "
-                    "DEFAULT '1970-01-01T00:00:00+00:00'"
-                )
 
     def _ensure_user_columns(self) -> None:
         columns = {
@@ -446,111 +379,7 @@ class SQLiteStore:
             for row in cursor.fetchall()
         ]
 
-    def put_session(self, record: SessionRecord) -> None:
-        # F2.1 — UPSERT semantics. AuthService.get_session bumps last_seen_at
-        # + expires_at on every authenticated request and re-puts; refresh
-        # rotates the token (insert new + delete old) so primary-key conflict
-        # only happens if the same token is re-stored, which is the bump path.
-        with self._lock, self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO sessions (session_token, user_id, created_at, expires_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(session_token) DO UPDATE SET
-                    expires_at = excluded.expires_at,
-                    last_seen_at = excluded.last_seen_at
-                """,
-                (
-                    record.session_token,
-                    record.user_id,
-                    record.created_at.isoformat(),
-                    record.expires_at.isoformat(),
-                    record.last_seen_at.isoformat(),
-                ),
-            )
-
-    def get_session(self, session_token: str) -> SessionRecord | None:
-        cursor = self._connection.execute(
-            """
-            SELECT session_token, user_id, created_at, expires_at, last_seen_at
-            FROM sessions
-            WHERE session_token = ?
-            """,
-            (session_token,),
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return SessionRecord(
-            session_token=row["session_token"],
-            user_id=row["user_id"],
-            created_at=datetime.fromisoformat(row["created_at"]),
-            expires_at=datetime.fromisoformat(row["expires_at"]),
-            last_seen_at=datetime.fromisoformat(row["last_seen_at"]),
-        )
-
-    def delete_session(self, session_token: str) -> None:
-        with self._lock, self._connection:
-            self._connection.execute(
-                "DELETE FROM sessions WHERE session_token = ?",
-                (session_token,),
-            )
-
-    # F2.2 — login rate-limit storage --------------------------------------
-
-    def record_login_failure(self, user_id: str, ip: str, when: datetime) -> None:
-        with self._lock, self._connection:
-            self._connection.execute(
-                "INSERT INTO login_failures (user_id, ip, attempted_at) VALUES (?, ?, ?)",
-                (user_id, ip, when.isoformat()),
-            )
-
-    def count_recent_login_failures(
-        self, user_id: str, ip: str, since: datetime
-    ) -> int:
-        row = self._connection.execute(
-            """
-            SELECT COUNT(*) AS n FROM login_failures
-            WHERE user_id = ? AND ip = ? AND attempted_at >= ?
-            """,
-            (user_id, ip, since.isoformat()),
-        ).fetchone()
-        return int(row["n"])
-
-    def set_login_lockout(
-        self, user_id: str, ip: str, locked_until: datetime
-    ) -> None:
-        with self._lock, self._connection:
-            self._connection.execute(
-                """
-                INSERT INTO login_lockouts (user_id, ip, locked_until)
-                VALUES (?, ?, ?)
-                ON CONFLICT(user_id, ip) DO UPDATE SET locked_until = excluded.locked_until
-                """,
-                (user_id, ip, locked_until.isoformat()),
-            )
-
-    def get_login_lockout(self, user_id: str, ip: str) -> datetime | None:
-        row = self._connection.execute(
-            "SELECT locked_until FROM login_lockouts WHERE user_id = ? AND ip = ?",
-            (user_id, ip),
-        ).fetchone()
-        if row is None:
-            return None
-        return datetime.fromisoformat(row["locked_until"])
-
-    def clear_login_state(self, user_id: str, ip: str) -> None:
-        with self._lock, self._connection:
-            self._connection.execute(
-                "DELETE FROM login_failures WHERE user_id = ? AND ip = ?",
-                (user_id, ip),
-            )
-            self._connection.execute(
-                "DELETE FROM login_lockouts WHERE user_id = ? AND ip = ?",
-                (user_id, ip),
-            )
-
-    # F6.1 — speaker delete + restore-friendly soft delete -----------------
+    # Profile soft-delete (backs DELETE /users/{user_id}) ------------------
 
     def soft_delete_speaker(self, user_id: str, *, deleted_by: str | None, deleted_at: datetime) -> bool:
         """Move a row from `users` → `deleted_users`. Returns True iff the
@@ -588,9 +417,6 @@ class SQLiteStore:
                 ),
             )
             self._connection.execute(
-                "DELETE FROM sessions WHERE user_id = ?", (user_id,)
-            )
-            self._connection.execute(
                 "DELETE FROM users WHERE user_id = ?", (user_id,)
             )
             return True
@@ -609,83 +435,6 @@ class SQLiteStore:
                 "enrolled_at": r["enrolled_at"],
                 "deleted_at": r["deleted_at"],
                 "deleted_by": r["deleted_by"],
-            }
-            for r in rows
-        ]
-
-    # F6.2 — audit log ------------------------------------------------------
-
-    def add_audit_event(
-        self,
-        *,
-        action: str,
-        actor: str | None = None,
-        ip: str | None = None,
-        target: str | None = None,
-        metadata: dict | None = None,
-        when: datetime | None = None,
-    ) -> int:
-        """Append one row to audit_log; returns the new event_id. Callers
-        write actions like 'login.success', 'user.delete', 'threshold.set'.
-        `metadata` is JSON-serialised for free-form context (request id,
-        old/new values, etc.)."""
-        from datetime import datetime as _dt
-        from datetime import timezone as _tz
-
-        ts = (when or _dt.now(_tz.utc)).isoformat()
-        with self._lock, self._connection:
-            cursor = self._connection.execute(
-                """
-                INSERT INTO audit_log (occurred_at, actor, ip, action, target, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    ts,
-                    actor,
-                    ip,
-                    action,
-                    target,
-                    json.dumps(metadata) if metadata else None,
-                ),
-            )
-            return int(cursor.lastrowid)
-
-    def list_audit_events(
-        self,
-        *,
-        since: datetime | None = None,
-        limit: int = 200,
-    ) -> list[dict]:
-        if since is not None:
-            rows = self._connection.execute(
-                """
-                SELECT event_id, occurred_at, actor, ip, action, target, metadata_json
-                FROM audit_log
-                WHERE occurred_at >= ?
-                ORDER BY event_id DESC
-                LIMIT ?
-                """,
-                (since.isoformat(), limit),
-            ).fetchall()
-        else:
-            rows = self._connection.execute(
-                """
-                SELECT event_id, occurred_at, actor, ip, action, target, metadata_json
-                FROM audit_log
-                ORDER BY event_id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            {
-                "event_id": int(r["event_id"]),
-                "occurred_at": r["occurred_at"],
-                "actor": r["actor"],
-                "ip": r["ip"],
-                "action": r["action"],
-                "target": r["target"],
-                "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else None,
             }
             for r in rows
         ]

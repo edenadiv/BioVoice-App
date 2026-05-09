@@ -1,6 +1,6 @@
-// G7 — kiosk smoke E2E. Asserts the basics: page loads, sidebar
-// renders the five nav items, /readyz reports green from the running
-// backend, no console errors.
+// Kiosk smoke E2E. Verifies the page loads, the trimmed-down sidebar
+// renders the three operator screens (Console / Deepfake Lab /
+// Profiles), and the backend reports ready.
 
 import { test, expect } from "@playwright/test";
 
@@ -17,27 +17,22 @@ test.describe("kiosk smoke", () => {
     // Every kiosk screen renders the BIOVOICE wordmark in the chrome.
     await expect(page.getByText(/BIO\s*VOICE/i).first()).toBeVisible();
 
-    // 5 sidebar nav items. The t() labels resolve to these strings in
-    // EN. Multiple buttons in the page can carry the same accessible
-    // name (e.g. SettingsPanel has its own "Console" button), so scope
-    // the selector to the sidebar via the .biovoice-sidebar class
-    // (added in F5.3).
+    // Three sidebar nav items only after the auth/admin/settings strip.
+    // SettingsPanel still ships its own "Console" button so we scope to
+    // the sidebar by class.
     const sidebar = page.locator(".biovoice-sidebar");
-    for (const id of ["Console", "Deepfake Lab", "Profiles", "Settings", "Admin"]) {
+    for (const id of ["Console", "Deepfake Lab", "Profiles"]) {
       await expect(sidebar.locator(`button[title="${id}"]`)).toBeVisible();
     }
+    // Admin + Settings entries are gone.
+    await expect(sidebar.locator(`button[title="Admin"]`)).toHaveCount(0);
+    await expect(sidebar.locator(`button[title="Settings"]`)).toHaveCount(0);
 
-    // Filter expected 401s from getSession() probing on first paint
-    // (page asks the backend if a session exists; backend responds 401
-    // when the cookie isn't present yet — normal logged-out state).
-    const unexpected = consoleErrors.filter(
-      (msg) => !msg.includes("status of 401"),
-    );
-    expect(unexpected).toEqual([]);
+    expect(consoleErrors).toEqual([]);
   });
 
   test("/readyz responds with all checks green", async ({ request }) => {
-    const resp = await request.get("http://127.0.0.1:8000/readyz");
+    const resp = await request.get("http://localhost:8000/readyz");
     expect(resp.status()).toBe(200);
     const body = await resp.json();
     expect(body.ready).toBe(true);

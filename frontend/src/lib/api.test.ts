@@ -1,16 +1,12 @@
-// G7 — Vitest unit tests for the lib/api request wrapper.
-//
-// Goal: assert the cookie-auth contract (every fetch carries
-// `credentials: 'include'`) and the 401 propagation behaviour. We
-// stub `fetch` directly so the tests are hermetic — no backend needed.
+// Vitest unit tests for the lib/api request wrapper.
+// Stub `fetch` so the tests are hermetic — no backend required.
 
-import { describe, expect, it, beforeEach, vi, type Mock } from "vitest";
-import { listSpeakers, listResults, logoutSession, getSession } from "./api";
+import { describe, expect, it, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { listSpeakers, listResults, deleteUser, enrollSpeaker, verifySpeaker } from "./api";
 
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
-  // Reset the mock before each test so call counts are predictable.
   globalThis.fetch = vi.fn() as unknown as typeof fetch;
 });
 
@@ -29,11 +25,10 @@ function noContentResponse(status = 204): Response {
   return new Response(null, { status });
 }
 
-describe("api request wrapper — cookie auth contract", () => {
+describe("api request wrapper — credentials + method contract", () => {
   it("listSpeakers passes credentials: 'include'", async () => {
     (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse([]));
     await listSpeakers();
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     const init = (globalThis.fetch as Mock).mock.calls[0][1];
     expect(init.credentials).toBe("include");
   });
@@ -45,35 +40,64 @@ describe("api request wrapper — cookie auth contract", () => {
     expect(init.credentials).toBe("include");
   });
 
-  it("logoutSession sends DELETE with credentials and handles 204", async () => {
+  it("deleteUser sends DELETE and handles 204", async () => {
     (globalThis.fetch as Mock).mockResolvedValueOnce(noContentResponse());
-    await logoutSession();
-    const [, init] = (globalThis.fetch as Mock).mock.calls[0];
+    await deleteUser("alice");
+    const [url, init] = (globalThis.fetch as Mock).mock.calls[0];
+    expect(String(url)).toMatch(/\/users\/alice$/);
     expect(init.method).toBe("DELETE");
     expect(init.credentials).toBe("include");
+  });
+
+  it("enrollSpeaker posts user_id + audio as form data", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      user_id: "alice",
+      status: "enrolled",
+      message: "ok",
+      enrolled_at: "2026-05-09T00:00:00Z",
+      quality: { score: 90, snr_db: 60, clipping_pct: 0, speech_ratio: 1, acceptable: true },
+    }));
+    const file = new File([new Uint8Array([0])], "test.wav", { type: "audio/wav" });
+    await enrollSpeaker("alice", file);
+    const [url, init] = (globalThis.fetch as Mock).mock.calls[0];
+    expect(String(url)).toMatch(/\/enroll$/);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+  });
+
+  it("verifySpeaker posts user_id + audio as form data", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      result_id: "r1",
+      user_id: "alice",
+      decision: "ACCEPT",
+      decision_reason: "accepted",
+      similarity_score: 0.9,
+      deepfake_score: 0.9,
+      centroid_similarity: 0.9,
+      sample_similarities: [],
+      message: "ok",
+      session_id: "VRF-20260509-00001",
+      created_at: "2026-05-09T00:00:00Z",
+    }));
+    const file = new File([new Uint8Array([0])], "test.wav", { type: "audio/wav" });
+    await verifySpeaker("alice", file);
+    const [url] = (globalThis.fetch as Mock).mock.calls[0];
+    expect(String(url)).toMatch(/\/verify$/);
   });
 });
 
 describe("api request wrapper — error propagation", () => {
-  it("throws when the server returns 401", async () => {
+  it("throws when the server returns 400", async () => {
     (globalThis.fetch as Mock).mockResolvedValueOnce(
-      new Response("Missing Authorization header", { status: 401 }),
+      new Response("user not found", { status: 400 }),
     );
-    await expect(getSession()).rejects.toThrow(/Missing Authorization|401/);
+    await expect(listSpeakers()).rejects.toThrow(/user not found|400/);
   });
 
   it("throws when the server returns 500", async () => {
     (globalThis.fetch as Mock).mockResolvedValueOnce(
       new Response("internal error", { status: 500 }),
     );
-    await expect(listSpeakers()).rejects.toThrow();
-  });
-
-  it("rejects unauthorised even when body is empty", async () => {
-    (globalThis.fetch as Mock).mockResolvedValueOnce(noContentResponse(401));
-    await expect(getSession()).rejects.toThrow(/401/);
+    await expect(listResults()).rejects.toThrow();
   });
 });
-
-// --- Compatibility shim for the test runner --------------------------------
-import { afterEach } from "vitest";

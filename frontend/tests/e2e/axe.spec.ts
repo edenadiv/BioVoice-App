@@ -15,14 +15,12 @@ test.describe.configure({ mode: "parallel" });
 
 test.skip(({ browserName }) => browserName !== "chromium", "axe scan is browser-agnostic; chromium only");
 
-// `nav` strings must match the EN i18n labels in en.json — the
-// sidebar renders those as the button `title` attribute.
+// Three surviving operator screens after the strip — sidebar buttons
+// carry the visible label as their `title` attribute.
 const SCREENS: Array<{ id: string; nav: string; label: string }> = [
   { id: "console",  nav: "Console",      label: "Console" },
   { id: "lab",      nav: "Deepfake Lab", label: "DeepfakeLab" },
   { id: "profiles", nav: "Profiles",     label: "Profiles" },
-  { id: "settings", nav: "Settings",     label: "Settings" },
-  { id: "admin",    nav: "Admin",        label: "Admin" },
 ];
 
 for (const screen of SCREENS) {

@@ -41,12 +41,6 @@ export type Speaker = {
   enrolledAt: string;
 };
 
-export type Session = {
-  sessionToken: string;
-  userId: string;
-  createdAt: string;
-};
-
 export type ReferenceSample = {
   sampleId: string;
   userId: string;

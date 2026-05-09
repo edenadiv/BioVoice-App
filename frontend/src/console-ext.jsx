@@ -5,8 +5,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Waveform, EmbeddingCloud } from "./visuals.jsx";
 import { useVoiceRecorder } from "./lib/audio";
-import { loginWithVoice, logoutSession, verifyAuthenticatedSpeaker } from "./lib/api";
-import { useAppDispatch, useAppState } from "./lib/session";
+import { verifySpeaker } from "./lib/api";
+import { useAppDispatch } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 
@@ -400,25 +400,20 @@ function ThreatLevel({ level = 'green' }) {
 }
 
 // ============================================================================
-// VerificationOverlay — runs the real verification (E-17/E-18).
+// VerificationOverlay — runs the real verification.
 //
 // Lifecycle:
-//   1. Mount  → start the recorder (Y-12).
-//   2. After RECORD_MS (or recorder.maxMs) → stop, encode WAV, kick the API.
-//        - No session            → loginWithVoice(userId, file)
-//        - Session for same user → verifyAuthenticatedSpeaker(file)   (cookie auth — F2.5)
-//        - Session for different → logout, then loginWithVoice
-//   3. While the API is in flight → animate phases 1 (Embed) and 2 (Match)
-//        on a calibrated 1.5 s timeline (Plan §5).
+//   1. Mount  → start the recorder.
+//   2. After RECORD_MS → stop, encode WAV, POST /verify with profile.userId.
+//   3. While the API is in flight → animate the calibrated timeline.
 //   4. On settle → show ResultPanel with the real similarity / dfScore.
-//   5. On error  → show ErrorPanel with the server's `message`.
+//   5. On error  → show ErrorPanel with the server's message.
 // ============================================================================
 const RECORD_MS = 3000;
 
 function VerificationOverlay({ profile, onClose }) {
   const recorder = useVoiceRecorder({ minMs: 1000, maxMs: RECORD_MS });
   const dispatch = useAppDispatch();
-  const { session } = useAppState();
 
   // The in-flight verification promise drives the calibrated timeline.
   const [verifyPromise, setVerifyPromise] = useState(null);
@@ -448,38 +443,11 @@ function VerificationOverlay({ profile, onClose }) {
     }
 
     const userId = profile?.userId ?? profile?.id;
-    let promise;
-    if (!session) {
-      promise = loginWithVoice(userId, recording.wavFile);
-    } else if (session.userId === userId) {
-      // F2.5 — cookie carries the session; no token argument needed.
-      promise = verifyAuthenticatedSpeaker(recording.wavFile);
-    } else {
-      promise = (async () => {
-        try {
-          await logoutSession();
-        } catch {
-          /* ignore — we're replacing the session anyway */
-        }
-        dispatch({ type: "set-session", session: null });
-        return loginWithVoice(userId, recording.wavFile);
-      })();
-    }
-
+    const promise = verifySpeaker(userId, recording.wavFile);
     setVerifyPromise(promise);
 
     promise
-      .then((response) => {
-        let verification;
-        // loginWithVoice returns { session, verification }; the backend has
-        // already pinned the rotated session cookie before we ever see this
-        // response, so we just stash the typed Session for UI state.
-        if (response && typeof response === "object" && "session" in response && "verification" in response) {
-          dispatch({ type: "set-session", session: response.session });
-          verification = response.verification;
-        } else {
-          verification = response;
-        }
+      .then((verification) => {
         setResult(verification);
         dispatch({ type: "set-last-verification", result: verification });
         dispatch({ type: "prepend-result", result: verification });
@@ -488,7 +456,7 @@ function VerificationOverlay({ profile, onClose }) {
         const message = err instanceof Error ? err.message : String(err ?? "Verification failed.");
         setError(message);
       });
-  }, [recorder, session, profile, dispatch]);
+  }, [recorder, profile, dispatch]);
 
   // Once recording is live, schedule the auto-stop.
   useEffect(() => {

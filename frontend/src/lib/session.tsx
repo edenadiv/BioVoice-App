@@ -7,20 +7,19 @@ import {
   useMemo,
   useReducer,
 } from "react";
-import { getSession, listResults, listSpeakers } from "./api";
+import { listResults, listSpeakers } from "./api";
 import { deriveProfile, type Profile } from "./profileVisual";
 import { useResultsPolling } from "./useResultsPolling";
-import type { Session, Speaker, VerificationResult, SpoofGenerationResult } from "../types";
+import type { Speaker, VerificationResult, SpoofGenerationResult } from "../types";
 
-// F2.5 — the session token now lives in an HttpOnly cookie
-// (`biovoice_session`) set by the backend. JavaScript cannot read it; the
-// browser sends it automatically on every fetch with `credentials: "include"`.
-// localStorage is no longer touched, removing the XSS-readable token surface.
+// Session reducer for the kiosk. After the auth strip, there's no
+// per-user session — `lastVerification` and `lastSpoof` are the only
+// "current operation" state we carry. `speakers` + `results` are
+// polled from the public backend.
 
 type FlowIntent = "enroll" | "verify" | null;
 
 export type AppState = {
-  session: Session | null;
   speakers: Speaker[];
   results: VerificationResult[];
   lastVerification: VerificationResult | null;
@@ -34,7 +33,6 @@ export type AppState = {
 };
 
 const initialState: AppState = {
-  session: null,
   speakers: [],
   results: [],
   lastVerification: null,
@@ -44,7 +42,6 @@ const initialState: AppState = {
 };
 
 type Action =
-  | { type: "set-session"; session: Session | null }
   | { type: "set-speakers"; speakers: Speaker[] }
   | { type: "set-results"; results: VerificationResult[] }
   | { type: "prepend-result"; result: VerificationResult }
@@ -53,12 +50,10 @@ type Action =
   | { type: "set-flow"; intent: FlowIntent; promise: Promise<unknown> | null }
   | { type: "set-flow-error"; error: string | null }
   | { type: "set-health"; health: AppState["health"] }
-  | { type: "logout" };
+  | { type: "refresh-speakers" };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "set-session":
-      return { ...state, session: action.session };
     case "set-speakers":
       return { ...state, speakers: action.speakers };
     case "set-results":
@@ -88,8 +83,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "set-health":
       return { ...state, health: action.health };
-    case "logout":
-      return { ...initialState, speakers: state.speakers, results: state.results, health: state.health };
+    case "refresh-speakers":
+      return state; // sentinel — actual fetch fires from a side-effect below
     default:
       return state;
   }
@@ -107,7 +102,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, []);
   useResultsPolling(onResults, 5000);
 
-  // Initial speaker load — refreshed elsewhere after enrollment mutations.
+  // Initial speaker load — refreshed elsewhere after enrollment mutations
+  // via the `refreshSpeakers` helper.
   useEffect(() => {
     let alive = true;
     listSpeakers()
@@ -125,25 +121,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // F2.5 — probe for an existing session via the HttpOnly cookie. The
-  // browser ships it on this fetch automatically; if the cookie is missing
-  // or expired the backend returns 401 and we silently stay logged out.
-  useEffect(() => {
-    let alive = true;
-    getSession()
-      .then((session) => {
-        if (alive) dispatch({ type: "set-session", session });
-      })
-      .catch(() => {
-        /* No session — leave state unchanged (initial state is null). */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Refetch results once now (the polling loop also covers this, but a fresh
-  // mount can render zeros for ~5 s otherwise — kick a single immediate fetch).
+  // Refetch results once on mount (the polling loop also covers this, but
+  // a fresh mount renders zeros for ~5 s otherwise).
   useEffect(() => {
     let alive = true;
     listResults()
@@ -175,6 +154,18 @@ export function useAppDispatch(): (action: Action) => void {
   return ctx;
 }
 
+// Imperative helper — re-fetch the speaker list and dispatch the
+// result. Components that mutate the speaker set (EnrollModal,
+// ProfilesPage delete) call this to refresh their view without
+// waiting for any polling cycle.
+export function useRefreshSpeakers(): () => Promise<void> {
+  const dispatch = useAppDispatch();
+  return useCallback(async () => {
+    const speakers = await listSpeakers();
+    dispatch({ type: "set-speakers", speakers });
+  }, [dispatch]);
+}
+
 // Convenience selector — many components want the visual-augmented profile list.
 export function useProfiles(): Profile[] {
   const { speakers } = useAppState();
@@ -195,10 +186,7 @@ export function useDerivedCounts(): { verifyCount: number; threatCount: number }
   }, [results]);
 }
 
-// G15 — per-profile verification counts derived from state.results. Used
-// by the ProfilesPage stat row to replace the previous Math.random()
-// VERIFIED count. Returns a Record<userId, count> so ProfilesPage looks
-// up a single profile's number without re-walking the array per card.
+// Per-profile verification counts derived from state.results.
 export function usePerProfileVerifyCounts(): Record<string, number> {
   const { results } = useAppState();
   return useMemo(() => {
@@ -212,9 +200,7 @@ export function usePerProfileVerifyCounts(): Record<string, number> {
   }, [results]);
 }
 
-// G15 — days elapsed between an ISO timestamp and now. Returns 0 for
-// future dates / unparseable input so the stat-card renderer never
-// shows a negative day count.
+// Days elapsed between an ISO timestamp and now (clamped at 0).
 export function daysSince(iso: string | null | undefined): number {
   if (!iso) return 0;
   const then = new Date(iso).getTime();

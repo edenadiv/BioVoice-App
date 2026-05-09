@@ -1,30 +1,21 @@
-// Additional pages: Sidebar nav, Deepfake Creation Lab, User Settings, Profile manager.
+// Additional pages: Sidebar nav, Deepfake Creation Lab, Profile manager.
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { useTranslation } from "react-i18next";
 import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { LanguageSwitcher } from "./components/LanguageSwitcher.tsx";
-import { generateSpoofSample, spoofTest } from "./lib/api";
-import { useAppState, usePerProfileVerifyCounts, daysSince } from "./lib/session";
+import { generateSpoof, spoofTest, deleteUser } from "./lib/api";
+import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
+import { EnrollModal } from "./components/EnrollModal.tsx";
 
 // ============================================================================
-// Sidebar — real-app navigation rail.
+// Sidebar — three-item navigation rail (Console / DeepfakeLab / Profiles).
 // ============================================================================
 function Sidebar({ page, setPage }) {
-  // F5.2 — labels come through i18next so the chrome flips with the
-  // language switch. The icons themselves stay literal SVG.
-  const { t } = useTranslation();
   const items = [
-    { id: 'console',  label: t('nav.console'),       icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
-    { id: 'lab',      label: t('nav.deepfakeLab'),   icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
-    { id: 'profiles', label: t('nav.profiles'),      icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
-    { id: 'settings', label: t('nav.settings'),      icon: <><circle cx="10" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
-    // F6 — operator admin (gated by BIOVOICE_ADMIN_API_KEY at the
-    // backend; the screen itself shows a disabled state until the
-    // operator pastes the key).
-    { id: 'admin',    label: t('nav.admin', 'Admin'), icon: <><path d="M10 2L3 5v5c0 4 3 7 7 8 4-1 7-4 7-8V5l-7-3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M7 10l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></> },
+    { id: 'console',  label: 'Console',      icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
+    { id: 'lab',      label: 'Deepfake Lab', icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
+    { id: 'profiles', label: 'Profiles',     icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
   ];
   return (
     <div className="biovoice-sidebar" style={{
@@ -59,10 +50,6 @@ function Sidebar({ page, setPage }) {
         );
       })}
       <div style={{ flex: 1 }}></div>
-      {/* F5.1 — language switcher in the sidebar. Sits above the
-          operator avatar so it's discoverable but out of the main
-          interaction path. */}
-      <LanguageSwitcher />
       {/* Avatar at the bottom */}
       <div style={{
         width: 44, height: 44, borderRadius: '50%',
@@ -78,26 +65,14 @@ function Sidebar({ page, setPage }) {
 // ============================================================================
 // DeepfakeLab — interactive deepfake creation/detection.
 //
-// G14 — replaced the setTimeout/Math.random simulation with real backend
-// calls. The "Forge & test attack" button now does a two-step round-trip:
+// Two-step pipeline driven by the public backend routes:
+//   1. POST /spoof          → XTTS clones `target_user_id`'s enrolled voice.
+//   2. POST /spoof/test     → AASIST + F4 sub-classifier score the clone.
 //
-//   1. POST /me/spoof  → backend XTTS clones the LOGGED-IN user's voice
-//      reading the supplied text. Returns audio/wav (the clone).
-//   2. POST /me/spoof/test → backend runs that clone through the real
-//      AASIST detector + the F4 sub-classifier and returns deepfake
-//      score + decision (FAKE/GENUINE) + the four sub-axis scores.
-//
-// The "target voice" picker is visual context only — the real clone
-// always targets the authenticated user's enrolled voice, since
-// /me/spoof is keyed off the session cookie. Until we add an
-// admin-only "clone any user" endpoint, the operator must log in as
-// the target via the Console verify flow first.
-//
-// XTTS missing on the server (503) and not-logged-in (401) both surface
-// as actionable error banners in the result panel.
+// XTTS missing on the server (503) and reference-missing surface as
+// actionable error banners in the result panel.
 // ============================================================================
 function DeepfakeLab({ audio, profiles }) {
-  const { session } = useAppState();
   const [target, setTarget] = useState(profiles[0]?.id ?? null);
   const [text, setText] = useState("Authorize transfer of two million dollars.");
   const [model, setModel] = useState('clone-v3');
@@ -106,11 +81,16 @@ function DeepfakeLab({ audio, profiles }) {
   const [error, setError] = useState(null);
   const [stage, setStage] = useState(0); // 0 idle, 1 cloning, 2 detecting, 3 done
 
+  // Keep the target picker in sync as profiles arrive from the polling.
+  useEffect(() => {
+    if (!target && profiles[0]) setTarget(profiles[0].id);
+  }, [profiles, target]);
+
   const targetProfile = profiles.find(p => p.id === target) || profiles[0];
 
   const generate = useCallback(async () => {
-    if (!session) {
-      setError("Log in via the Console first — the lab clones the authenticated user's voice.");
+    if (!target) {
+      setError("Enrol at least one profile in the Profiles page first.");
       return;
     }
     setError(null);
@@ -120,18 +100,16 @@ function DeepfakeLab({ audio, profiles }) {
     const startedAt = performance.now();
 
     try {
-      // Step 1 — XTTS clone of the logged-in user's voice. Returns an
-      // audio blob URL we can play AND a fileName for the spoof-test
-      // round-trip.
-      const generation = await generateSpoofSample({
+      // Step 1 — XTTS clone of `target` saying `text`. Returns a blob
+      // URL we can play AND the fileName for the spoof-test round-trip.
+      const generation = await generateSpoof({
+        targetUserId: target,
         text,
         language: 'en',
       });
       setStage(2);
 
-      // Step 2 — fetch the blob, convert to File, run /me/spoof/test on it.
-      // The endpoint runs AASIST + the F4 sub-classifier and returns
-      // deepfake score + decision + the four sub-axis scores.
+      // Step 2 — fetch the blob, run /spoof/test on it.
       const blob = await (await fetch(generation.audioUrl)).blob();
       const cloneFile = new File([blob], generation.fileName, { type: 'audio/wav' });
       const detection = await spoofTest(cloneFile);
@@ -143,28 +121,25 @@ function DeepfakeLab({ audio, profiles }) {
         fileName: generation.fileName,
         sourceDescription: generation.sourceDescription,
         dfScore: detection.deepfakeScore,
-        decision: detection.decision,        // 'FAKE' | 'GENUINE'
+        decision: detection.decision,
         analysisDetails: detection.analysisDetails,
         time: (elapsedMs / 1000).toFixed(2),
         model,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // Map backend-known failure modes to actionable messages.
       let friendly = msg;
       if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
         friendly = 'Spoof generation requires XTTS-v2. Install it on the backend (see backend/README.md §XTTS spoof generation).';
-      } else if (msg.includes('401')) {
-        friendly = 'Session expired. Log in again via the Console.';
-      } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol')) {
-        friendly = 'No reference sample for this voice — enrol the user first via the Profiles page.';
+      } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol') || msg.includes('404')) {
+        friendly = `No reference sample for "${target}" — enrol them first via the Profiles page.`;
       }
       setError(friendly);
       setStage(0);
     } finally {
       setGenerating(false);
     }
-  }, [session, text, model]);
+  }, [target, text, model]);
 
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
@@ -258,9 +233,9 @@ function DeepfakeLab({ audio, profiles }) {
                 ? (stage === 1 ? 'Cloning voice…' : 'Running detector…')
                 : <>⚡  Forge & test attack</>}
             </button>
-            {!session && (
+            {!target && (
               <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 4 }}>
-                Log in via Console to enable real XTTS clone of your voice.
+                Enrol at least one profile in Profiles before forging.
               </div>
             )}
           </div>
@@ -658,7 +633,24 @@ function ProfilesPage({ profiles, audio }) {
   // to a future enrollment_quality table — until then, sampleCount is
   // the most truthful proxy a profile card can render).
   const [hover, setHover] = useState(null);
+  const [showEnroll, setShowEnroll] = useState(false);
+  const [deleting, setDeleting] = useState(null);
   const verifyCounts = usePerProfileVerifyCounts();
+  const refreshSpeakers = useRefreshSpeakers();
+
+  const handleDelete = useCallback(async (userId) => {
+    if (!window.confirm(`Delete profile "${userId}"? This cannot be undone.`)) return;
+    setDeleting(userId);
+    try {
+      await deleteUser(userId);
+      await refreshSpeakers();
+    } catch (err) {
+      window.alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeleting(null);
+    }
+  }, [refreshSpeakers]);
+
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle={`${profiles.length} enrolled profiles`} screenName="PROFILES"/>
@@ -670,46 +662,79 @@ function ProfilesPage({ profiles, audio }) {
             <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
             <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
           </div>
-          <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 13 }}>+ &nbsp;ENROLL NEW</button>
+          <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 13 }}
+                  onClick={() => setShowEnroll(true)}>
+            + &nbsp;ENROLL NEW
+          </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
-          {profiles.map((p, i) => (
-            <div key={p.id} className="panel lift"
-              onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)}
-              style={{
-                padding: 24, position: 'relative', overflow: 'hidden',
-                animation: `fadeIn 500ms ${i * 60}ms ease both`,
-                cursor: 'pointer',
-              }}>
-              <div style={{
-                position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: '50%',
-                background: `radial-gradient(circle, ${p.color1}33, transparent)`, opacity: hover === p.id ? 1 : 0.5,
-                transition: 'opacity 300ms',
-              }}></div>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+        {profiles.length === 0 ? (
+          <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-mute)' }}>
+            <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: 'var(--teal-2)' }}>NO PROFILES YET</div>
+            <div style={{ fontSize: 16, marginBottom: 16 }}>Enrol your first speaker to get started.</div>
+            <button className="btn btn-primary" onClick={() => setShowEnroll(true)} style={{ padding: '10px 20px', fontSize: 13 }}>
+              + &nbsp;ENROLL FIRST PROFILE
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+            {profiles.map((p, i) => (
+              <div key={p.id} className="panel lift"
+                onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)}
+                style={{
+                  padding: 24, position: 'relative', overflow: 'hidden',
+                  animation: `fadeIn 500ms ${i * 60}ms ease both`,
+                  opacity: deleting === p.userId ? 0.4 : 1,
+                  transition: 'opacity 200ms',
+                }}>
                 <div style={{
-                  width: 56, height: 56, borderRadius: '50%',
-                  background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
-                  display: 'grid', placeItems: 'center',
-                  color: '#04070d', fontWeight: 600, fontSize: 18,
-                  boxShadow: `0 0 20px ${p.color1}66`,
-                }}>{p.initials}</div>
-                <div>
-                  <div style={{ fontSize: 18 }}>{p.name}</div>
-                  <div className="label-mono" style={{ fontSize: 10 }}>{p.id}</div>
+                  position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: '50%',
+                  background: `radial-gradient(circle, ${p.color1}33, transparent)`, opacity: hover === p.id ? 1 : 0.5,
+                  transition: 'opacity 300ms',
+                }}></div>
+                {/* Delete button — top-right corner of each card */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(p.userId); }}
+                  disabled={deleting === p.userId}
+                  title={`Delete ${p.userId}`}
+                  aria-label={`Delete ${p.userId}`}
+                  style={{
+                    position: 'absolute', top: 10, right: 10, zIndex: 4,
+                    width: 28, height: 28, minWidth: 28, minHeight: 28, borderRadius: '50%',
+                    background: 'rgba(255,85,119,0.10)', color: '#ff5577',
+                    border: '1px solid rgba(255,85,119,0.30)',
+                    cursor: deleting === p.userId ? 'wait' : 'pointer',
+                    fontSize: 14, lineHeight: 1, padding: 0,
+                  }}>
+                  ×
+                </button>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                  <div style={{
+                    width: 56, height: 56, borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
+                    display: 'grid', placeItems: 'center',
+                    color: '#04070d', fontWeight: 600, fontSize: 18,
+                    boxShadow: `0 0 20px ${p.color1}66`,
+                  }}>{p.initials}</div>
+                  <div>
+                    <div style={{ fontSize: 18 }}>{p.name}</div>
+                    <div className="label-mono" style={{ fontSize: 10 }}>{p.id}</div>
+                  </div>
+                </div>
+                <MiniWave color={p.color1} idx={i}/>
+                <div className="biovoice-numerals" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
+                  <Stat2 k="VERIFIED" v={verifyCounts[p.userId] ?? 0}/>
+                  <Stat2 k="ENROLLED" v={`${daysSince(p.enrolledAt)}d`}/>
+                  <Stat2 k="SAMPLES"  v={`${p.sampleCount}/3`}/>
                 </div>
               </div>
-              <MiniWave color={p.color1} idx={i}/>
-              <div className="biovoice-numerals" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
-                <Stat2 k="VERIFIED" v={verifyCounts[p.userId] ?? 0}/>
-                <Stat2 k="ENROLLED" v={`${daysSince(p.enrolledAt)}d`}/>
-                <Stat2 k="SAMPLES"  v={`${p.sampleCount}/3`}/>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {showEnroll && <EnrollModal onClose={() => setShowEnroll(false)} audio={audio}/>}
     </div>
   );
 }

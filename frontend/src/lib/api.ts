@@ -1,7 +1,10 @@
+// HTTP client for the BioVoice kiosk. All routes are public —
+// auth/cookie/admin scaffolding was removed in the "strip the
+// scaffolding" pass. The kiosk talks to a single FastAPI backend at
+// `VITE_API_BASE_URL` (defaults to http://localhost:8000).
+
 import type {
   AnalysisDetails,
-  ReferenceSample,
-  Session,
   Speaker,
   SpoofDecision,
   SpoofGenerationResult,
@@ -66,32 +69,17 @@ type EnrollmentResponse = {
   quality?: SampleQualityResponse | null;
 };
 
-type SessionResponse = {
-  session_token: string;
-  user_id: string;
-  created_at: string;
-  expires_at: string;
+type SpoofTestResponse = {
+  deepfake_score: number;
+  decision: SpoofDecision;
+  analysis_details: AnalysisDetailsResponse;
 };
 
-type ReferenceSampleResponse = {
-  sample_id: string;
-  user_id: string;
-  original_filename: string;
-  source: string;
-  created_at: string;
-};
-
-type AuthSessionResponse = {
-  session: SessionResponse;
-  verification: VerificationResponse;
-};
-
-// F2.5 — every request opts into cookie auth. The `biovoice_session` cookie
-// is HttpOnly so this code can never read it; the browser sends it for us
-// when we set `credentials: "include"` and the server echoes
-// `Access-Control-Allow-Credentials: true` (CORS config in backend/app/main.py).
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    // Kiosk + backend are same-origin in production (nginx fronts both)
+    // and same-site in local dev (localhost:5173 + localhost:8000).
+    // Sending credentials is harmless without auth.
     credentials: "include",
     ...init,
   });
@@ -103,6 +91,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+async function postForm<T>(path: string, formData: FormData): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
+  return {
+    voiceNaturalness: payload.voice_naturalness,
+    spectralConsistency: payload.spectral_consistency,
+    temporalPatterns: payload.temporal_patterns,
+    artifactDetection: payload.artifact_detection,
+  };
 }
 
 function toVerificationResult(response: VerificationResponse): VerificationResult {
@@ -135,13 +139,12 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
   };
 }
 
-function toSession(response: SessionResponse): Session {
-  return {
-    sessionToken: response.session_token,
-    userId: response.user_id,
-    createdAt: response.created_at,
-  };
+function parseFileName(contentDisposition: string | null): string {
+  const match = contentDisposition?.match(/filename="([^"]+)"/i);
+  return match?.[1] ?? "spoof.wav";
 }
+
+// -- Profiles -----------------------------------------------------------------
 
 export async function listSpeakers(): Promise<Speaker[]> {
   const response = await request<SpeakerResponse[]>("/users");
@@ -150,18 +153,6 @@ export async function listSpeakers(): Promise<Speaker[]> {
     enrolledAt: item.enrolled_at,
     sampleCount: item.sample_count,
   }));
-}
-
-export async function listResults(): Promise<VerificationResult[]> {
-  const response = await request<VerificationResponse[]>("/results");
-  return response.map(toVerificationResult);
-}
-
-async function postForm<T>(path: string, formData: FormData): Promise<T> {
-  return request<T>(path, {
-    method: "POST",
-    body: formData,
-  });
 }
 
 export type EnrollResult = {
@@ -177,6 +168,12 @@ export async function enrollSpeaker(userId: string, file: File): Promise<EnrollR
   return { message: response.message, quality: response.quality ?? null };
 }
 
+export async function deleteUser(userId: string): Promise<void> {
+  await request(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}
+
+// -- Verification -------------------------------------------------------------
+
 export async function verifySpeaker(userId: string, file: File): Promise<VerificationResult> {
   const formData = new FormData();
   formData.append("user_id", userId);
@@ -185,191 +182,24 @@ export async function verifySpeaker(userId: string, file: File): Promise<Verific
   return toVerificationResult(response);
 }
 
-export async function enrollAuthenticatedSpeaker(file: File): Promise<EnrollResult> {
-  const formData = new FormData();
-  formData.append("audio", file);
-  const response = await postForm<EnrollmentResponse>("/me/enroll", formData);
-  return { message: response.message, quality: response.quality ?? null };
+export async function listResults(): Promise<VerificationResult[]> {
+  const response = await request<VerificationResponse[]>("/results");
+  return response.map(toVerificationResult);
 }
 
-export async function verifyAuthenticatedSpeaker(file: File): Promise<VerificationResult> {
-  const formData = new FormData();
-  formData.append("audio", file);
-  const response = await postForm<VerificationResponse>("/me/verify", formData);
-  return toVerificationResult(response);
-}
+// -- Deepfake lab -------------------------------------------------------------
 
-export async function loginWithVoice(userId: string, file: File): Promise<{ session: Session; verification: VerificationResult }> {
-  const formData = new FormData();
-  formData.append("user_id", userId);
-  formData.append("audio", file);
-  // The server pins the session cookie on the response. The body still
-  // carries the session token for the sake of the typed `Session` we surface
-  // upward — the cookie is the source of truth for subsequent requests.
-  const response = await postForm<AuthSessionResponse>("/auth/login", formData);
-  return {
-    session: toSession(response.session),
-    verification: toVerificationResult(response.verification),
-  };
-}
-
-export async function getSession(): Promise<Session> {
-  const response = await request<SessionResponse>("/auth/session");
-  return toSession(response);
-}
-
-type AvailabilityResponse = { available: boolean };
-
-export async function getAvailability(userId: string): Promise<boolean> {
-  const response = await request<AvailabilityResponse>(`/users/${encodeURIComponent(userId)}/availability`);
-  return response.available;
-}
-
-type SpoofTestResponse = {
-  deepfake_score: number;
-  decision: SpoofDecision;
-  analysis_details: AnalysisDetailsResponse;
-};
-
-export async function spoofTest(file: File): Promise<SpoofTestResult> {
-  const formData = new FormData();
-  formData.append("audio", file);
-  const response = await postForm<SpoofTestResponse>("/me/spoof/test", formData);
-  return {
-    deepfakeScore: response.deepfake_score,
-    decision: response.decision,
-    analysisDetails: toAnalysisDetails(response.analysis_details),
-  };
-}
-
-function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
-  return {
-    voiceNaturalness: payload.voice_naturalness,
-    spectralConsistency: payload.spectral_consistency,
-    temporalPatterns: payload.temporal_patterns,
-    artifactDetection: payload.artifact_detection,
-  };
-}
-
-export async function getMyVerification(resultId: string): Promise<VerificationResult> {
-  const response = await request<VerificationResponse>(
-    `/me/verifications/${encodeURIComponent(resultId)}`,
-  );
-  return toVerificationResult(response);
-}
-
-export async function logoutSession(): Promise<void> {
-  await request("/auth/session", { method: "DELETE" });
-}
-
-export async function listReferenceSamples(): Promise<ReferenceSample[]> {
-  const response = await request<ReferenceSampleResponse[]>("/me/reference-samples");
-  return response.map((item) => ({
-    sampleId: item.sample_id,
-    userId: item.user_id,
-    originalFilename: item.original_filename,
-    source: item.source,
-    createdAt: item.created_at,
-  }));
-}
-
-function parseFileName(contentDisposition: string | null): string {
-  const match = contentDisposition?.match(/filename="([^"]+)"/i);
-  return match?.[1] ?? "spoof.wav";
-}
-
-// F6 frontend — admin surface helpers.
-//
-// Every call passes the admin key via the X-Admin-API-Key header. Unlike
-// the user-session cookie path, the key never touches a cookie — the
-// admin UI stores it in localStorage and replays per request. That keeps
-// the admin and user sessions independently revocable.
-
-export type AdminThresholds = {
-  similarity_threshold: number;
-  deepfake_threshold: number;
-  voice_naturalness_threshold: number;
-  spectral_consistency_threshold: number;
-  temporal_patterns_threshold: number;
-  artifact_detection_threshold: number;
-};
-
-export type AdminAuditEvent = {
-  event_id: number;
-  occurred_at: string;
-  actor: string | null;
-  ip: string | null;
-  action: string;
-  target: string | null;
-  metadata: Record<string, unknown> | null;
-};
-
-async function adminRequest<T>(adminKey: string, path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  headers.set("X-Admin-API-Key", adminKey);
-  if (init?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-    // Admin routes are key-gated, not cookie-gated; sending credentials is
-    // harmless but unnecessary.
-    credentials: "include",
-  });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `Admin request failed (${response.status})`);
-  }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  return (await response.json()) as T;
-}
-
-export async function adminGetThresholds(adminKey: string): Promise<AdminThresholds> {
-  return adminRequest<AdminThresholds>(adminKey, "/admin/settings/thresholds");
-}
-
-export async function adminUpdateThresholds(
-  adminKey: string,
-  patch: Partial<AdminThresholds>,
-): Promise<AdminThresholds> {
-  return adminRequest<AdminThresholds>(adminKey, "/admin/settings/thresholds", {
-    method: "PUT",
-    body: JSON.stringify(patch),
-  });
-}
-
-export async function adminListAudit(
-  adminKey: string,
-  options: { since?: string; limit?: number } = {},
-): Promise<AdminAuditEvent[]> {
-  const params = new URLSearchParams();
-  if (options.since) params.set("since", options.since);
-  if (options.limit) params.set("limit", String(options.limit));
-  const query = params.toString();
-  return adminRequest<AdminAuditEvent[]>(
-    adminKey,
-    `/admin/audit${query ? `?${query}` : ""}`,
-  );
-}
-
-export async function adminDeleteUser(adminKey: string, userId: string): Promise<void> {
-  await adminRequest<void>(adminKey, `/admin/users/${encodeURIComponent(userId)}`, {
-    method: "DELETE",
-  });
-}
-
-export async function generateSpoofSample(payload: {
+export async function generateSpoof(payload: {
+  targetUserId: string;
   text: string;
-  language: string;
+  language?: string;
   referenceSampleId?: string;
   file?: File | null;
 }): Promise<SpoofGenerationResult> {
   const formData = new FormData();
+  formData.append("target_user_id", payload.targetUserId);
   formData.append("text", payload.text);
-  formData.append("language", payload.language);
+  formData.append("language", payload.language ?? "en");
   if (payload.referenceSampleId) {
     formData.append("reference_sample_id", payload.referenceSampleId);
   }
@@ -377,7 +207,7 @@ export async function generateSpoofSample(payload: {
     formData.append("audio", payload.file);
   }
 
-  const response = await fetch(`${API_BASE}/me/spoof`, {
+  const response = await fetch(`${API_BASE}/spoof`, {
     method: "POST",
     body: formData,
     credentials: "include",
@@ -394,6 +224,17 @@ export async function generateSpoofSample(payload: {
     fileName: parseFileName(response.headers.get("Content-Disposition")),
     sourceDescription: response.headers.get("X-Spoof-Source") ?? "Reference sample",
     text: payload.text,
-    language: payload.language,
+    language: payload.language ?? "en",
+  };
+}
+
+export async function spoofTest(file: File): Promise<SpoofTestResult> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  const response = await postForm<SpoofTestResponse>("/spoof/test", formData);
+  return {
+    deepfakeScore: response.deepfake_score,
+    decision: response.decision,
+    analysisDetails: toAnalysisDetails(response.analysis_details),
   };
 }

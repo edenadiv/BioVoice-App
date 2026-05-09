@@ -28,12 +28,6 @@ def create_app() -> FastAPI:
     )
     app.state.container = container
     app.include_router(router)
-    # F6 — admin surface (delete, audit, threshold tuning). The
-    # require_admin_key dependency on the router rejects every call when
-    # BIOVOICE_ADMIN_API_KEY is unset, so adding it to the app is safe in
-    # all environments.
-    from app.api.admin_routes import admin_router  # local import to avoid cycle
-    app.include_router(admin_router)
     return app
 
 
