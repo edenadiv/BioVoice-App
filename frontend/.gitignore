@@ -1,0 +1,9 @@
+# Build output
+dist/
+node_modules/
+
+# G7 — Playwright + Vitest run artifacts
+playwright-report/
+test-results/
+.playwright/
+coverage/
