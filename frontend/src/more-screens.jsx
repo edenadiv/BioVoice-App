@@ -7,7 +7,7 @@ import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { LanguageSwitcher } from "./components/LanguageSwitcher.tsx";
 import { generateSpoofSample, spoofTest } from "./lib/api";
-import { useAppState } from "./lib/session";
+import { useAppState, usePerProfileVerifyCounts, daysSince } from "./lib/session";
 
 // ============================================================================
 // Sidebar — real-app navigation rail.
@@ -651,7 +651,14 @@ function KV({ k, v }) {
 // ProfilesPage — manage enrolled voice profiles (real-app feel).
 // ============================================================================
 function ProfilesPage({ profiles, audio }) {
+  // G15 — per-card stats now derive from real session state instead of
+  // per-render Math.random(). VERIFIED is the live ACCEPT count from
+  // state.results; ENROLLED is days since speaker.enrolledAt; SAMPLES
+  // replaces the synthetic QUALITY % (real quality persistence belongs
+  // to a future enrollment_quality table — until then, sampleCount is
+  // the most truthful proxy a profile card can render).
   const [hover, setHover] = useState(null);
+  const verifyCounts = usePerProfileVerifyCounts();
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle={`${profiles.length} enrolled profiles`} screenName="PROFILES"/>
@@ -694,10 +701,10 @@ function ProfilesPage({ profiles, audio }) {
                 </div>
               </div>
               <MiniWave color={p.color1} idx={i}/>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
-                <Stat2 k="VERIFIED" v={Math.floor(120 + Math.random() * 600)}/>
-                <Stat2 k="ENROLLED" v={`${1 + Math.floor(Math.random() * 24)}d`}/>
-                <Stat2 k="QUALITY"  v={`${85 + Math.floor(Math.random() * 14)}%`}/>
+              <div className="biovoice-numerals" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
+                <Stat2 k="VERIFIED" v={verifyCounts[p.userId] ?? 0}/>
+                <Stat2 k="ENROLLED" v={`${daysSince(p.enrolledAt)}d`}/>
+                <Stat2 k="SAMPLES"  v={`${p.sampleCount}/3`}/>
               </div>
             </div>
           ))}
