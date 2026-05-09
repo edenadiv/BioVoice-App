@@ -86,6 +86,20 @@ class AnalysisDetails(BaseModel):
     artifact_detection: float = Field(ge=0.0, le=1.0)
 
 
+SpoofDecision = Literal["FAKE", "GENUINE"]
+
+
+class SpoofTestResponse(BaseModel):
+    """G14 — payload for `POST /me/spoof/test`. The DeepfakeLab UI uses
+    this to score an arbitrary uploaded WAV (typically the just-generated
+    XTTS clone) against AASIST + the F4 sub-classifier. Mirrors the
+    contract the frontend `lib/api.ts:spoofTest()` expects."""
+
+    deepfake_score: float = Field(ge=0.0, le=1.0)
+    decision: SpoofDecision
+    analysis_details: AnalysisDetails
+
+
 class VerificationResponse(BaseModel):
     result_id: str
     user_id: str

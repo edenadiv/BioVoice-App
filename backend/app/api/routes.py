@@ -21,6 +21,7 @@ from app.schemas import (
     ReferenceSampleResponse,
     SessionResponse,
     SpeakerResponse,
+    SpoofTestResponse,
     VerificationResponse,
 )
 from app.core.metrics import metrics
@@ -358,6 +359,58 @@ async def generate_spoof_sample(
             "Content-Disposition": f'attachment; filename="{result.file_name}"',
             "X-Spoof-Source": result.source_description,
         },
+    )
+
+
+@router.post("/me/spoof/test", response_model=SpoofTestResponse)
+async def test_spoof_sample(
+    audio: UploadFile = File(...),
+    session: SessionResponse = Depends(get_current_session),
+    service: VerificationService = Depends(get_verification_service),
+) -> SpoofTestResponse:
+    """G14 — score an arbitrary uploaded WAV against AASIST + the F4
+    sub-classifier. Used by the DeepfakeLab UI to test whether a freshly
+    generated clone (or any user-supplied audio) passes the deepfake
+    gate. Same audio pipeline as `/verify` minus the speaker-similarity
+    step — the question here is "is this synthetic?", not "whose voice
+    is it?".
+    """
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+
+    try:
+        decoded = service.audio.decode_wav(payload)
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # F3.2 — trim silence the same way /verify does. Without this, AASIST
+    # gets fed leading silence and the score drifts toward whatever
+    # AASIST predicts for empty audio (typically 0.5-ish, which is
+    # neither fake nor genuine).
+    try:
+        trimmed, _ = service.audio.trim_to_voice(decoded)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    deepfake_score = service.detector.detect(trimmed.waveform)
+    # G1 / Py 3.12 float-precision defence — same clamp the verification
+    # path uses before the value reaches the Pydantic schema.
+    if deepfake_score < 0.0:
+        deepfake_score = 0.0
+    if deepfake_score > 1.0:
+        deepfake_score = 1.0
+
+    analysis_details = service.acoustic_probe.score(
+        trimmed.waveform, sample_rate=trimmed.sample_rate
+    )
+
+    decision = "GENUINE" if deepfake_score >= service.deepfake_threshold else "FAKE"
+
+    return SpoofTestResponse(
+        deepfake_score=deepfake_score,
+        decision=decision,
+        analysis_details=analysis_details,
     )
 
 
