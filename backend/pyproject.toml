@@ -12,15 +12,27 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",
   "python-multipart>=0.0.9",
-  "TTS>=0.22,<0.23",
 ]
 
 [project.optional-dependencies]
+# F4 wired numpy + torch into the verification import chain
+# (verification → sub_classifier → acoustic_features → numpy;
+#  verification → speaker_encoder → torch). Treat them as base for any
+# install that runs the test suite — there is no "tests-only" path that
+# can skip them anymore.
 model = [
   "numpy>=1.26",
   "torch>=2.2",
   "torchaudio>=2.2",
   "scipy>=1.11",
+]
+# F1.4 — XTTS spoof generation. Lives behind its own extra because
+# `TTS>=0.22,<0.23` does not resolve cleanly on Python 3.12+ (the
+# upstream package has fallen out of date). Operators install with
+# `pip install -e .[model,spoof]` on a pinned 3.12 venv when the spoof
+# generation route is in scope.
+spoof = [
+  "TTS>=0.22,<0.23",
 ]
 
 [tool.setuptools]
