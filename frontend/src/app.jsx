@@ -1,7 +1,7 @@
 // Main app — expert-default with sidebar nav, multi-page, settings + shortcuts.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { useMicrophone, useSyntheticAudio } from "./audio.jsx";
+import { useMicrophone, useSyntheticAudio, useSilentAudio } from "./audio.jsx";
 import {
   WelcomeScreen, EnrollScreen, ProcessingScreen, VerifyScreen, DeepfakeScreen,
 } from "./screens.jsx";
@@ -36,8 +36,16 @@ function AppShell() {
   const { lastVerification } = useAppState();
 
   const mic = useMicrophone();
-  const synth = useSyntheticAudio(true, { variant: 'human' });
-  const audio = mic.state === 'live' ? mic : synth;
+  // G16 — synthetic audio is the demo-loop's fake-mic substitute. In
+  // expert/live/self modes the kiosk should render honest visualisations
+  // (silence when the mic isn't recording), not animated noise that
+  // looks like live capture. `useSyntheticAudio` keeps `active` so its
+  // RAF loop is alive in auto mode but idle elsewhere.
+  const synth = useSyntheticAudio(mode === 'auto', { variant: 'human' });
+  const silent = useSilentAudio();
+  const audio = mic.state === 'live'
+    ? mic
+    : (mode === 'auto' ? synth : silent);
   const startMic = useCallback(() => mic.start(), [mic]);
   useEffect(() => { startMic(); }, []);
 

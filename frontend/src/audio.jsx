@@ -176,6 +176,29 @@ function useSyntheticAudio(active = true, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// useSilentAudio — G16 honest no-signal placeholder.
+//
+// When the kiosk is in expert/live/self modes and the operator hasn't
+// granted mic access yet, we used to fall back to `useSyntheticAudio`,
+// which renders a believable speech-like waveform. That made the
+// visualisations look "alive" when the system was actually idle — a
+// subtle mockup that misled viewers into thinking real audio was being
+// processed. Use this hook instead: zero-filled buffers + level 0,
+// honest representation of "nothing recording yet".
+// ---------------------------------------------------------------------------
+function useSilentAudio() {
+  // Stable references; never mutated. Visualisations read length and
+  // values; both are fine at zero.
+  const samplesRef = useRef(new Uint8Array(2048));
+  const freqsRef = useRef(new Uint8Array(512));
+  return {
+    samples: samplesRef.current,
+    freqs: freqsRef.current,
+    get level() { return 0; },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Deterministic seeded random for stable visualizations
 // ---------------------------------------------------------------------------
 function seedRand(seed) {
@@ -186,4 +209,4 @@ function seedRand(seed) {
   };
 }
 
-export { useMicrophone, useSyntheticAudio, seedRand };
+export { useMicrophone, useSyntheticAudio, useSilentAudio, seedRand };
