@@ -71,8 +71,13 @@ class StageBreakdown(BaseModel):
 class AnalysisDetails(BaseModel):
     """Sub-scores rendered on the Deepfake Result screen (Fig. 17).
 
-    Yoav owns the AASIST-anchored derivation in Y-8 (see `detector.py`). Until
-    that lands, these mirror the raw deepfake score with placeholder semantics.
+    F4 — produced by `AcousticProbe.score()` in
+    `app/services/sub_classifier.py`. In heuristic mode (default) each
+    axis is a direct function of interpretable acoustic features (HNR,
+    voiced ratio, spectral flatness, F0 variance) — see
+    `docs/paper/sub_classifier.md` §3. In trained-head mode (when
+    `aasist_heads.pt` is present) four 75→64→1 MLPs score each axis
+    from the AcousticFeatures vector.
     """
 
     voice_naturalness: float = Field(ge=0.0, le=1.0)
