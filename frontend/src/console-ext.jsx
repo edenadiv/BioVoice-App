@@ -4,7 +4,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Waveform, EmbeddingCloud } from "./visuals.jsx";
-import { useVoiceRecorder } from "./lib/audio";
+import {
+  decodeAudioFileToWav,
+  listAudioInputs,
+  requestMicPermission,
+  useVoiceRecorder,
+} from "./lib/audio";
 import { verifySpeaker } from "./lib/api";
 import { useAppDispatch } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
@@ -402,50 +407,112 @@ function ThreatLevel({ level = 'green' }) {
 // ============================================================================
 // VerificationOverlay — runs the real verification.
 //
-// Lifecycle:
-//   1. Mount  → start the recorder.
-//   2. After RECORD_MS → stop, encode WAV, POST /verify with profile.userId.
-//   3. While the API is in flight → animate the calibrated timeline.
-//   4. On settle → show ResultPanel with the real similarity / dfScore.
-//   5. On error  → show ErrorPanel with the server's message.
+// Operator-driven (no auto-record). Two ways to provide a sample:
+//   1. START RECORDING → speak → STOP. No time limit. Live waveform / level.
+//   2. UPLOAD AUDIO → file picker (mp3/m4a/wav/ogg/flac → in-browser decode).
+//
+// Once a sample is captured, the operator clicks SUBMIT VERIFICATION to
+// POST /verify with profile.userId + the WAV. The decision panel shows
+// the real similarity / deepfake score from the backend.
 // ============================================================================
-const RECORD_MS = 3000;
 
 function VerificationOverlay({ profile, onClose }) {
-  const recorder = useVoiceRecorder({ minMs: 1000, maxMs: RECORD_MS });
   const dispatch = useAppDispatch();
+
+  // Mic device picker
+  const [devices, setDevices] = useState([]);
+  const [deviceId, setDeviceId] = useState("");
+
+  // Operator-driven recording (no auto-start, no time limit).
+  const recorder = useVoiceRecorder({
+    minMs: 800,
+    maxMs: null,
+    deviceId: deviceId || undefined,
+  });
+
+  // The captured sample — either from a recording or an upload.
+  const [sample, setSample] = useState(null); // { wavFile: File, durationSec: number, source: "record" | "upload" }
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
 
   // The in-flight verification promise drives the calibrated timeline.
   const [verifyPromise, setVerifyPromise] = useState(null);
   const [result, setResult] = useState(null); // VerificationResult on success
   const [error, setError] = useState(null);   // string on failure
-  const stopFiredRef = useRef(false);
 
-  // Auto-start the recorder once when the overlay mounts.
+  // -------- Mic device discovery --------
+  const reloadDevices = useCallback(async () => {
+    const list = await listAudioInputs();
+    setDevices(list);
+    if (deviceId && !list.some((d) => d.deviceId === deviceId)) {
+      setDeviceId("");
+    }
+  }, [deviceId]);
+
   useEffect(() => {
-    void recorder.start();
-    // recorder is intentionally not in deps — start() is idempotent and we
-    // only want to fire once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void reloadDevices();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    const handler = () => void reloadDevices();
+    navigator.mediaDevices.addEventListener("devicechange", handler);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", handler);
+  }, [reloadDevices]);
 
-  const handleStopAndVerify = useCallback(async () => {
-    if (stopFiredRef.current) return;
-    stopFiredRef.current = true;
-    const recording = await recorder.stop();
-    if (!recording) {
+  const handleEnableMicLabels = useCallback(async () => {
+    const ok = await requestMicPermission();
+    if (!ok) {
+      setError("Microphone access denied. Allow it in your browser settings.");
+      return;
+    }
+    await reloadDevices();
+  }, [reloadDevices]);
+
+  // -------- Recording controls --------
+  const handleStartRec = useCallback(async () => {
+    setError(null);
+    setUploadError(null);
+    setSample(null);
+    await recorder.start();
+  }, [recorder]);
+
+  const handleStopRec = useCallback(async () => {
+    const rec = await recorder.stop();
+    if (!rec) {
       setError(
         recorder.state === "denied"
           ? "Microphone access denied. Allow it in your browser to verify."
-          : "Recording too short. Try again.",
+          : "Recording too short — speak for at least a second.",
       );
       return;
     }
+    setSample({ wavFile: rec.wavFile, durationSec: rec.durationSec, source: "record" });
+  }, [recorder]);
 
+  // -------- File upload --------
+  const handleUploadClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+  const handleFilePicked = useCallback(async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setError(null);
+    setUploadError(null);
+    setSample(null);
+    try {
+      const wav = await decodeAudioFileToWav(files[0]);
+      const dur = Math.max(0, (wav.size - 44) / 32_000);
+      setSample({ wavFile: wav, durationSec: dur, source: "upload" });
+    } catch (err) {
+      setUploadError(`Couldn't decode "${files[0].name}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  // -------- Submit --------
+  const handleSubmit = useCallback(async () => {
+    if (!sample) return;
     const userId = profile?.userId ?? profile?.id;
-    const promise = verifySpeaker(userId, recording.wavFile);
+    const promise = verifySpeaker(userId, sample.wavFile);
     setVerifyPromise(promise);
-
     promise
       .then((verification) => {
         setResult(verification);
@@ -456,16 +523,16 @@ function VerificationOverlay({ profile, onClose }) {
         const message = err instanceof Error ? err.message : String(err ?? "Verification failed.");
         setError(message);
       });
-  }, [recorder, profile, dispatch]);
+  }, [sample, profile, dispatch]);
 
-  // Once recording is live, schedule the auto-stop.
-  useEffect(() => {
-    if (recorder.state !== "recording") return;
-    const timer = setTimeout(() => {
-      void handleStopAndVerify();
-    }, RECORD_MS);
-    return () => clearTimeout(timer);
-  }, [recorder.state, handleStopAndVerify]);
+  const handleReset = useCallback(() => {
+    setSample(null);
+    setError(null);
+    setUploadError(null);
+    setVerifyPromise(null);
+    setResult(null);
+    if (recorder.state === "recording") recorder.cancel();
+  }, [recorder]);
 
   const timeline = useCalibratedTimeline(verifyPromise, {
     stages: 2, // Embed, Match
@@ -475,10 +542,9 @@ function VerificationOverlay({ profile, onClose }) {
 
   const phase = useMemo(() => {
     if (result || error) return 3;
-    if (recorder.state === "requesting" || recorder.state === "recording") return 0;
     if (verifyPromise) return 1 + timeline.activeIdx;
     return 0;
-  }, [recorder.state, verifyPromise, result, error, timeline.activeIdx]);
+  }, [verifyPromise, result, error, timeline.activeIdx]);
 
   const passing = result?.decision === "ACCEPT";
   const errored = error !== null;
@@ -515,7 +581,9 @@ function VerificationOverlay({ profile, onClose }) {
             {phase === 0 && (
               recorder.state === 'denied'
                 ? <>Microphone <em className="serif" style={{ color: accent }}>blocked</em></>
-                : <>Capturing voice <em className="serif" style={{ color: accent }}>signature</em></>
+                : sample
+                  ? <>Sample <em className="serif" style={{ color: accent }}>ready</em></>
+                  : <>Provide a voice <em className="serif" style={{ color: accent }}>sample</em></>
             )}
             {phase === 1 && <>Computing <em className="serif" style={{ color: accent }}>embedding</em></>}
             {phase === 2 && (
@@ -551,15 +619,125 @@ function VerificationOverlay({ profile, onClose }) {
           {/* Phase-specific visualization */}
           <div style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
             {phase === 0 && (
-              <div style={{ position: 'relative', width: 720, height: 320, display: 'grid', placeItems: 'center' }}>
-                <Waveform samples={recorder.samples} width={720} height={260} bars={120} mirror={true} color={accent}/>
-                <div style={{ position: 'absolute', left: 12, top: 12 }}>
-                  <span className={`pill ${recorder.state === 'recording' ? 'good' : 'warn'}`}>
-                    <span className="dot"></span>
-                    {recorder.state === 'recording' ? 'SAMPLING · 16 KHZ' :
-                     recorder.state === 'requesting' ? 'AWAITING MIC ACCESS' :
-                     recorder.state === 'denied' ? 'MICROPHONE BLOCKED' : 'PREPARING…'}
-                  </span>
+              <div style={{ width: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* Live waveform — flat unless recording */}
+                <div style={{ position: 'relative', height: 200, background: 'rgba(0,0,0,0.3)', borderRadius: 12, border: `1px solid ${accent}33` }}>
+                  <Waveform samples={recorder.samples} width={720} height={200} bars={120} mirror={true} color={accent}/>
+                  <div style={{ position: 'absolute', left: 12, top: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`pill ${recorder.state === 'recording' ? 'good' : 'warn'}`}>
+                      <span className="dot"></span>
+                      {recorder.state === 'recording'
+                        ? `RECORDING · ${(recorder.durationMs / 1000).toFixed(1)}s`
+                        : recorder.state === 'requesting' ? 'AWAITING MIC'
+                        : recorder.state === 'denied' ? 'MIC BLOCKED'
+                        : sample ? `${sample.source.toUpperCase()} · ${sample.durationSec.toFixed(1)}s ready`
+                        : 'IDLE'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mic device picker */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)', minWidth: 44 }}>MIC</span>
+                  <select
+                    value={deviceId}
+                    onChange={(e) => setDeviceId(e.target.value)}
+                    disabled={recorder.state === 'recording'}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: 8,
+                      background: 'rgba(0,0,0,0.35)', color: 'var(--ink)',
+                      border: '1px solid rgba(125,200,255,0.18)',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                    }}>
+                    <option value="">Browser default</option>
+                    {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+                  </select>
+                  {devices.every((d) => !d.label || d.label === "Microphone") && (
+                    <button onClick={handleEnableMicLabels} style={{
+                      padding: '8px 12px', fontSize: 10,
+                      background: 'transparent', color: accent,
+                      border: `1px solid ${accent}55`, borderRadius: 6, cursor: 'pointer',
+                    }}>Enable labels</button>
+                  )}
+                </div>
+
+                {/* Capture controls */}
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {recorder.state !== 'recording' ? (
+                    <button onClick={handleStartRec} disabled={!!sample} style={{
+                      flex: 1, padding: '14px 20px', borderRadius: 10,
+                      background: sample ? 'rgba(125,200,255,0.05)' : 'linear-gradient(180deg, #ff5577, #c8194a)',
+                      color: sample ? 'var(--ink-mute)' : '#fff',
+                      border: 'none', cursor: sample ? 'not-allowed' : 'pointer',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: sample ? 'var(--ink-mute)' : '#fff' }}/>
+                      START RECORDING
+                    </button>
+                  ) : (
+                    <button onClick={handleStopRec} style={{
+                      flex: 1, padding: '14px 20px', borderRadius: 10,
+                      background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))',
+                      color: '#fff', border: '1px solid rgba(126,240,255,0.5)', cursor: 'pointer',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    }}>
+                      <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#7eF0FF', animation: 'pulse 0.9s infinite' }}/>
+                      STOP — {(recorder.durationMs / 1000).toFixed(1)}s
+                    </button>
+                  )}
+                  <button onClick={handleUploadClick} disabled={recorder.state === 'recording'} style={{
+                    padding: '14px 22px', borderRadius: 10,
+                    background: 'transparent', color: accent,
+                    border: `1px solid ${accent}55`, cursor: recorder.state === 'recording' ? 'not-allowed' : 'pointer',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                  }}>⤴ UPLOAD AUDIO</button>
+                  <input ref={fileInputRef} type="file"
+                    accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" onChange={handleFilePicked}
+                    style={{ display: 'none' }}/>
+                </div>
+
+                {uploadError && (
+                  <div style={{
+                    padding: '10px 14px', borderRadius: 8,
+                    background: 'rgba(255,128,128,0.08)',
+                    border: '1px solid rgba(255,128,128,0.35)',
+                    color: '#ffadad', fontSize: 11,
+                  }}>{uploadError}</div>
+                )}
+
+                {recorder.lastError && (
+                  <div style={{
+                    padding: '10px 14px', borderRadius: 8,
+                    background: 'rgba(255,128,128,0.08)',
+                    border: '1px solid rgba(255,128,128,0.35)',
+                    color: '#ffadad', fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
+                  }}>{recorder.lastError}</div>
+                )}
+
+                {/* Submit */}
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!sample}
+                    style={{
+                      flex: 1, padding: '16px 24px', borderRadius: 10,
+                      background: sample ? `linear-gradient(180deg, ${accent}, #3da9fc)` : 'rgba(125,200,255,0.05)',
+                      color: sample ? '#04070d' : 'var(--ink-mute)',
+                      border: 'none', cursor: sample ? 'pointer' : 'not-allowed',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 700, letterSpacing: '0.12em',
+                    }}>
+                    {sample ? `SUBMIT VERIFICATION · ${profile?.id || ''}` : 'CAPTURE A SAMPLE FIRST'}
+                  </button>
+                  {sample && (
+                    <button onClick={handleReset} style={{
+                      padding: '16px 22px', borderRadius: 10,
+                      background: 'transparent', color: 'var(--ink-mute)',
+                      border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                    }}>RESET</button>
+                  )}
                 </div>
               </div>
             )}
@@ -580,8 +758,9 @@ function VerificationOverlay({ profile, onClose }) {
             )}
           </div>
 
-          {/* Progress bar — recording progress for phase 0, calibrated timeline for 1-2 */}
-          {phase < 3 && (
+          {/* Progress bar — calibrated timeline during embed/match (phases 1-2) only.
+              Phase 0 is operator-driven (no fixed duration → no bar). */}
+          {phase > 0 && phase < 3 && (
             <div style={{ marginTop: 40, width: 480, margin: '40px auto 0', height: 2, background: 'rgba(125,200,255,0.10)', borderRadius: 1, overflow: 'hidden' }}>
               <div style={{
                 height: '100%',
@@ -734,12 +913,12 @@ function ErrorPanel({ message, profile }) {
   );
 }
 
-// Recording fills 0..50% of the bar over RECORD_MS; the calibrated timeline
-// fills 50..100% during the embed/match wait.
-function overlayProgress(phase, recordingMs, timeline) {
-  if (phase === 0) return Math.min(0.5, (recordingMs / RECORD_MS) * 0.5);
+// Phase-0 (operator capturing) doesn't render a progress bar (no fixed
+// duration). Phases 1-2 fill 0..100% during the embed/match wait.
+function overlayProgress(phase, _recordingMs, timeline) {
+  if (phase === 0) return 0;
   if (phase === 3) return 1;
-  return 0.5 + Math.min(0.5, timeline.progress * 0.5);
+  return Math.min(1, timeline.progress);
 }
 
 function Stat({ label, value, sub, accent }) {
