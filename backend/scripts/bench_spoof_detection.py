@@ -59,11 +59,13 @@ def load_audio(path: Path) -> tuple[np.ndarray, int]:
         if ch == 2:
             samples = samples.reshape(-1, 2).mean(axis=1)
         return samples, sr
-    # FLAC / OGG / etc. — torchaudio handles libsndfile-backed formats.
-    import torchaudio
-    waveform, sr = torchaudio.load(str(path))  # waveform: (channels, frames)
-    samples = waveform.mean(dim=0).cpu().numpy().astype(np.float32)
-    return samples, int(sr)
+    # FLAC / OGG / etc. — soundfile (libsndfile) avoids the torchaudio
+    # 2.11 torchcodec requirement.
+    import soundfile as sf
+    samples, sr = sf.read(str(path), dtype="float32", always_2d=False)
+    if samples.ndim > 1:
+        samples = samples.mean(axis=1).astype(np.float32)
+    return samples.astype(np.float32), int(sr)
 
 
 # Back-compat alias — `load_wav` was the original name; tests/imports may

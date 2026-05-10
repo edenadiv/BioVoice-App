@@ -52,17 +52,32 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def load_wav(path: Path) -> tuple[np.ndarray, int]:
-    with wave.open(str(path), "rb") as h:
-        frames = h.readframes(h.getnframes())
-        sr = h.getframerate()
-        ch = h.getnchannels()
-        sw = h.getsampwidth()
-    if sw != 2:
-        raise ValueError(f"{path}: expected 16-bit PCM")
-    samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-    if ch == 2:
-        samples = samples.reshape(-1, 2).mean(axis=1)
-    return samples, sr
+    """Load WAV (16-bit PCM) directly via Python's wave module, or
+    delegate to torchaudio for everything else (FLAC for LibriSpeech,
+    OGG, etc.). Returns mono float32 at the file's native sample rate.
+
+    Function name is kept for back-compat; despite the name it handles
+    FLAC + WAV transparently."""
+    if path.suffix.lower() == ".wav":
+        with wave.open(str(path), "rb") as h:
+            frames = h.readframes(h.getnframes())
+            sr = h.getframerate()
+            ch = h.getnchannels()
+            sw = h.getsampwidth()
+        if sw != 2:
+            raise ValueError(f"{path}: expected 16-bit PCM")
+        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        if ch == 2:
+            samples = samples.reshape(-1, 2).mean(axis=1)
+        return samples, sr
+    # FLAC / OGG / etc. — soundfile (libsndfile) handles non-WAV
+    # formats with no torch dependency. torchaudio 2.11 dropped its
+    # built-in loaders in favour of optional torchcodec.
+    import soundfile as sf
+    samples, sr = sf.read(str(path), dtype="float32", always_2d=False)
+    if samples.ndim > 1:
+        samples = samples.mean(axis=1).astype(np.float32)
+    return samples.astype(np.float32), int(sr)
 
 
 def compute_eer(scores: np.ndarray, labels: np.ndarray) -> tuple[float, float]:
@@ -119,7 +134,9 @@ def main() -> int:
     parser.add_argument("--audio-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--plot-dir", type=Path, default=None,
-                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/voxceleb1_o/")
+                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/<dataset-name>/")
+    parser.add_argument("--dataset-name", type=str, default="voxceleb1_o",
+                        help="Label for the JSON output + plot subdir (e.g. voxceleb1_o, librispeech_test_clean).")
     parser.add_argument("--limit", type=int, default=0, help="Cap pairs (0=all)")
     args = parser.parse_args()
 
@@ -175,13 +192,14 @@ def main() -> int:
         from _plotting import (
             plot_det_curve, plot_roc_curve, plot_score_histogram, write_score_csv,
         )
-        sub_dir = args.plot_dir / "voxceleb1_o"
+        sub_dir = args.plot_dir / args.dataset_name
+        title_prefix = args.dataset_name.replace("_", " ").title()
         plot_det_curve(scores, labels, sub_dir / "det.png",
-                       title=f"VoxCeleb1-O · ReDimNet B5 · n={len(pairs)} · EER {eer*100:.2f}%")
+                       title=f"{title_prefix} · ReDimNet B5 · n={len(pairs)} · EER {eer*100:.2f}%")
         plot_roc_curve(scores, labels, sub_dir / "roc.png",
-                       title=f"VoxCeleb1-O · ReDimNet B5 · n={len(pairs)}")
+                       title=f"{title_prefix} · ReDimNet B5 · n={len(pairs)}")
         plot_score_histogram(scores, labels, sub_dir / "score_hist.png",
-                             title=f"VoxCeleb1-O · cosine similarity distribution")
+                             title=f"{title_prefix} · cosine similarity distribution")
         write_score_csv(sub_dir / "scores.csv",
                         [(pair_ids[i], float(scores[i]), int(labels[i])) for i in range(len(pairs))])
         logger.info("Plots + CSV written to %s", sub_dir)
@@ -190,7 +208,7 @@ def main() -> int:
     args.output.write_text(
         json.dumps(
             {
-                "dataset": "voxceleb1_o",
+                "dataset": args.dataset_name,
                 "n_pairs": len(pairs),
                 "eer": eer,
                 "eer_threshold": eer_threshold,

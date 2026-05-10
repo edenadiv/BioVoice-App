@@ -50,6 +50,7 @@ test = [
 bench = [
   "matplotlib>=3.8",
   "scikit-learn>=1.4",
+  "soundfile>=0.12",
 ]
 
 [tool.setuptools]
