@@ -43,6 +43,14 @@ test = [
   "pytest>=8.0",
   "httpx>=0.27",
 ]
+# B2 — Real-dataset benchmarks (Plan.md v1.0.2). matplotlib for DET / ROC
+# plot output, sklearn for the standard det_curve / roc_curve helpers.
+# Out of CI scope; operator runs benchmarks locally with
+# `pip install -e ".[model,bench]"` before invoking scripts/bench_*.py.
+bench = [
+  "matplotlib>=3.8",
+  "scikit-learn>=1.4",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}

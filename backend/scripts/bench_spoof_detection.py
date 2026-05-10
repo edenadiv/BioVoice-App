@@ -19,10 +19,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import platform
 import sys
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -102,9 +105,13 @@ def evaluate_asvspoof(
     detector: DeepfakeDetectorService,
     protocol: list[tuple[str, int]],
     audio_root: Path,
-) -> dict:
+) -> tuple[dict, np.ndarray, np.ndarray, list[str]]:
+    """Returns (summary_dict, scores_arr, labels_arr, utt_ids).
+    The arrays are returned alongside the summary so the caller can
+    plot DET/ROC + write a per-utterance CSV without re-running."""
     scores = []
     labels = []
+    utt_ids: list[str] = []
     t0 = perf_counter()
     for i, (utt_id, label) in enumerate(protocol):
         # ASVspoof ships FLAC; some mirrors ship WAV. Try both.
@@ -122,17 +129,27 @@ def evaluate_asvspoof(
         score = detector.detect(payload.waveform)
         scores.append(score)
         labels.append(label)
+        utt_ids.append(utt_id)
         if (i + 1) % 1000 == 0:
             logger.info("  ASVspoof %d / %d (%.1f s)", i + 1, len(protocol), perf_counter() - t0)
     scores_arr = np.asarray(scores, dtype=np.float32)
     labels_arr = np.asarray(labels, dtype=np.int32)
     eer, threshold = compute_eer(scores_arr, labels_arr)
-    return {
+    summary = {
         "n_clips": int(scores_arr.size),
         "eer": eer,
         "eer_threshold": threshold,
         "wall_seconds": perf_counter() - t0,
     }
+    return summary, scores_arr, labels_arr, utt_ids
+
+
+def _checkpoint_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def evaluate_clones(
@@ -184,6 +201,8 @@ def main() -> int:
     parser.add_argument("--asvspoof-dir", type=Path, help="Directory containing the eval audio (FLAC or WAV files named <utt_id>.{wav,flac}).")
     parser.add_argument("--asvspoof-protocol", type=Path, help="ASVspoof2019.LA.cm.eval.trl.txt protocol file.")
     parser.add_argument("--clones-dir", type=Path, help="Directory of TTS subdirs (one per family) containing WAV clones.")
+    parser.add_argument("--plot-dir", type=Path, default=None,
+                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/asvspoof2019_la/")
     parser.add_argument("--limit", type=int, default=0, help="Cap the ASVspoof eval at the first N protocol entries (0 = all).")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -194,7 +213,17 @@ def main() -> int:
     # removed in the strip; the trained-heads path is a v1.1 follow-up.
     probe = AcousticProbe()
 
-    results: dict = {"deepfake_threshold": settings.deepfake_threshold}
+    results: dict = {
+        "dataset": "asvspoof2019_la",
+        "deepfake_threshold": settings.deepfake_threshold,
+        "hardware": {
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "torch_device": "cpu",
+        },
+        "checkpoint_sha256": _checkpoint_sha256(settings.aasist_weights_path),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
 
     if args.asvspoof_protocol and args.asvspoof_dir:
         protocol = parse_asvspoof_protocol(args.asvspoof_protocol)
@@ -203,7 +232,28 @@ def main() -> int:
             logger.info("ASVspoof: %d clips (limited from full protocol)", len(protocol))
         else:
             logger.info("ASVspoof: %d clips", len(protocol))
-        results["asvspoof2019_la"] = evaluate_asvspoof(audio, detector, protocol, args.asvspoof_dir)
+        summary, scores_arr, labels_arr, utt_ids = evaluate_asvspoof(
+            audio, detector, protocol, args.asvspoof_dir
+        )
+        results["asvspoof2019_la"] = summary
+
+        # B2 — emit DET / ROC / score-histogram plots + per-utterance CSV.
+        if args.plot_dir is not None:
+            from _plotting import (
+                plot_det_curve, plot_roc_curve, plot_score_histogram, write_score_csv,
+            )
+            sub_dir = args.plot_dir / "asvspoof2019_la"
+            n = len(scores_arr)
+            eer_pct = summary["eer"] * 100.0
+            plot_det_curve(scores_arr, labels_arr, sub_dir / "det.png",
+                           title=f"ASVspoof 2019 LA · AASIST · n={n} · EER {eer_pct:.2f}%")
+            plot_roc_curve(scores_arr, labels_arr, sub_dir / "roc.png",
+                           title=f"ASVspoof 2019 LA · AASIST · n={n}")
+            plot_score_histogram(scores_arr, labels_arr, sub_dir / "score_hist.png",
+                                 title=f"ASVspoof 2019 LA · AASIST score distribution")
+            write_score_csv(sub_dir / "scores.csv",
+                            [(utt_ids[i], float(scores_arr[i]), int(labels_arr[i])) for i in range(n)])
+            logger.info("Plots + CSV written to %s", sub_dir)
 
     if args.clones_dir:
         logger.info("Evaluating clones under %s", args.clones_dir)

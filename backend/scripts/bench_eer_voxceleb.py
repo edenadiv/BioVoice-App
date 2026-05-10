@@ -21,10 +21,13 @@ release (`<label> <wav1> <wav2>` per line).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import platform
 import sys
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -99,11 +102,24 @@ def compute_min_dcf(
     return float(np.min(dcf))
 
 
+def _checkpoint_sha256(path: Path) -> str:
+    """SHA-256 of the model checkpoint — proves the same weights
+    produced the numbers later. Reads the file in chunks so we don't
+    blow up on the larger checkpoints."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--pairs", type=Path, required=True)
     parser.add_argument("--audio-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--plot-dir", type=Path, default=None,
+                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/voxceleb1_o/")
     parser.add_argument("--limit", type=int, default=0, help="Cap pairs (0=all)")
     args = parser.parse_args()
 
@@ -118,6 +134,7 @@ def main() -> int:
     cache: dict[Path, np.ndarray] = {}
     scores = np.zeros(len(pairs), dtype=np.float32)
     labels = np.zeros(len(pairs), dtype=np.int32)
+    pair_ids: list[str] = [""] * len(pairs)  # human-readable utt id for the CSV
     t0 = perf_counter()
 
     for i, line in enumerate(pairs):
@@ -142,23 +159,50 @@ def main() -> int:
                 cache[path] = np.asarray(encoder.embed(waveform), dtype=np.float32)
         scores[i] = cosine_similarity(cache[wav1], cache[wav2])
         labels[i] = label
+        pair_ids[i] = f"{parts[1]}::{parts[2]}"
         if (i + 1) % 1000 == 0:
             logger.info("  %d / %d pairs (%.1f s)", i + 1, len(pairs), perf_counter() - t0)
 
     eer, eer_threshold = compute_eer(scores, labels)
     min_dcf = compute_min_dcf(scores, labels, p_target=0.01)
+    wall_seconds = perf_counter() - t0
 
     logger.info("EER: %.4f  threshold: %.4f  minDCF: %.4f", eer, eer_threshold, min_dcf)
+
+    # B2 — emit DET / ROC / score-histogram plots + per-utterance CSV
+    # alongside the JSON summary.
+    if args.plot_dir is not None:
+        from _plotting import (
+            plot_det_curve, plot_roc_curve, plot_score_histogram, write_score_csv,
+        )
+        sub_dir = args.plot_dir / "voxceleb1_o"
+        plot_det_curve(scores, labels, sub_dir / "det.png",
+                       title=f"VoxCeleb1-O · ReDimNet B5 · n={len(pairs)} · EER {eer*100:.2f}%")
+        plot_roc_curve(scores, labels, sub_dir / "roc.png",
+                       title=f"VoxCeleb1-O · ReDimNet B5 · n={len(pairs)}")
+        plot_score_histogram(scores, labels, sub_dir / "score_hist.png",
+                             title=f"VoxCeleb1-O · cosine similarity distribution")
+        write_score_csv(sub_dir / "scores.csv",
+                        [(pair_ids[i], float(scores[i]), int(labels[i])) for i in range(len(pairs))])
+        logger.info("Plots + CSV written to %s", sub_dir)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(
             {
+                "dataset": "voxceleb1_o",
                 "n_pairs": len(pairs),
                 "eer": eer,
                 "eer_threshold": eer_threshold,
-                "min_dcf_p001": min_dcf,
-                "wall_seconds": perf_counter() - t0,
+                "min_dcf_pt01": min_dcf,
+                "wall_seconds": wall_seconds,
+                "hardware": {
+                    "platform": platform.platform(),
+                    "machine": platform.machine(),
+                    "torch_device": "cpu",
+                },
+                "checkpoint_sha256": _checkpoint_sha256(settings.redimnet_weights_path),
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             },
             indent=2,
         )
