@@ -7,6 +7,7 @@ import { Chrome } from "./screens.jsx";
 import { generateSpoof, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
+import { DegradedBanner } from "./components/DegradedBanner";
 import {
   decodeAudioFileToWav,
   listAudioInputs,
@@ -130,6 +131,7 @@ function DeepfakeLab({ audio, profiles }) {
         dfScore: detection.deepfakeScore,
         decision: detection.decision,
         analysisDetails: detection.analysisDetails,
+        modelProvenance: detection.modelProvenance,
         time: (elapsedMs / 1000).toFixed(2),
         model,
       });
@@ -342,6 +344,7 @@ function DeepfakeLab({ audio, profiles }) {
             )}
             {result && (
               <div style={{ animation: 'fadeIn 600ms ease both' }}>
+                <DegradedBanner provenance={result.modelProvenance} variant="full" style={{ marginBottom: 14 }}/>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16, flexWrap: 'wrap' }}>
                   {/* G14 — banner reflects the REAL detector decision instead of
                        always-DEEPFAKE. If AASIST flagged the clone (FAKE), the
@@ -675,6 +678,7 @@ function IdentifyScreen({ profiles }) {
 function IdentifyResults({ result, profiles }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <DegradedBanner provenance={result.modelProvenance} variant="full"/>
       {result.matches.map((m, i) => {
         const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
         const pct = (m.similarityScore * 100).toFixed(1);

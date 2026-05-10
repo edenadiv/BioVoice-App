@@ -35,6 +35,8 @@ import {
   type AudioInputDevice,
 } from "../lib/audio";
 import { useRefreshSpeakers } from "../lib/session";
+import { DegradedBanner } from "./DegradedBanner";
+import type { ModelProvenance } from "../types";
 
 const MIN_ACCEPTED_FOR_DONE = 3;
 const USER_ID_PATTERN = /^[a-z0-9_-]{2,32}$/;
@@ -59,6 +61,7 @@ interface EnrollModalProps {
 export function EnrollModal({ onClose }: EnrollModalProps) {
   const [userId, setUserId] = useState("");
   const [samples, setSamples] = useState<Sample[]>([]);
+  const [provenance, setProvenance] = useState<ModelProvenance | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devices, setDevices] = useState<AudioInputDevice[]>([]);
@@ -119,6 +122,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
         // 200 → backend stored the sample. quality.acceptable is the
         // truth-bit; reason explains why if it isn't.
         const accepted = !!result.quality?.acceptable;
+        setProvenance(result.modelProvenance);
         setSamples((prev) => [
           ...prev,
           {
@@ -403,6 +407,9 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
           <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: "var(--ink-mute)" }}>
             CAPTURED SAMPLES · {acceptedCount} accepted / {samples.length} total · {MIN_ACCEPTED_FOR_DONE} required
           </div>
+          {provenance && (
+            <DegradedBanner provenance={provenance} show={["encoder"]} variant="compact" style={{ marginBottom: 8 }}/>
+          )}
           {samples.length === 0 ? (
             <div style={emptyListStyle}>
               No samples yet. Press <strong>START RECORDING</strong> or <strong>UPLOAD AUDIO</strong> to add some.

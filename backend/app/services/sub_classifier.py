@@ -46,6 +46,15 @@ class AcousticProbe:
         self.heads = None  # populated lazily on first score() call
         self._torch = None
 
+    @property
+    def provenance(self) -> str:
+        """`"trained_heads"` once the per-axis MLPs are loaded;
+        `"heuristic"` otherwise. v1.0 ships without trained heads —
+        every operator gets `"heuristic"`. Settles after the first
+        `score()` call (lazy load); call `_ensure_loaded()` first if
+        you need the value before any audio scoring."""
+        return "trained_heads" if self.heads is not None else "heuristic"
+
     def _ensure_loaded(self) -> None:
         if self.heads is not None:
             return

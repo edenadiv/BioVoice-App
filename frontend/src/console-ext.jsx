@@ -14,6 +14,7 @@ import { verifySpeaker } from "./lib/api";
 import { useAppDispatch } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
+import { DegradedBanner } from "./components/DegradedBanner";
 
 // ============================================================================
 // AmbientField — slow-drifting particles with parallax depth in the backdrop.
@@ -840,6 +841,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
       background: `linear-gradient(180deg, ${accent}10, transparent)`,
       display: 'grid', gap: 22,
     }}>
+      <DegradedBanner provenance={result?.modelProvenance} variant="full"/>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{

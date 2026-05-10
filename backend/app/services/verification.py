@@ -16,6 +16,7 @@ from app.schemas import (
     EnrollmentResponse,
     IdentificationMatch,
     IdentificationResponse,
+    ModelProvenance,
     SampleQuality,
     SpeakerResponse,
     StageBreakdown,
@@ -107,6 +108,27 @@ class VerificationService:
         # Heuristic mode by default; trained probe heads loaded if present.
         self.acoustic_probe = acoustic_probe or AcousticProbe()
 
+    def _collect_provenance(self) -> ModelProvenance:
+        """Snapshot the live engines for inclusion in API responses.
+
+        HF1 — surfaces silent fallbacks. If anyone wires a placeholder
+        encoder, swaps a stub detector, or wires the AcousticProbe with
+        trained heads, this method's return value will reflect that
+        without any other code change."""
+        encoder_provenance = getattr(self.encoder, "provenance", "redimnet_b5")
+        detector_provenance = getattr(self.detector, "provenance", "aasist")
+        probe_provenance = getattr(self.acoustic_probe, "provenance", "heuristic")
+        is_degraded = (
+            encoder_provenance != "redimnet_b5"
+            or detector_provenance != "aasist"
+        )
+        return ModelProvenance(
+            encoder=encoder_provenance,
+            detector=detector_provenance,
+            acoustic_probe=probe_provenance,
+            is_degraded=is_degraded,
+        )
+
     def list_users(self) -> list[SpeakerResponse]:
         return [
             SpeakerResponse(
@@ -187,6 +209,7 @@ class VerificationService:
                 speech_ratio=quality.speech_ratio,
                 acceptable=quality.acceptable,
             ),
+            model_provenance=self._collect_provenance(),
         )
 
     def verify(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> VerificationResponse:
@@ -294,6 +317,7 @@ class VerificationService:
             session_id=session_id,
             stage_breakdown=stage_breakdown,
             analysis_details=analysis_details,
+            model_provenance=self._collect_provenance(),
             created_at=created_at,
         )
 
@@ -360,6 +384,7 @@ class VerificationService:
             similarity_threshold=self.similarity_threshold,
             deepfake_threshold=self.deepfake_threshold,
             n_enrolled_total=len(speakers),
+            model_provenance=self._collect_provenance(),
         )
 
     def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:
@@ -405,6 +430,7 @@ class VerificationService:
             session_id=session_id,
             stage_breakdown=stage_breakdown,
             analysis_details=analysis_details,
+            model_provenance=self._collect_provenance(),
             created_at=record.created_at,
         )
 

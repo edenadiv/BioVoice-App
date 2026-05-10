@@ -8,6 +8,22 @@ from pydantic import BaseModel, Field
 
 DecisionReason = Literal["accepted", "mismatch", "synthetic", "not_enrolled"]
 
+EncoderProvenance = Literal["redimnet_b5", "heuristic_placeholder"]
+DetectorProvenance = Literal["aasist", "heuristic"]
+ProbeProvenance = Literal["heuristic", "trained_heads"]
+
+
+class ModelProvenance(BaseModel):
+    """Which engines produced the scores in this response. `is_degraded`
+    is true iff any subsystem is in heuristic-fallback mode — the UI
+    should surface a banner so the operator knows the score isn't real
+    ML output."""
+
+    encoder: EncoderProvenance
+    detector: DetectorProvenance
+    acoustic_probe: ProbeProvenance
+    is_degraded: bool
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -46,6 +62,7 @@ class EnrollmentResponse(BaseModel):
     message: str
     enrolled_at: datetime
     quality: SampleQuality | None = None
+    model_provenance: ModelProvenance | None = None
 
 
 class StageBreakdown(BaseModel):
@@ -98,6 +115,7 @@ class SpoofTestResponse(BaseModel):
     deepfake_score: float = Field(ge=0.0, le=1.0)
     decision: SpoofDecision
     analysis_details: AnalysisDetails
+    model_provenance: ModelProvenance | None = None
 
 
 class VerificationResponse(BaseModel):
@@ -113,6 +131,7 @@ class VerificationResponse(BaseModel):
     session_id: str
     stage_breakdown: StageBreakdown = Field(default_factory=StageBreakdown)
     analysis_details: AnalysisDetails | None = None
+    model_provenance: ModelProvenance | None = None
     created_at: datetime
 
 
@@ -145,3 +164,4 @@ class IdentificationResponse(BaseModel):
     similarity_threshold: float = Field(ge=0.0, le=1.0)
     deepfake_threshold: float = Field(ge=0.0, le=1.0)
     n_enrolled_total: int = Field(ge=0)
+    model_provenance: ModelProvenance | None = None

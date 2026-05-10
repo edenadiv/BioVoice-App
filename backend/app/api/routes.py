@@ -295,4 +295,5 @@ async def test_spoof_sample(
         deepfake_score=deepfake_score,
         decision=decision,
         analysis_details=analysis_details,
+        model_provenance=service._collect_provenance(),
     )

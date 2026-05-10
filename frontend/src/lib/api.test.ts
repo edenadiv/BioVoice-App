@@ -130,6 +130,56 @@ describe("api request wrapper — credentials + method contract", () => {
   });
 });
 
+describe("model_provenance snake→camel transform", () => {
+  it("verifySpeaker exposes modelProvenance from the backend response", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      result_id: "r1",
+      user_id: "alice",
+      decision: "ACCEPT",
+      decision_reason: "accepted",
+      similarity_score: 0.9,
+      deepfake_score: 0.9,
+      centroid_similarity: 0.9,
+      sample_similarities: [],
+      message: "ok",
+      session_id: "VRF-20260510-00001",
+      created_at: "2026-05-10T00:00:00Z",
+      model_provenance: {
+        encoder: "redimnet_b5",
+        detector: "heuristic",
+        acoustic_probe: "heuristic",
+        is_degraded: true,
+      },
+    }));
+    const file = new File([new Uint8Array([0])], "q.wav", { type: "audio/wav" });
+    const r = await verifySpeaker("alice", file);
+    expect(r.modelProvenance).not.toBeNull();
+    expect(r.modelProvenance!.detector).toBe("heuristic");
+    expect(r.modelProvenance!.acousticProbe).toBe("heuristic");  // snake → camel
+    expect(r.modelProvenance!.isDegraded).toBe(true);
+  });
+
+  it("verifySpeaker handles missing model_provenance (legacy backend)", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      result_id: "r1",
+      user_id: "alice",
+      decision: "ACCEPT",
+      decision_reason: "accepted",
+      similarity_score: 0.9,
+      deepfake_score: 0.9,
+      centroid_similarity: 0.9,
+      sample_similarities: [],
+      message: "ok",
+      session_id: "VRF-20260510-00001",
+      created_at: "2026-05-10T00:00:00Z",
+      // no model_provenance — older backend
+    }));
+    const file = new File([new Uint8Array([0])], "q.wav", { type: "audio/wav" });
+    const r = await verifySpeaker("alice", file);
+    expect(r.modelProvenance).toBeNull();
+  });
+});
+
 describe("api request wrapper — error propagation", () => {
   it("throws when the server returns 400", async () => {
     (globalThis.fetch as Mock).mockResolvedValueOnce(

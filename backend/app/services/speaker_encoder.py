@@ -21,6 +21,8 @@ class SpeakerEncoder(Protocol):
 class RedimNetSpeakerEncoder:
     """Real speaker encoder backed by the vendored RedimNet checkpoint."""
 
+    provenance: str = "redimnet_b5"
+
     def __init__(self, weights_path: Path):
         checkpoint = torch.load(Path(weights_path), map_location="cpu")
         model_config = dict(checkpoint["model_config"])
@@ -59,7 +61,15 @@ class RedimNetSpeakerEncoder:
 
 
 class PlaceholderSpeakerEncoder:
-    """Fallback deterministic encoder used only if the real model cannot load."""
+    """Fallback deterministic encoder used only if the real model cannot load.
+
+    NOT WIRED IN PRODUCTION — `core/container.py` constructs
+    `RedimNetSpeakerEncoder` directly, which raises on missing weights.
+    Kept as a defensive shim for any future code path that wants
+    degraded-mode operation. The `provenance` flag flows through to the
+    `ModelProvenance` schema so the UI can warn loudly."""
+
+    provenance: str = "heuristic_placeholder"
 
     def embed(self, waveform: list[float]) -> list[float]:
         if not waveform:

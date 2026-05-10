@@ -7,6 +7,7 @@ import type {
   AnalysisDetails,
   IdentificationMatch,
   IdentificationResult,
+  ModelProvenance,
   Speaker,
   SpoofDecision,
   SpoofGenerationResult,
@@ -39,6 +40,13 @@ type AnalysisDetailsResponse = {
   artifact_detection: number;
 };
 
+type ModelProvenanceResponse = {
+  encoder: "redimnet_b5" | "heuristic_placeholder";
+  detector: "aasist" | "heuristic";
+  acoustic_probe: "heuristic" | "trained_heads";
+  is_degraded: boolean;
+};
+
 type VerificationResponse = {
   result_id: string;
   user_id: string;
@@ -52,6 +60,7 @@ type VerificationResponse = {
   session_id: string;
   stage_breakdown?: StageBreakdownResponse;
   analysis_details?: AnalysisDetailsResponse | null;
+  model_provenance?: ModelProvenanceResponse | null;
   created_at: string;
 };
 
@@ -69,12 +78,14 @@ type EnrollmentResponse = {
   message: string;
   enrolled_at: string;
   quality?: SampleQualityResponse | null;
+  model_provenance?: ModelProvenanceResponse | null;
 };
 
 type SpoofTestResponse = {
   deepfake_score: number;
   decision: SpoofDecision;
   analysis_details: AnalysisDetailsResponse;
+  model_provenance?: ModelProvenanceResponse | null;
 };
 
 type IdentificationMatchResponse = {
@@ -93,6 +104,7 @@ type IdentificationResponse = {
   similarity_threshold: number;
   deepfake_threshold: number;
   n_enrolled_total: number;
+  model_provenance?: ModelProvenanceResponse | null;
 };
 
 type MetricsSummaryResponse = {
@@ -153,6 +165,16 @@ async function postForm<T>(path: string, formData: FormData): Promise<T> {
   });
 }
 
+function toModelProvenance(payload: ModelProvenanceResponse | null | undefined): ModelProvenance | null {
+  if (!payload) return null;
+  return {
+    encoder: payload.encoder,
+    detector: payload.detector,
+    acousticProbe: payload.acoustic_probe,
+    isDegraded: payload.is_degraded,
+  };
+}
+
 function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
   return {
     voiceNaturalness: payload.voice_naturalness,
@@ -188,6 +210,7 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
         }
       : { loadMs: 0, resampleMs: 0, normalizeMs: 0, vadMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
     analysisDetails: details ? toAnalysisDetails(details) : null,
+    modelProvenance: toModelProvenance(response.model_provenance),
     createdAt: response.created_at,
   };
 }
@@ -211,6 +234,7 @@ export async function listSpeakers(): Promise<Speaker[]> {
 export type EnrollResult = {
   message: string;
   quality: SampleQualityResponse | null;
+  modelProvenance: ModelProvenance | null;
 };
 
 export async function enrollSpeaker(userId: string, file: File): Promise<EnrollResult> {
@@ -218,7 +242,11 @@ export async function enrollSpeaker(userId: string, file: File): Promise<EnrollR
   formData.append("user_id", userId);
   formData.append("audio", file);
   const response = await postForm<EnrollmentResponse>("/enroll", formData);
-  return { message: response.message, quality: response.quality ?? null };
+  return {
+    message: response.message,
+    quality: response.quality ?? null,
+    modelProvenance: toModelProvenance(response.model_provenance),
+  };
 }
 
 export async function deleteUser(userId: string): Promise<void> {
@@ -289,6 +317,7 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     deepfakeScore: response.deepfake_score,
     decision: response.decision,
     analysisDetails: toAnalysisDetails(response.analysis_details),
+    modelProvenance: toModelProvenance(response.model_provenance),
   };
 }
 
@@ -307,6 +336,7 @@ export async function identifySpeaker(file: File, topN: number = 3): Promise<Ide
     similarityThreshold: response.similarity_threshold,
     deepfakeThreshold: response.deepfake_threshold,
     nEnrolledTotal: response.n_enrolled_total,
+    modelProvenance: toModelProvenance(response.model_provenance),
   };
 }
 

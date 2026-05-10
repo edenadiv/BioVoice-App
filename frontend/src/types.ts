@@ -32,6 +32,7 @@ export type VerificationResult = {
   sessionId: string;
   stageBreakdown: StageBreakdown;
   analysisDetails: AnalysisDetails | null;
+  modelProvenance: ModelProvenance | null;
   createdAt: string;
 };
 
@@ -63,6 +64,7 @@ export type SpoofTestResult = {
   deepfakeScore: number;
   decision: SpoofDecision;
   analysisDetails: AnalysisDetails;
+  modelProvenance: ModelProvenance | null;
 };
 
 export type IdentificationMatch = {
@@ -81,4 +83,12 @@ export type IdentificationResult = {
   similarityThreshold: number;
   deepfakeThreshold: number;
   nEnrolledTotal: number;
+  modelProvenance: ModelProvenance | null;
+};
+
+export type ModelProvenance = {
+  encoder: "redimnet_b5" | "heuristic_placeholder";
+  detector: "aasist" | "heuristic";
+  acousticProbe: "heuristic" | "trained_heads";
+  isDegraded: boolean;
 };

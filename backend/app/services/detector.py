@@ -16,6 +16,14 @@ class DeepfakeDetectorService:
         self._torch = None
         self._target_peak = 0.05
 
+    @property
+    def provenance(self) -> str:
+        """`"aasist"` when the real model is loaded; `"heuristic"` when
+        falling back to the linear formula in `_heuristic_score`. The
+        value is settled after the first `load()` (lazy)."""
+        self.load()
+        return "aasist" if self.model is not None else "heuristic"
+
     def load(self) -> None:
         if self.model is not None:
             return
