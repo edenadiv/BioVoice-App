@@ -1,87 +1,104 @@
-# BioVoice App
+# BioVoice
 
-Local development setup for the BioVoice web app.
+A single-kiosk voice-biometric authentication system. Enrol an operator's voice, verify it later, attempt deepfake attacks against the detector, all from a self-contained operator console. Real ReDimNet B5 speaker embeddings + real AASIST anti-spoofing, no mocks.
 
-## Project structure
+![status: v1.0](https://img.shields.io/badge/status-v1.0-blue) ![tests: 79 backend · 28 frontend · 7 e2e](https://img.shields.io/badge/tests-114%20green-brightgreen) ![bundle: 73 KB gzipped](https://img.shields.io/badge/bundle-73KB%20gzipped-lightgrey)
 
-- `backend`: FastAPI API server
-- `frontend`: Vite + React client
-- `XTTS-v2`: local XTTS model directory used for spoof generation
+## Quick start
 
-## Backend
+```bash
+git clone https://github.com/edenadiv/BioVoice-App.git
+cd BioVoice-App
 
-The backend expects Python `3.11`.
+# Production deploy (Docker)
+docker compose up -d --build
+curl --insecure https://localhost/readyz
 
-From the repo root:
-
-```powershell
-C:\Users\yoav1\AppData\Local\Programs\Python\Python311\python.exe -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install wheel setuptools
-.\.venv\Scripts\python.exe -m pip install fastapi "uvicorn[standard]" pydantic python-multipart numpy scipy torch torchaudio
+# Local dev (two terminals)
+cd backend  && .venv/bin/uvicorn app.main:app --reload --port 8000
+cd frontend && npm install && npm run dev
+# → http://localhost:5173
 ```
 
-Run the backend:
+Run the end-to-end smoke against a live backend:
 
-```powershell
-cd backend
-..\ .venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```bash
+./deploy/smoke.sh
 ```
 
-Use this exact command without the space in the interpreter path:
+## What's in the box
 
-```powershell
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+- **Three-screen operator kiosk**: Console (run verification + activity feed), Profiles (enrol + delete), Deepfake Lab (forge a clone, score it through AASIST).
+- **Real models**: vendored ReDimNet B5 (192-d speaker embedding) + vendored AASIST (anti-spoofing). Weights at `backend/models/`. End-to-end p50 verify ~400 ms on Apple silicon.
+- **Real audio capture**: MediaRecorder + AnalyserNode in the browser (no AudioWorklet flakiness). Mic device picker, manual start/stop with no time limit, file-upload alternative (mp3/m4a/wav/ogg/flac → decoded in browser to 16 kHz mono WAV).
+- **Real telemetry**: every number in the Console panel comes from the live `/api/metrics/summary` endpoint. No hardcoded "11ms / 62/s / 14d" decoration anywhere.
+- **Spoof generation**: macOS `say` / Linux `espeak-ng` fallback ships today (real synthetic audio that goes through real AASIST scoring); XTTS-v2 voice cloning is a v1.1 upgrade path.
+
+## Documentation
+
+| Doc | Audience |
+|---|---|
+| [`docs/operator-guide.md`](docs/operator-guide.md) | Day-to-day usage walkthrough — enrol, verify, forge a deepfake, troubleshoot. |
+| [`docs/deployment.md`](docs/deployment.md) | Production deploy via Docker — TLS provisioning, env vars, backup/restore, hardening. |
+| [`docs/hardware.md`](docs/hardware.md) | Procurement spec — Mac mini M2 / Intel NUC / mic recommendation / cold-start timing. |
+| [`docs/benchmarks.md`](docs/benchmarks.md) | Methodology + scripts for ReDimNet (VoxCeleb1-O EER) and AASIST (ASVspoof 2019 LA EER + min-tDCF). |
+| [`docs/qa.md`](docs/qa.md) | 10-step QA protocol + axe accessibility checklist + Lighthouse perf budget. |
+| [`docs/postgres_migration.md`](docs/postgres_migration.md) | Storage migration playbook (planned for v1.1 multi-instance HA). |
+| [`docs/remaining_work.md`](docs/remaining_work.md) | What's open vs done — G-tasks. |
+| [`Plan.md`](Plan.md) | The active shipping plan. |
+| [`CHANGELOG.md`](CHANGELOG.md) | Per-version release notes. |
+
+## Architecture
+
+```
+┌──────────────────┐  WAV upload   ┌────────────────────────┐
+│  React + Vite    │ ────────────▶ │  FastAPI :8000         │
+│  Console / Lab   │               │  ┌──────────────────┐  │
+│  Profiles        │ ◀──────────── │  │ ReDimNet B5      │  │
+│  MediaRecorder   │  decision +   │  │ AASIST           │  │
+└──────────────────┘  metrics      │  │ AcousticProbe    │  │
+       ▲                           │  │ AudioService VAD │  │
+       │ TLS via nginx (prod)      │  └──────────────────┘  │
+       │                           │  SQLite: profiles,     │
+       └───────────────────────────│  results, audit trail  │
+                                   └────────────────────────┘
 ```
 
-Backend URLs:
+## What's planned for v1.1
 
-- API: `http://127.0.0.1:8000`
-- Swagger UI: `http://127.0.0.1:8000/docs`
+- **XTTS-v2 voice cloning** for the Deepfake Lab. The current macOS `say` fallback works but doesn't always trigger the AASIST detector — XTTS clones do. See `Plan.md` §S2.
+- **Tauri native installer** (`.dmg` / `.msi` / `.deb`). Removes the Docker prerequisite for the kiosk operator. See `Plan.md` §S7.
+- **Postgres storage**, multi-instance HA. See `docs/postgres_migration.md`.
+- **Trained sub-classifier heads** for AASIST sub-axis scoring. Currently heuristic.
 
-## Frontend
+## Status by component
 
-The frontend uses Vite and reads `VITE_API_BASE_URL` from `frontend/.env`.
+| Component | State |
+|---|---|
+| ReDimNet B5 speaker embedding | ✅ Real, vendored, end-to-end |
+| AASIST anti-spoofing | ✅ Real, vendored, end-to-end |
+| `/enroll` + `/verify` + `/users` + `/results` | ✅ Public REST surface, no auth |
+| `/spoof` + `/spoof/test` | ✅ system-TTS fallback shipped; XTTS-v2 v1.1 |
+| MediaRecorder browser capture | ✅ Live waveform / level meter / mic picker |
+| Console real-time metrics | ✅ /api/metrics/summary → live values |
+| Deepfake Lab clone-and-score | ✅ End-to-end with real AASIST |
+| Backup / restore | ✅ `deploy/backup.sh` + `deploy/restore.sh` |
+| Cross-browser sign-off | ⏭ Chrome ✅; Safari/Firefox/iOS/Android pending |
+| Published EER on ASVspoof + VoxCeleb | ⏭ scripts ready, real run pending dataset acquisition |
 
-From the repo root:
+## Tests
 
-```powershell
-cd frontend
-npm install
-npm run dev
+```bash
+# Backend
+cd backend && .venv/bin/pytest -q          # 79 tests
+
+# Frontend unit
+cd frontend && npm test                     # 28 tests
+
+# Frontend e2e (chromium)
+cd frontend && npx playwright test --project=chromium-desktop  # 7 tests
 ```
 
-Frontend URL:
+## Licence
 
-- App: `http://localhost:5173`
-
-The default API base URL is already set to:
-
-```text
-http://localhost:8000
-```
-
-## Run everything
-
-Use two terminals.
-
-Terminal 1:
-
-```powershell
-cd C:\Users\yoav1\final\BioVoice-App\backend
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Terminal 2:
-
-```powershell
-cd C:\Users\yoav1\final\BioVoice-App\frontend
-npm run dev
-```
-
-Then open `http://localhost:5173`.
-
-## Notes
-
-- If the backend fails with compiled-package import errors, recreate `.venv` with Python `3.11`.
-- The spoof-generation path depends on XTTS-related packages and the local `XTTS-v2` directory.
+MIT (vendored AASIST is also MIT, vendored ReDimNet weights are research-use; check `backend/app/vendor/*/LICENSE` before redistribution).
