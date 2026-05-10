@@ -102,12 +102,14 @@ def test_spoof_test_returns_genuine_for_high_score():
     body = resp.json()
     assert body["decision"] == "GENUINE"
     assert body["deepfake_score"] == pytest.approx(0.92)
-    assert set(body["analysis_details"].keys()) == {
+    # HF3 added a `mode` key alongside the four axes; assert subset so
+    # the test isn't brittle to schema additions.
+    assert {
         "voice_naturalness",
         "spectral_consistency",
         "temporal_patterns",
         "artifact_detection",
-    }
+    } <= set(body["analysis_details"].keys())
 
 
 def test_spoof_test_returns_fake_for_low_score():

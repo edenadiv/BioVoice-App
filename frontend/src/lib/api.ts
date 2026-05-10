@@ -38,6 +38,7 @@ type AnalysisDetailsResponse = {
   spectral_consistency: number;
   temporal_patterns: number;
   artifact_detection: number;
+  mode?: "heuristic" | "trained_heads";
 };
 
 type ModelProvenanceResponse = {
@@ -181,6 +182,7 @@ function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
     spectralConsistency: payload.spectral_consistency,
     temporalPatterns: payload.temporal_patterns,
     artifactDetection: payload.artifact_detection,
+    mode: payload.mode ?? "heuristic",
   };
 }
 

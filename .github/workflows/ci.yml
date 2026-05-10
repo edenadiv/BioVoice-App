@@ -98,14 +98,15 @@ jobs:
       - name: Bundle-size budget
         working-directory: frontend
         run: |
-          # F9.3 — fail the PR if the gzipped JS bundle creeps past 350 KB.
-          # Vite reports gzip size in the build output; pull it out by
-          # measuring the dist/assets/*.js file directly.
+          # HF6 — tightened from F9.3's loose 350 KB budget to 100 KB.
+          # Current bundle ≈ 77 KB after HF1 (provenance type + banner +
+          # transforms). The 23 KB headroom catches dependency-bloat
+          # regressions early; bump if a real feature legitimately needs it.
           actual_bytes=$(gzip -c dist/assets/*.js | wc -c | tr -d ' ')
-          budget_bytes=358400  # 350 KB
+          budget_bytes=102400  # 100 KB
           echo "Gzipped JS bundle: $actual_bytes bytes (budget $budget_bytes)"
           test "$actual_bytes" -le "$budget_bytes" || {
-            echo "::error::Bundle exceeds 350 KB gzipped budget"
+            echo "::error::Bundle exceeds 100 KB gzipped budget (HF6)"
             exit 1
           }
       - name: Vitest unit tests

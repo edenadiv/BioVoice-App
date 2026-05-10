@@ -17,6 +17,11 @@ export type AnalysisDetails = {
   spectralConsistency: number;
   temporalPatterns: number;
   artifactDetection: number;
+  /** HF3 — `heuristic` (sigmoid-squashed acoustic features, v1.0
+   *  default) or `trained_heads` (per-axis MLPs, v1.1). UI labels
+   *  the panel accordingly so operators don't read these as AASIST
+   *  sub-scores. */
+  mode: "heuristic" | "trained_heads";
 };
 
 export type VerificationResult = {

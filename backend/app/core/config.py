@@ -37,8 +37,23 @@ def _log_level_from_env() -> str:
 @dataclass(slots=True)
 class Settings:
     sample_rate: int = 16000
+
+    # ⚠️ HF4 — these defaults are SDD conventions, NOT calibrated against
+    # any dataset. See docs/thresholds.md for the operating-point
+    # rationale, FAR/FRR trade-offs, and the procedure to retune. The
+    # ASVspoof + VoxCeleb benchmarks (Plan.md S3 / docs/benchmarks.md)
+    # are the path to data-driven values; until those land, treat both
+    # numbers as placeholders.
+    #
+    # similarity_threshold: cosine sim cutoff for "ACCEPT" decisions.
+    # Lower → more false accepts (security risk); higher → more false
+    # rejects (operator unusability). 0.75 is the SDD default.
     similarity_threshold: float = 0.75
+    # deepfake_threshold: AASIST score cutoff for "GENUINE" decisions.
+    # Lower → more synthetic audio passes through; higher → more real
+    # voices flagged as DEEPFAKE. 0.50 is the SDD default.
     deepfake_threshold: float = 0.50
+
     min_enrollment_samples: int = 3
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)

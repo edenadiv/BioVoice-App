@@ -97,9 +97,21 @@ verify_resp=$(curl -sf -X POST "$BACKEND/verify" \
 decision=$(echo "$verify_resp" | python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('decision', 'unknown'))")
 similarity=$(echo "$verify_resp" | python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('similarity_score', 0))")
 df_score=$(echo "$verify_resp" | python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('deepfake_score', 0))")
-echo "    decision: $decision · similarity: $similarity · df: $df_score"
+total_ms=$(echo "$verify_resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('stage_breakdown', {}).get('total_ms', 0))")
+echo "    decision: $decision · similarity: $similarity · df: $df_score · total: ${total_ms} ms"
 if [ "$decision" != "ACCEPT" ]; then
     echo "    WARN: decision was $decision (expected ACCEPT). Likely AASIST flagging the synthetic enrol audio."
+fi
+
+# HF6 — latency assertion. Fails the smoke if /verify p50 drifts past
+# the configured budget. The default 800 ms covers a Mac mini M2's
+# real /verify (≈ 400 ms p50 + headroom).
+LATENCY_BUDGET_MS="${BIOVOICE_LATENCY_BUDGET_MS:-800}"
+latency_ok=$(python3 -c "print(int(float('${total_ms}') <= ${LATENCY_BUDGET_MS}))")
+if [ "$latency_ok" != "1" ]; then
+    echo "    FAIL: verify took ${total_ms} ms (budget ${LATENCY_BUDGET_MS} ms)"
+    echo "          Override the budget with BIOVOICE_LATENCY_BUDGET_MS=<n>"
+    exit 1
 fi
 echo
 

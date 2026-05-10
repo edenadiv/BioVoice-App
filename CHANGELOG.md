@@ -2,6 +2,45 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.1] — 2026-05-10
+
+Audit-fix release. Closes 6 of 8 findings from `docs/audit-v1.0.md` outright, with explicit disclosure for the remaining 2 (the deferred-to-v1.1 items).
+
+### Fixed
+
+- **F-1 (HIGH) — AASIST silent heuristic fallback**: every `/verify`, `/identify`, `/spoof/test` response now carries a `model_provenance` block (`encoder`, `detector`, `acoustic_probe`, `is_degraded`). The frontend `DegradedBanner` surfaces a red warning above any result panel sourced from a heuristic fallback. No more silent score swaps.
+- **F-2 (HIGH) — Encoder silent fallback**: `RedimNetSpeakerEncoder.provenance = "redimnet_b5"` and `PlaceholderSpeakerEncoder.provenance = "heuristic_placeholder"`; flows through the same banner.
+- **F-5 (HIGH) — Zero tests exercise real ML**: new `backend/tests/test_real_models_integration.py` (slow-marked) loads the production weights and runs an end-to-end enrol → verify cycle. Default `pytest -q` skips it; `pytest -m slow` runs it. New CI `backend-integration` job invokes it (continue-on-error until weight cache lands).
+- **F-3 (MEDIUM) — `analysis_details` mislabelled as AASIST sub-scores**: schema now has `mode: "heuristic" | "trained_heads"`. UI labels the panel `ACOUSTIC FEATURES (heuristic v1.0 · not from AASIST)` so operators don't misread the four axes.
+- **F-4 (MEDIUM) — Uncalibrated thresholds**: `backend/app/core/config.py` defaults now carry an explicit "SDD convention, not calibrated" comment + link to `docs/thresholds.md`. New `docs/thresholds.md` covers the operating-point trade-offs, FAR/FRR table, and retune procedure.
+- **F-6 (LOW) — `EmbeddingConstellation` "● LIVE" label**: dropped the LIVE chip; renamed panel to `VOICE EMBEDDING SPACE (schematic)` with a tooltip explaining cluster centres are deterministic per profile ID.
+- **F-7 (LOW) — `LiveFeatures` "LIVE" label on simulated jitter**: panel header now reads `EXTRACTED VOICE FEATURES (live mic · approx jitter)` while recording, `(idle)` otherwise.
+- **F-8 (LOW) — Loose CI budgets**: bundle budget tightened from 350 KB → 100 KB (current 77 KB). `deploy/smoke.sh` now asserts `stage_breakdown.total_ms ≤ BIOVOICE_LATENCY_BUDGET_MS` (default 800 ms, configurable).
+
+### Added
+
+- New `backend/app/schemas.py` `ModelProvenance` class.
+- New `backend/tests/test_provenance.py` (9 cases) covering service properties + every response shape.
+- New `frontend/src/components/DegradedBanner.tsx` (compact + full variants).
+- New `frontend/src/lib/api.ts` `toModelProvenance()` snake→camel transform.
+- New `docs/thresholds.md` (full operator-tuning playbook).
+- New operator-guide troubleshooting rows for the heuristic-fallback red banners.
+- New `docs/qa.md` "Real-model integration test (HF2)" section.
+- `pyproject.toml` `[tool.pytest.ini_options]` with the `slow` marker.
+
+### Tests
+
+- Backend: 99 / 99 (97 fast + 2 slow). Was 88 + 0 in v1.0.0.
+- Frontend Vitest: 32 / 32. Was 30 in v1.0.0.
+- Frontend Playwright: 8 / 8 (unchanged).
+- Bundle: 77 KB gzipped. Was 76 KB; +1 KB net for the banner + provenance type minus dead-code removal.
+
+### Known limitations carried forward
+
+The audit's `Acoustic probe is heuristic, not AASIST sub-scoring` (F-3) was reframed via the `mode` flag instead of renaming the API field — keeps backwards compatibility with v1.0.0 clients. Trained heads remain a v1.1 deliverable.
+
+The threshold defaults are unchanged from v1.0.0 (`similarity_threshold=0.75`, `deepfake_threshold=0.50`); they're now documented as placeholders. Real calibration awaits the dataset acquisition gated in Plan.md §S3.
+
 ## [v1.0.0] — 2026-05-10
 
 First shipping release. Single-kiosk operator-driven voice-biometric authentication system.

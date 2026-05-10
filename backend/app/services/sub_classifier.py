@@ -110,6 +110,7 @@ class AcousticProbe:
             spectral_consistency=_clamp(scores["spectral_consistency"]),
             temporal_patterns=_clamp(scores["temporal_patterns"]),
             artifact_detection=_clamp(scores["artifact_detection"]),
+            mode="trained_heads",
         )
 
     # -------------------------------------------------------------------------
@@ -158,6 +159,7 @@ class AcousticProbe:
             spectral_consistency=_clamp(spectral_consistency),
             temporal_patterns=_clamp(temporal_patterns),
             artifact_detection=_clamp(artifact_score),
+            mode="heuristic",
         )
 
 

@@ -219,3 +219,21 @@ This audit is harsh. To balance:
 
 **Genuinely safe to buy** if:
 - The use-case is operator-driven adversarial-testing (the design intent — security-research kiosk, demo for stakeholders). The pipeline is real, the UI is mostly honest, and the documented limitations are documented.
+
+---
+
+## Update — v1.0.1 (2026-05-10)
+
+`v1.0.1` (`Plan.md` HF1–HF8, see `CHANGELOG.md`) closes:
+- ✅ **F-1** — `model_provenance` block on every score-bearing response + red `DegradedBanner` in the UI.
+- ✅ **F-2** — same plumbing covers the encoder fallback path.
+- ✅ **F-5** — slow-marked `test_real_models_integration.py` loads real ReDimNet + AASIST and runs end-to-end. CI `backend-integration` job invokes it.
+- ✅ **F-6** — `EmbeddingConstellation` panel re-labelled `(schematic)`, dropped the LIVE chip.
+- ✅ **F-7** — `LiveFeatures` panel re-labelled with the `(approx jitter)` qualifier.
+- ✅ **F-8** — bundle budget tightened 350 KB → 100 KB; `deploy/smoke.sh` asserts verify p50 ≤ 800 ms.
+
+Discloses (doesn't fully resolve):
+- 🟡 **F-3** — `AnalysisDetails.mode` flag added + UI label `ACOUSTIC FEATURES (heuristic v1.0 · not from AASIST)`. Trained heads remain a v1.1 deliverable.
+- 🟡 **F-4** — `docs/thresholds.md` documents the operating-point trade-offs + retune procedure. Real calibration awaits the dataset acquisition gated in Plan.md §S3.
+
+The verdict above stands on the underlying engineering, but the "buy with conditions" list (HIGH findings F-1, F-2, F-5) is now satisfied for the v1.0.1 tag.

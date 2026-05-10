@@ -104,7 +104,9 @@ There's no undelete in the UI. To recover a profile you re-enrol it from scratch
 | Symptom | First thing to check |
 |---|---|
 | `/readyz` returns 503 | Backend log — usually weights weren't loaded. `pip install -e ".[model]"` then restart uvicorn. |
+| **Red banner: "Heuristic fallback · anti-spoof detector"** | `models/aasist.pt` is missing. The detector silently fell back to a 3-line linear formula. `ls -la backend/models/aasist.pt`. Re-download or restore from backup; restart the backend. |
+| **Red banner: "Heuristic fallback · speaker encoder"** | `models/redimnet_b5.pt` is missing. The encoder fell back to 8-d hash features (verification accuracy is meaningless in this state). Same fix as above. |
 | Modal won't open | Browser devtools console for a JS error. CORS misconfig will show as a network failure. |
 | "Microphone access denied" | Browser permission. macOS Safari needs a separate Settings → Websites → Microphone allow. |
-| All verifications come back REJECT | Mic input is probably noisy. Check the SNR in the enrol panel; re-enrol in a quieter room. |
-| All verifications come back ACCEPT regardless of speaker | Threshold might be too low. Edit `similarity_threshold` in `backend/app/core/config.py` (default 0.75) and restart uvicorn. |
+| All verifications come back REJECT | Mic input is probably noisy. Check the SNR in the enrol panel; re-enrol in a quieter room. **OR** thresholds may need tuning — see [`thresholds.md`](thresholds.md). |
+| All verifications come back ACCEPT regardless of speaker | Threshold may be too low. See [`thresholds.md`](thresholds.md) for the operating-point table + retune procedure. |

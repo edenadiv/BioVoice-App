@@ -101,6 +101,12 @@ class AnalysisDetails(BaseModel):
     spectral_consistency: float = Field(ge=0.0, le=1.0)
     temporal_patterns: float = Field(ge=0.0, le=1.0)
     artifact_detection: float = Field(ge=0.0, le=1.0)
+    # HF3 — surfaces audit F-3: the four sub-axes are NOT derived from
+    # AASIST. They're sigmoid-squashed acoustic features (HNR / F0
+    # stability / spectral flatness) by default. v1.0 ships without
+    # trained probe heads → every score is `heuristic`. UI labels the
+    # panel accordingly.
+    mode: Literal["heuristic", "trained_heads"] = "heuristic"
 
 
 SpoofDecision = Literal["FAKE", "GENUINE"]

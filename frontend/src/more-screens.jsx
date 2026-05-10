@@ -404,7 +404,11 @@ function DeepfakeLab({ audio, profiles }) {
                   </div>
                 </div>
 
-                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>F4 SUB-CLASSIFIER · PER-AXIS SCORES</div>
+                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>
+                  {result.analysisDetails.mode === "trained_heads"
+                    ? "ACOUSTIC SUB-AXES · TRAINED PROBE"
+                    : "ACOUSTIC FEATURES (heuristic v1.0 · not from AASIST)"}
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {/* G14 — real F4 sub-axis values from AcousticProbe instead
                        of four `0.81 + Math.random() * 0.1` placeholders. */}

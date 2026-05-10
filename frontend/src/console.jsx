@@ -467,7 +467,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           {/* Live extracted voice features */}
           <div className="panel" style={{ padding: '16px 20px', minWidth: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>EXTRACTED VOICE FEATURES · LIVE</span>
+              <span className="label-mono" style={{ fontSize: 10 }}>
+                EXTRACTED VOICE FEATURES {micState === 'live' ? '(live mic · approx jitter)' : '(idle)'}
+              </span>
               <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>16 KHZ · 25MS WIN · 10MS HOP</span>
             </div>
             <LiveFeatures freqs={audio.freqs} samples={audio.samples} level={audio.level}/>
@@ -489,8 +491,13 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           {/* Embedding Constellation — the showpiece */}
           <div className="panel outline-glow" style={{ padding: '18px 18px 14px', position: 'relative', overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>VOICE EMBEDDING SPACE</span>
-              <span className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>● LIVE</span>
+              <span
+                className="label-mono"
+                style={{ fontSize: 10 }}
+                title="Schematic — cluster centres are deterministic per profile ID, not real ReDimNet projections."
+              >
+                VOICE EMBEDDING SPACE (schematic)
+              </span>
             </div>
             <div style={{ display: 'grid', placeItems: 'center' }}>
               <EmbeddingConstellation width={420} height={300} profiles={profiles} audioLevel={audio.level} matchId={selectedProfile}/>
