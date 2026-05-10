@@ -5,6 +5,8 @@
 
 import type {
   AnalysisDetails,
+  IdentificationMatch,
+  IdentificationResult,
   Speaker,
   SpoofDecision,
   SpoofGenerationResult,
@@ -73,6 +75,24 @@ type SpoofTestResponse = {
   deepfake_score: number;
   decision: SpoofDecision;
   analysis_details: AnalysisDetailsResponse;
+};
+
+type IdentificationMatchResponse = {
+  user_id: string;
+  similarity_score: number;
+  centroid_similarity: number;
+  sample_count: number;
+  enrolled_at: string;
+};
+
+type IdentificationResponse = {
+  matches: IdentificationMatchResponse[];
+  deepfake_score: number;
+  analysis_details: AnalysisDetailsResponse | null;
+  would_accept_top1: boolean;
+  similarity_threshold: number;
+  deepfake_threshold: number;
+  n_enrolled_total: number;
 };
 
 type MetricsSummaryResponse = {
@@ -269,6 +289,34 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     deepfakeScore: response.deepfake_score,
     decision: response.decision,
     analysisDetails: toAnalysisDetails(response.analysis_details),
+  };
+}
+
+// -- Open-set identification --------------------------------------------------
+
+export async function identifySpeaker(file: File, topN: number = 3): Promise<IdentificationResult> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  formData.append("top_n", String(topN));
+  const response = await postForm<IdentificationResponse>("/identify", formData);
+  return {
+    matches: response.matches.map((m) => toIdentificationMatch(m)),
+    deepfakeScore: response.deepfake_score,
+    analysisDetails: response.analysis_details ? toAnalysisDetails(response.analysis_details) : null,
+    wouldAcceptTop1: response.would_accept_top1,
+    similarityThreshold: response.similarity_threshold,
+    deepfakeThreshold: response.deepfake_threshold,
+    nEnrolledTotal: response.n_enrolled_total,
+  };
+}
+
+function toIdentificationMatch(m: IdentificationMatchResponse): IdentificationMatch {
+  return {
+    userId: m.user_id,
+    similarityScore: m.similarity_score,
+    centroidSimilarity: m.centroid_similarity,
+    sampleCount: m.sample_count,
+    enrolledAt: m.enrolled_at,
   };
 }
 

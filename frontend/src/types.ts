@@ -64,3 +64,21 @@ export type SpoofTestResult = {
   decision: SpoofDecision;
   analysisDetails: AnalysisDetails;
 };
+
+export type IdentificationMatch = {
+  userId: string;
+  similarityScore: number;
+  centroidSimilarity: number;
+  sampleCount: number;
+  enrolledAt: string;
+};
+
+export type IdentificationResult = {
+  matches: IdentificationMatch[];
+  deepfakeScore: number;
+  analysisDetails: AnalysisDetails | null;
+  wouldAcceptTop1: boolean;
+  similarityThreshold: number;
+  deepfakeThreshold: number;
+  nEnrolledTotal: number;
+};

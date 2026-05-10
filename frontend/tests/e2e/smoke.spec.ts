@@ -17,11 +17,11 @@ test.describe("kiosk smoke", () => {
     // Every kiosk screen renders the BIOVOICE wordmark in the chrome.
     await expect(page.getByText(/BIO\s*VOICE/i).first()).toBeVisible();
 
-    // Three sidebar nav items only after the auth/admin/settings strip.
+    // Four sidebar nav items: Console + Identify + Deepfake Lab + Profiles.
     // SettingsPanel still ships its own "Console" button so we scope to
     // the sidebar by class.
     const sidebar = page.locator(".biovoice-sidebar");
-    for (const id of ["Console", "Deepfake Lab", "Profiles"]) {
+    for (const id of ["Console", "Identify", "Deepfake Lab", "Profiles"]) {
       await expect(sidebar.locator(`button[title="${id}"]`)).toBeVisible();
     }
     // Admin + Settings entries are gone.

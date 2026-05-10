@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useMicrophone, useSilentAudio } from "./audio.jsx";
 import { ConsoleScreen } from "./console.jsx";
-import { Sidebar, DeepfakeLab, ProfilesPage } from "./more-screens.jsx";
+import { Sidebar, DeepfakeLab, IdentifyScreen, ProfilesPage } from "./more-screens.jsx";
 import { VerificationOverlay } from "./console-ext.jsx";
 import { AppStateProvider, useDerivedCounts, useProfiles } from "./lib/session";
 
@@ -33,8 +33,9 @@ function AppShell() {
       const k = e.key.toLowerCase();
       if (k === 'v' && profiles[0]) setOverlayProfile(profiles[0]);
       else if (k === '1') setPage('console');
-      else if (k === '2') setPage('lab');
-      else if (k === '3') setPage('profiles');
+      else if (k === '2') setPage('identify');
+      else if (k === '3') setPage('lab');
+      else if (k === '4') setPage('profiles');
       else if (k === 'escape') setOverlayProfile(null);
     };
     window.addEventListener('keydown', onKey);
@@ -45,6 +46,8 @@ function AppShell() {
 
   let body;
   switch (page) {
+    case 'identify':
+      body = <IdentifyScreen profiles={profiles}/>; break;
     case 'lab':
       body = <DeepfakeLab audio={audio} profiles={profiles}/>; break;
     case 'profiles':

@@ -14,6 +14,8 @@ from app.schemas import (
     AnalysisDetails,
     DecisionReason,
     EnrollmentResponse,
+    IdentificationMatch,
+    IdentificationResponse,
     SampleQuality,
     SpeakerResponse,
     StageBreakdown,
@@ -293,6 +295,71 @@ class VerificationService:
             stage_breakdown=stage_breakdown,
             analysis_details=analysis_details,
             created_at=created_at,
+        )
+
+    def identify(
+        self,
+        audio_bytes: bytes,
+        top_n: int = 3,
+    ) -> IdentificationResponse:
+        """Open-set "most similar" — score the input WAV against every
+        enrolled centroid and return the ranked top-N. Same audio
+        pipeline as verify() (decode → trim → embed → AASIST), no
+        result row stored.
+
+        Raises:
+            ValueError: bad audio (no speech, decode failure)
+            RuntimeError: no users enrolled
+        """
+        speakers = self.store.list_users()
+        if not speakers:
+            raise RuntimeError("No users enrolled. Enrol at least one profile first.")
+
+        payload, _ = self.audio.decode_wav_with_timings(audio_bytes)
+        trimmed, _ = self.audio.trim_to_voice(payload)
+        query_embedding = self.encoder.embed(trimmed.waveform)
+        deepfake_score = _clamp_unit(self.detector.detect(trimmed.waveform))
+        analysis_details = self.acoustic_probe.score(
+            trimmed.waveform, sample_rate=trimmed.sample_rate
+        )
+
+        scored: list[IdentificationMatch] = []
+        for speaker in speakers:
+            # Aggregate similarity using the same per-sample + centroid
+            # blend that verify() does, so the ranking is consistent
+            # with what /verify would have returned for each candidate.
+            sample_sims = [
+                _clamp_unit(self.encoder.cosine_similarity(s, query_embedding))
+                for s in speaker.sample_embeddings
+            ]
+            centroid_sim = _clamp_unit(
+                self.encoder.cosine_similarity(speaker.embedding, query_embedding)
+            )
+            similarity = _clamp_unit(self._aggregate_similarity(sample_sims, centroid_sim))
+            scored.append(
+                IdentificationMatch(
+                    user_id=speaker.user_id,
+                    similarity_score=similarity,
+                    centroid_similarity=centroid_sim,
+                    sample_count=speaker.sample_count,
+                    enrolled_at=speaker.enrolled_at,
+                )
+            )
+
+        scored.sort(key=lambda m: m.similarity_score, reverse=True)
+        top = scored[: max(1, top_n)]
+        would_accept = (
+            top[0].similarity_score >= self.similarity_threshold
+            and deepfake_score >= self.deepfake_threshold
+        )
+        return IdentificationResponse(
+            matches=top,
+            deepfake_score=deepfake_score,
+            analysis_details=analysis_details,
+            would_accept_top1=would_accept,
+            similarity_threshold=self.similarity_threshold,
+            deepfake_threshold=self.deepfake_threshold,
+            n_enrolled_total=len(speakers),
         )
 
     def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:

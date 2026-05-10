@@ -118,3 +118,30 @@ class VerificationResponse(BaseModel):
 
 class AvailabilityResponse(BaseModel):
     available: bool
+
+
+class IdentificationMatch(BaseModel):
+    """One row in the ranked top-N from POST /identify."""
+    user_id: str
+    similarity_score: float = Field(ge=0.0, le=1.0)
+    centroid_similarity: float = Field(ge=0.0, le=1.0)
+    sample_count: int = Field(ge=0)
+    enrolled_at: datetime
+
+
+class IdentificationResponse(BaseModel):
+    """Open-set "most similar" answer. Returns the ranked top-N enrolled
+    speakers given an arbitrary input WAV — no user_id required from
+    the caller. Same audio pipeline as /verify minus the stored result.
+
+    `would_accept` reflects what /verify would have decided for the
+    top-1 match: similarity ≥ similarity_threshold AND deepfake_score
+    ≥ deepfake_threshold."""
+
+    matches: list[IdentificationMatch]
+    deepfake_score: float = Field(ge=0.0, le=1.0)
+    analysis_details: AnalysisDetails | None = None
+    would_accept_top1: bool = False
+    similarity_threshold: float = Field(ge=0.0, le=1.0)
+    deepfake_threshold: float = Field(ge=0.0, le=1.0)
+    n_enrolled_total: int = Field(ge=0)

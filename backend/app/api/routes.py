@@ -22,6 +22,7 @@ from app.core.metrics import metrics
 from app.schemas import (
     EnrollmentResponse,
     HealthResponse,
+    IdentificationResponse,
     SpeakerResponse,
     SpoofTestResponse,
     VerificationResponse,
@@ -170,6 +171,35 @@ async def verify(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/identify", response_model=IdentificationResponse)
+async def identify(
+    audio: UploadFile = File(...),
+    top_n: int = Form(default=3, ge=1, le=20),
+    service: VerificationService = Depends(get_verification_service),
+) -> IdentificationResponse:
+    """Open-set "most similar" — score the input WAV against every
+    enrolled centroid and return the ranked top-N. Doesn't require a
+    user_id; returns the system's best guess at who the speaker is.
+
+    Errors: 400 on empty / unspeechy / undecodable audio; 404 when
+    no users are enrolled."""
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    try:
+        return service.identify(audio_bytes=payload, top_n=top_n)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        # "No users enrolled" — surface as 404 so the caller can show
+        # the empty-state message instead of a generic 500.
+        if "No users enrolled" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

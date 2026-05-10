@@ -2,7 +2,7 @@
 // Stub `fetch` so the tests are hermetic — no backend required.
 
 import { describe, expect, it, beforeEach, afterEach, vi, type Mock } from "vitest";
-import { listSpeakers, listResults, deleteUser, enrollSpeaker, verifySpeaker } from "./api";
+import { listSpeakers, listResults, deleteUser, enrollSpeaker, verifySpeaker, identifySpeaker } from "./api";
 
 const originalFetch = globalThis.fetch;
 
@@ -83,6 +83,50 @@ describe("api request wrapper — credentials + method contract", () => {
     await verifySpeaker("alice", file);
     const [url] = (globalThis.fetch as Mock).mock.calls[0];
     expect(String(url)).toMatch(/\/verify$/);
+  });
+
+  it("identifySpeaker posts audio + top_n + transforms snake_case → camelCase", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      matches: [
+        { user_id: "alice", similarity_score: 0.94, centroid_similarity: 0.92, sample_count: 3, enrolled_at: "2026-05-09T00:00:00Z" },
+        { user_id: "bob",   similarity_score: 0.71, centroid_similarity: 0.69, sample_count: 5, enrolled_at: "2026-05-08T00:00:00Z" },
+        { user_id: "carol", similarity_score: 0.42, centroid_similarity: 0.40, sample_count: 4, enrolled_at: "2026-05-07T00:00:00Z" },
+      ],
+      deepfake_score: 0.97,
+      analysis_details: { voice_naturalness: 0.5, spectral_consistency: 0.6, temporal_patterns: 0.7, artifact_detection: 0.8 },
+      would_accept_top1: true,
+      similarity_threshold: 0.75,
+      deepfake_threshold: 0.5,
+      n_enrolled_total: 3,
+    }));
+    const file = new File([new Uint8Array([0])], "query.wav", { type: "audio/wav" });
+    const result = await identifySpeaker(file, 3);
+    const [url, init] = (globalThis.fetch as Mock).mock.calls[0];
+    expect(String(url)).toMatch(/\/identify$/);
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect(result.matches).toHaveLength(3);
+    expect(result.matches[0].userId).toBe("alice");
+    expect(result.matches[0].similarityScore).toBeCloseTo(0.94);
+    expect(result.wouldAcceptTop1).toBe(true);
+    expect(result.nEnrolledTotal).toBe(3);
+    expect(result.analysisDetails?.voiceNaturalness).toBeCloseTo(0.5);
+  });
+
+  it("identifySpeaker handles null analysis_details", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      matches: [],
+      deepfake_score: 0,
+      analysis_details: null,
+      would_accept_top1: false,
+      similarity_threshold: 0.75,
+      deepfake_threshold: 0.5,
+      n_enrolled_total: 0,
+    }));
+    const file = new File([new Uint8Array([0])], "query.wav", { type: "audio/wav" });
+    const result = await identifySpeaker(file);
+    expect(result.matches).toEqual([]);
+    expect(result.analysisDetails).toBeNull();
   });
 });
 

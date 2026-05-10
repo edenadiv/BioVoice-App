@@ -4,9 +4,15 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { generateSpoof, spoofTest, deleteUser } from "./lib/api";
+import { generateSpoof, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
+import {
+  decodeAudioFileToWav,
+  listAudioInputs,
+  requestMicPermission,
+  useVoiceRecorder,
+} from "./lib/audio";
 
 // ============================================================================
 // Sidebar — three-item navigation rail (Console / DeepfakeLab / Profiles).
@@ -14,6 +20,7 @@ import { EnrollModal } from "./components/EnrollModal.tsx";
 function Sidebar({ page, setPage }) {
   const items = [
     { id: 'console',  label: 'Console',      icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
+    { id: 'identify', label: 'Identify',     icon: <><circle cx="9" cy="9" r="5" stroke="currentColor" strokeWidth="1.5"/><path d="M13 13l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
     { id: 'lab',      label: 'Deepfake Lab', icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
     { id: 'profiles', label: 'Profiles',     icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
   ];
@@ -416,6 +423,338 @@ function DeepfakeLab({ audio, profiles }) {
   );
 }
 
+// ============================================================================
+// IdentifyScreen — open-set "most similar" feature.
+//
+// Operator records or uploads a sample, the backend ranks every enrolled
+// profile by cosine similarity and returns the top-3. Useful for
+// answering "who does this voice sound most like?" without committing
+// to a single user_id up front.
+// ============================================================================
+function IdentifyScreen({ profiles }) {
+  const [devices, setDevices] = useState([]);
+  const [deviceId, setDeviceId] = useState("");
+  const recorder = useVoiceRecorder({ minMs: 800, maxMs: null, deviceId: deviceId || undefined });
+
+  const [sample, setSample] = useState(null); // { wavFile, durationSec, source }
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null); // IdentificationResult
+  const fileInputRef = useRef(null);
+
+  // Mic devices ----------------------------------------------------------
+  const reloadDevices = useCallback(async () => {
+    const list = await listAudioInputs();
+    setDevices(list);
+    if (deviceId && !list.some((d) => d.deviceId === deviceId)) setDeviceId("");
+  }, [deviceId]);
+  useEffect(() => {
+    void reloadDevices();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    const handler = () => void reloadDevices();
+    navigator.mediaDevices.addEventListener("devicechange", handler);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", handler);
+  }, [reloadDevices]);
+  const handleEnableMicLabels = useCallback(async () => {
+    const ok = await requestMicPermission();
+    if (!ok) {
+      setError("Microphone access denied. Allow it in your browser settings.");
+      return;
+    }
+    await reloadDevices();
+  }, [reloadDevices]);
+
+  // Recording ------------------------------------------------------------
+  const handleStartRec = useCallback(async () => {
+    setError(null);
+    setResult(null);
+    setSample(null);
+    await recorder.start();
+  }, [recorder]);
+  const handleStopRec = useCallback(async () => {
+    const rec = await recorder.stop();
+    if (!rec) {
+      setError(recorder.state === "denied" ? "Microphone access denied." : "Recording too short.");
+      return;
+    }
+    setSample({ wavFile: rec.wavFile, durationSec: rec.durationSec, source: "record" });
+  }, [recorder]);
+
+  // Upload ---------------------------------------------------------------
+  const handleUploadClick = useCallback(() => fileInputRef.current?.click(), []);
+  const handleFilePicked = useCallback(async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setError(null);
+    setResult(null);
+    setSample(null);
+    try {
+      const wav = await decodeAudioFileToWav(files[0]);
+      const dur = Math.max(0, (wav.size - 44) / 32_000);
+      setSample({ wavFile: wav, durationSec: dur, source: "upload" });
+    } catch (err) {
+      setError(`Couldn't decode "${files[0].name}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  // Submit ---------------------------------------------------------------
+  const handleSubmit = useCallback(async () => {
+    if (!sample) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await identifySpeaker(sample.wavFile, 3);
+      setResult(r);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg.length > 240 ? msg.slice(0, 240) + "…" : msg);
+    } finally {
+      setBusy(false);
+    }
+  }, [sample]);
+
+  const handleReset = useCallback(() => {
+    setSample(null);
+    setResult(null);
+    setError(null);
+    if (recorder.state === "recording") recorder.cancel();
+  }, [recorder]);
+
+  return (
+    <div className="screen fade-enter">
+      <Chrome status="OPEN-SET IDENTIFICATION" statusKind="info" subtitle="Most similar across all enrolled profiles" screenName="IDENTIFY"/>
+      <AmbientField count={40}/>
+
+      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+
+        {/* LEFT — capture */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+          <div>
+            <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>WHO IS THIS VOICE?</div>
+            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>Most similar match</div>
+            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
+              Capture or upload a voice sample. The system ranks all <strong>{profiles.length}</strong> enrolled profile{profiles.length === 1 ? '' : 's'} by cosine similarity and returns the top three matches.
+            </div>
+          </div>
+
+          <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <Field label="MICROPHONE">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  value={deviceId}
+                  onChange={(e) => setDeviceId(e.target.value)}
+                  disabled={recorder.state === "recording"}
+                  style={{
+                    flex: 1, padding: '10px 12px', borderRadius: 10,
+                    background: 'rgba(0,0,0,0.35)', color: 'var(--ink)',
+                    border: '1px solid rgba(125,200,255,0.18)',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
+                  }}>
+                  <option value="">Browser default</option>
+                  {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+                </select>
+                {devices.every((d) => !d.label || d.label === "Microphone") && (
+                  <button onClick={handleEnableMicLabels} style={{
+                    padding: '8px 12px', fontSize: 11,
+                    background: 'transparent', color: 'var(--teal-2)',
+                    border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer',
+                  }}>Enable labels</button>
+                )}
+              </div>
+            </Field>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              {recorder.state !== 'recording' ? (
+                <button onClick={handleStartRec} disabled={!!sample || busy} style={{
+                  flex: 1, padding: '14px 20px', borderRadius: 10,
+                  background: sample ? 'rgba(125,200,255,0.05)' : 'linear-gradient(180deg, #ff5577, #c8194a)',
+                  color: sample ? 'var(--ink-mute)' : '#fff',
+                  border: 'none', cursor: sample ? 'not-allowed' : 'pointer',
+                  fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: sample ? 'var(--ink-mute)' : '#fff' }}/>
+                  START RECORDING
+                </button>
+              ) : (
+                <button onClick={handleStopRec} style={{
+                  flex: 1, padding: '14px 20px', borderRadius: 10,
+                  background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))',
+                  color: '#fff', border: '1px solid rgba(126,240,255,0.5)', cursor: 'pointer',
+                  fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                }}>STOP — {(recorder.durationMs / 1000).toFixed(1)}s</button>
+              )}
+              <button onClick={handleUploadClick} disabled={recorder.state === 'recording' || busy} style={{
+                padding: '14px 22px', borderRadius: 10,
+                background: 'transparent', color: 'var(--teal-2)',
+                border: '1px solid rgba(126,240,255,0.35)', cursor: recorder.state === 'recording' || busy ? 'not-allowed' : 'pointer',
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+              }}>⤴ UPLOAD AUDIO</button>
+              <input ref={fileInputRef} type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
+                onChange={handleFilePicked} style={{ display: 'none' }}/>
+            </div>
+
+            {sample && (
+              <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>
+                READY · {sample.source.toUpperCase()} · {sample.durationSec.toFixed(1)}s
+              </div>
+            )}
+
+            {recorder.lastError && (
+              <div style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: 'rgba(255,128,128,0.08)',
+                border: '1px solid rgba(255,128,128,0.35)',
+                color: '#ffadad', fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+              }}>{recorder.lastError}</div>
+            )}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={handleSubmit} disabled={!sample || busy || profiles.length === 0} style={{
+                flex: 1, padding: '16px 24px', borderRadius: 10,
+                background: sample && !busy && profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.05)',
+                color: sample && !busy && profiles.length > 0 ? '#04070d' : 'var(--ink-mute)',
+                border: 'none', cursor: sample && !busy && profiles.length > 0 ? 'pointer' : 'not-allowed',
+                fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 700, letterSpacing: '0.12em',
+              }}>
+                {busy ? 'COMPARING…' :
+                 profiles.length === 0 ? 'ENROL A PROFILE FIRST' :
+                 sample ? 'FIND TOP 3 MATCHES' : 'CAPTURE A SAMPLE FIRST'}
+              </button>
+              {(sample || result) && (
+                <button onClick={handleReset} disabled={busy} style={{
+                  padding: '16px 22px', borderRadius: 10,
+                  background: 'transparent', color: 'var(--ink-mute)',
+                  border: '1px solid rgba(125,200,255,0.18)', cursor: busy ? 'wait' : 'pointer',
+                  fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                }}>RESET</button>
+              )}
+            </div>
+
+            {error && (
+              <div style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: 'rgba(255,128,128,0.08)',
+                border: '1px solid rgba(255,128,128,0.35)',
+                color: '#ffadad', fontSize: 12,
+              }}>{error}</div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT — results */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+          <div>
+            <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>RANKED MATCHES</div>
+            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>
+              {result ? `Top ${result.matches.length}` : 'Awaiting sample'}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-mute)', marginTop: 6 }}>
+              {result
+                ? `Compared against ${result.nEnrolledTotal} enrolled profile${result.nEnrolledTotal === 1 ? '' : 's'}.`
+                : 'Submit a sample to see the ranked list.'}
+            </div>
+          </div>
+
+          {result && <IdentifyResults result={result} profiles={profiles}/>}
+          {!result && (
+            <div className="panel" style={{
+              padding: '32px 24px', textAlign: 'center',
+              color: 'var(--ink-mute)', fontSize: 13, lineHeight: 1.6,
+            }}>
+              The result panel will show similarity percentages and the deepfake verdict here once you submit.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IdentifyResults({ result, profiles }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {result.matches.map((m, i) => {
+        const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
+        const pct = (m.similarityScore * 100).toFixed(1);
+        const above = m.similarityScore >= result.similarityThreshold;
+        const accent = i === 0 ? (above ? '#7ef0ff' : '#ffb24a') : 'var(--ink-mute)';
+        return (
+          <div key={m.userId} className="panel" style={{
+            padding: '16px 20px',
+            background: i === 0 ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))' : 'rgba(125,200,255,0.02)',
+            border: `1px solid ${i === 0 ? 'rgba(126,240,255,0.35)' : 'rgba(125,200,255,0.15)'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+              <span className="label-mono" style={{ fontSize: 18, color: accent, minWidth: 28 }}>#{i + 1}</span>
+              {profile && (
+                <div style={{
+                  width: 36, height: 36, borderRadius: '50%',
+                  background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`,
+                  display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 12, fontWeight: 600,
+                }}>{profile.initials}</div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 500 }}>{m.userId}</div>
+                <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)', marginTop: 2 }}>
+                  {m.sampleCount} enrol sample{m.sampleCount === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div className="num-mono" style={{ fontSize: 28, color: accent, letterSpacing: '-0.02em', fontWeight: 600 }}>
+                {pct}%
+              </div>
+            </div>
+            <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,0,0,0.4)', overflow: 'hidden', position: 'relative' }}>
+              <div style={{
+                width: `${pct}%`, height: '100%',
+                background: i === 0
+                  ? `linear-gradient(90deg, ${accent}88, ${accent})`
+                  : 'linear-gradient(90deg, rgba(125,200,255,0.4), rgba(125,200,255,0.7))',
+                transition: 'width 600ms cubic-bezier(.2,.8,.2,1)',
+              }}/>
+              {/* Threshold marker */}
+              <div title={`accept threshold ${(result.similarityThreshold * 100).toFixed(0)}%`} style={{
+                position: 'absolute', top: -3, bottom: -3,
+                left: `${result.similarityThreshold * 100}%`,
+                width: 1.5, background: 'rgba(255,178,74,0.55)',
+              }}/>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Deepfake verdict + verdict summary */}
+      <div className="panel" style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>DEEPFAKE SCORE</div>
+          <div className="num-mono" style={{
+            fontSize: 22, marginTop: 4,
+            color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)',
+          }}>
+            {result.deepfakeScore.toFixed(3)}
+          </div>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>
+            threshold {result.deepfakeThreshold.toFixed(2)} · {result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'}
+          </div>
+        </div>
+        <div>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>WOULD /VERIFY ACCEPT?</div>
+          <div style={{
+            fontSize: 22, marginTop: 4, fontWeight: 600,
+            color: result.wouldAcceptTop1 ? 'var(--good)' : 'var(--bad)',
+          }}>
+            {result.wouldAcceptTop1 ? 'YES' : 'NO'}
+          </div>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>
+            top match vs sim ≥ {(result.similarityThreshold * 100).toFixed(0)}% + df ≥ {result.deepfakeThreshold.toFixed(2)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ArtifactBar({ name, strength, delay = 0 }) {
   const [w, setW] = useState(0);
   useEffect(() => {
@@ -796,5 +1135,5 @@ function MiniWave({ color, idx = 0 }) {
 }
 
 export {
-  Sidebar, DeepfakeLab, UserSettingsPage, ProfilesPage,
+  Sidebar, DeepfakeLab, IdentifyScreen, UserSettingsPage, ProfilesPage,
 };

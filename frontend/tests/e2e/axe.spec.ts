@@ -15,10 +15,11 @@ test.describe.configure({ mode: "parallel" });
 
 test.skip(({ browserName }) => browserName !== "chromium", "axe scan is browser-agnostic; chromium only");
 
-// Three surviving operator screens after the strip — sidebar buttons
-// carry the visible label as their `title` attribute.
+// Four operator screens — sidebar buttons carry the visible label as
+// their `title` attribute.
 const SCREENS: Array<{ id: string; nav: string; label: string }> = [
   { id: "console",  nav: "Console",      label: "Console" },
+  { id: "identify", nav: "Identify",     label: "Identify" },
   { id: "lab",      nav: "Deepfake Lab", label: "DeepfakeLab" },
   { id: "profiles", nav: "Profiles",     label: "Profiles" },
 ];
