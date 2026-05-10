@@ -36,13 +36,49 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[model,test]"
-      - name: Run pytest
+      - name: Run pytest (fast suite, default)
         working-directory: backend
+        # HF2 — `-m "not slow"` excludes the real-model integration tests.
+        # The slow suite runs in the `backend-integration` job below
+        # when model weights are available.
         run: |
-          pytest -q
+          pytest -q -m "not slow"
       - name: Secret scan (F2.4)
         working-directory: backend
         run: pytest tests/test_secret_scan.py -q
+
+  backend-integration:
+    # HF2 — real-model end-to-end test. Requires the production
+    # ReDimNet B5 + AASIST checkpoints under backend/models/. The job
+    # auto-skips when weights aren't present (via pytest.skip).
+    # Marked continue-on-error initially — flips to required once the
+    # weights are reliably restored (release artefact + cache key).
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend with [model,test] extras
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[model,test]"
+      - name: Restore model weights cache
+        # Operator uploads weights to a release artefact. Once the
+        # release tag has the assets, swap this to actions/download-artifact.
+        # Until then the cache miss is acceptable — pytest.skip handles it.
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: model-weights-v1.0
+      - name: Install espeak-ng (system TTS for the test fixture)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
+      - name: Run slow integration tests
+        working-directory: backend
+        run: pytest -m slow -v
 
   frontend:
     runs-on: ubuntu-latest

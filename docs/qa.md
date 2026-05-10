@@ -10,6 +10,25 @@
 | Penetration test | Scope + RoE | Out-of-scope after auth strip — kiosk has no public-internet attack surface |
 | Final acceptance with speakers | Volunteer protocol | Recruitment pending |
 
+## Real-model integration test (HF2)
+
+`backend/tests/test_real_models_integration.py` loads the production ReDimNet B5 + AASIST checkpoints and runs an end-to-end enrol → verify cycle. This is the only test in the suite that exercises the real ML; everything else uses `HashEncoder` + `StubDetector` from `tests/conftest.py`.
+
+```bash
+# Default fast suite (skips slow):
+.venv/bin/pytest -q -m "not slow"
+
+# Real-model integration suite (requires backend/models/{aasist,redimnet_b5}.pt):
+.venv/bin/pytest -m slow -v
+```
+
+Auto-skips when:
+- `backend/models/aasist.pt` or `redimnet_b5.pt` missing
+- `torch` / `torchaudio` not installed (need `pip install -e ".[model]"`)
+- No system TTS binary (`say` on macOS, `espeak-ng` on Linux)
+
+CI runs this in the `backend-integration` job; weights restored from a cache key `model-weights-v1.0`. Initially `continue-on-error: true` until the operator uploads a release artefact with the weights — the job will skip-and-pass without weights, won't false-positive a regression.
+
 ## Cross-browser test matrix
 
 ### Targets

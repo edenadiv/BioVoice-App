@@ -49,3 +49,14 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.pytest.ini_options]
+# `-m "not slow"` is the CI default — keeps the fast suite under 10 s.
+# Run `pytest -m slow` to load real ReDimNet + AASIST weights and run
+# the end-to-end integration test in tests/test_real_models_integration.py.
+markers = [
+  "slow: real model load (skipped by default; run with `pytest -m slow`)",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
