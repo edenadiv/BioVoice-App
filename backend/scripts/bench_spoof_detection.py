@@ -204,7 +204,9 @@ def main() -> int:
     parser.add_argument("--asvspoof-protocol", type=Path, help="ASVspoof2019.LA.cm.eval.trl.txt protocol file.")
     parser.add_argument("--clones-dir", type=Path, help="Directory of TTS subdirs (one per family) containing WAV clones.")
     parser.add_argument("--plot-dir", type=Path, default=None,
-                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/asvspoof2019_la/")
+                        help="If set, write {det,roc,score_hist}.png + scores.csv into <plot-dir>/<dataset-name>/")
+    parser.add_argument("--dataset-name", type=str, default="asvspoof2019_la",
+                        help="Label for the JSON output + plot subdir (e.g. asvspoof2019_la, spoof_libri_say).")
     parser.add_argument("--limit", type=int, default=0, help="Cap the ASVspoof eval at the first N protocol entries (0 = all).")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -216,7 +218,7 @@ def main() -> int:
     probe = AcousticProbe()
 
     results: dict = {
-        "dataset": "asvspoof2019_la",
+        "dataset": args.dataset_name,
         "deepfake_threshold": settings.deepfake_threshold,
         "hardware": {
             "platform": platform.platform(),
@@ -237,22 +239,23 @@ def main() -> int:
         summary, scores_arr, labels_arr, utt_ids = evaluate_asvspoof(
             audio, detector, protocol, args.asvspoof_dir
         )
-        results["asvspoof2019_la"] = summary
+        results[args.dataset_name] = summary
 
         # B2 — emit DET / ROC / score-histogram plots + per-utterance CSV.
         if args.plot_dir is not None:
             from _plotting import (
                 plot_det_curve, plot_roc_curve, plot_score_histogram, write_score_csv,
             )
-            sub_dir = args.plot_dir / "asvspoof2019_la"
+            sub_dir = args.plot_dir / args.dataset_name
+            title_prefix = args.dataset_name.replace("_", " ").title()
             n = len(scores_arr)
             eer_pct = summary["eer"] * 100.0
             plot_det_curve(scores_arr, labels_arr, sub_dir / "det.png",
-                           title=f"ASVspoof 2019 LA · AASIST · n={n} · EER {eer_pct:.2f}%")
+                           title=f"{title_prefix} · AASIST · n={n} · EER {eer_pct:.2f}%")
             plot_roc_curve(scores_arr, labels_arr, sub_dir / "roc.png",
-                           title=f"ASVspoof 2019 LA · AASIST · n={n}")
+                           title=f"{title_prefix} · AASIST · n={n}")
             plot_score_histogram(scores_arr, labels_arr, sub_dir / "score_hist.png",
-                                 title=f"ASVspoof 2019 LA · AASIST score distribution")
+                                 title=f"{title_prefix} · AASIST score distribution")
             write_score_csv(sub_dir / "scores.csv",
                             [(utt_ids[i], float(scores_arr[i]), int(labels_arr[i])) for i in range(n)])
             logger.info("Plots + CSV written to %s", sub_dir)

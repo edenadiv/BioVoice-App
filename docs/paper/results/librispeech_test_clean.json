@@ -1,0 +1,15 @@
+{
+  "dataset": "librispeech_test_clean",
+  "n_pairs": 8000,
+  "eer": 0.009000000000000005,
+  "eer_threshold": 0.3874742090702057,
+  "min_dcf_pt01": 0.00037250000000000006,
+  "wall_seconds": 725.9109161660017,
+  "hardware": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "torch_device": "cpu"
+  },
+  "checkpoint_sha256": "bb8cc848c92c2a01fe225ee29daffbf3487b8183802a949c00986982755457cd",
+  "completed_at": "2026-05-10T13:05:29.410053+00:00"
+}

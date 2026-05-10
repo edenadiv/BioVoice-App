@@ -47,14 +47,20 @@ Outcome: AASIST's binary score gets explained by four sub-axes
 (naturalness / spectral / temporal / artifact) with calibrated
 weights instead of the heuristic proxies.
 
-### G3 — Real-dataset benchmarks (scripts ready, real run pending)
+### G3 — Real-dataset benchmarks ✅ (v1.0.2)
 
-✅ **Scripts and methodology landed in `docs/benchmarks.md`** — the eval scripts at `backend/scripts/bench_eer_voxceleb.py` and `backend/scripts/bench_spoof_detection.py` are end-to-end ready and pass a self-contained smoke run.
+Real measured numbers landed at v1.0.2 (2026-05-10). Path was switched from gated VoxCeleb1 + ASVspoof to public LibriSpeech test-clean + self-built `say`-spoof set.
 
-⏭ **Pending the operator's dataset acquisition**:
-1. Register with VoxCeleb1 + Edinburgh DataShare (gated — both require a licence acceptance).
-2. Run the two scripts per `docs/benchmarks.md` §"Running the evaluations".
-3. Update the Results tables in `docs/benchmarks.md` from the produced JSON outputs.
+| Run | EER | Comparison |
+|---|---|---|
+| Speaker verification (LibriSpeech, 8000 pairs) | **0.90 %** | paper baseline 0.79 % on VoxCeleb1-O |
+| Anti-spoofing (LibriSpeech bonafide vs `say` spoofs, 600 clips) | **29.0 %** | confirms the AASIST-vs-`say` gap documented in operator-guide |
+
+DET / ROC plots + per-utterance CSVs: `docs/paper/results/`. Reproduce per `docs/benchmarks.md`. Threshold calibration analysis in `docs/thresholds.md`.
+
+Future work (deferred):
+- Run on the gated VoxCeleb1 + ASVspoof for direct paper-baseline comparison (operator's call on the registration friction).
+- Run on XTTS-v2 cloning attacks (gated by Plan §S2).
 
 ### G4 — Multi-speaker enrolment study
 

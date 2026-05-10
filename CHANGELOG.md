@@ -2,6 +2,54 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.2] — 2026-05-10
+
+Real-dataset benchmarks landed. Closes the audit's calibration gap (F-4) with measured numbers + DET / ROC / score-histogram plots. Switched from the gated VoxCeleb1 + ASVspoof datasets to public alternatives (LibriSpeech test-clean + self-built `say`-spoof set) so the eval is reproducible without licence acceptance.
+
+### Added
+
+- **`backend/scripts/_plotting.py`**: shared DET / ROC / score-histogram plot writers (matplotlib + sklearn). Used by both bench scripts via `--plot-dir`.
+- **`backend/scripts/make_libri_pairs.py`**: builds 8000-trial VoxCeleb-format pair file from LibriSpeech test-clean (40 speakers × 100 positives × 100 negatives, seeded for reproducibility).
+- **`backend/scripts/make_spoof_eval.py`**: builds a 600-clip ASVspoof-format eval set from LibriSpeech bonafide + 8 macOS `say` voices.
+- **`[bench]` extra in pyproject.toml** (matplotlib + scikit-learn + soundfile). Out of CI scope; operator installs locally with `pip install -e ".[model,bench]"`.
+- **`backend/tests/test_bench_helpers.py`** (7 cases): plot writers produce valid PNGs, `compute_eer` / `compute_min_dcf` math sane.
+- **`docs/paper/results/`**: real eval JSONs + plots. Per-utterance CSVs included.
+
+### Measured
+
+| Subsystem | Dataset | Result | Comparison |
+|---|---|---|---|
+| ReDimNet B5 speaker verification | LibriSpeech test-clean (8000 pairs) | **EER 0.90 %**, min-DCF 0.000372 | paper baseline 0.79 % on VoxCeleb1-O |
+| AASIST anti-spoofing | LibriSpeech bonafide vs macOS `say` spoofs (600 clips) | **EER 29.0 %** | confirms the documented AASIST/`say` cross-distribution gap |
+
+Both checkpoints' SHA-256s recorded in the JSON outputs so future runs prove the same weights. Wall time on M2 Mac mini: 12 min for 8000 trials, 49 s for 600 clips.
+
+### Threshold calibration (analysis, no code change)
+
+Both measured EER thresholds drifted > 0.05 from defaults but **neither was retuned**:
+
+- `similarity_threshold`: measured 0.387 on LibriSpeech, kept at 0.75. LibriSpeech is studio audio; lowering to 0.387 risks production false-accepts on real-room mic input.
+- `deepfake_threshold`: measured 0.977 on `say` spoofs (degenerate — AASIST scores them like bonafide), kept at 0.50. Right fix is better attack distribution (XTTS clones, deferred to v1.1).
+
+Calibration history added to `docs/thresholds.md`.
+
+### Changed
+
+- Both bench scripts now take `--dataset-name` flag (controls JSON `dataset` field + plot subdir).
+- Both bench scripts switched from `torchaudio.load` to `soundfile.read` (torchaudio 2.11 dropped its built-in loaders).
+- `bench_eer_voxceleb.py` now handles FLAC alongside WAV (LibriSpeech ships FLAC).
+
+### Docs
+
+- `docs/benchmarks.md` rewritten with real numbers + embedded DET / ROC plots + reproduce-on-fresh-box runbook + honest disclaimers about the LibriSpeech-vs-VoxCeleb difference.
+- `docs/remaining_work.md` G3 marked done.
+- `Plan.md` switched from v1.0.1 audit-fix plan to v1.0.2 benchmarks plan.
+
+### Known limitations carried forward
+
+- Anti-spoofing EER 29 % is real and high — measured proof of the macOS-`say`-vs-AASIST gap. Not a regression; expected per the operator-guide caveat. Lifts when XTTS-v2 (Plan §S2) lands real cloning attacks.
+- Numbers don't directly compare to published baselines (different test distributions). For a side-by-side comparison, swap in the gated datasets via the same scripts.
+
 ## [v1.0.1] — 2026-05-10
 
 Audit-fix release. Closes 6 of 8 findings from `docs/audit-v1.0.md` outright, with explicit disclosure for the remaining 2 (the deferred-to-v1.1 items).

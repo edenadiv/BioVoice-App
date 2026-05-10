@@ -86,3 +86,20 @@ AASIST returns a probability that the audio is **genuine** (1.0 = clean human sp
 - After any retraining of AASIST or ReDimNet — thresholds are sensitive to the model's score distribution.
 
 Until any of those land, **the defaults are placeholders**, not validated values.
+
+---
+
+## Calibration history
+
+### v1.0.2 — 2026-05-10 — measured but not retuned
+
+First real measurement against public data (Plan §B4). Both thresholds checked, both kept at v1.0 defaults. Reasoning:
+
+| Threshold | Default | Measured EER point | Decision | Why |
+|---|---|---|---|---|
+| `similarity_threshold` | 0.75 | 0.387 (LibriSpeech test-clean, 8000 trials) | **Keep 0.75** | LibriSpeech is studio audio. Lowering to 0.387 in production (USB mic + real room) would spike false accepts on different speakers. Need real-room labelled data to retune confidently. |
+| `deepfake_threshold` | 0.50 | 0.977 (LibriSpeech bonafide vs `say` spoofs, 600 clips) | **Keep 0.50** | Degenerate measurement: AASIST scores `say` spoofs in the 0.95–0.99 range alongside bonafide. EER point lands at the histogram overlap (top of the score range), not at a meaningful operating point. The right fix is better attack distribution (XTTS-v2 / ADD), deferred to v1.1. |
+
+Per-utterance scores + DET / ROC plots: see `docs/benchmarks.md`.
+
+Next calibration window: after v1.1 lands real XTTS clones in the test set + a few real operators record voice samples in real-room conditions.

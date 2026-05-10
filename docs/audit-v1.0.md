@@ -222,6 +222,17 @@ This audit is harsh. To balance:
 
 ---
 
+## Update — v1.0.2 (2026-05-10)
+
+`v1.0.2` (`Plan.md` B0–B6) closes the calibration gap with measured numbers:
+- ✅ **F-4** (uncalibrated thresholds) — measured EER on LibriSpeech (8000 pairs) + LibriSpeech vs `say` spoofs (600 clips). Calibration analysis written up in `docs/thresholds.md`. Both defaults kept (with rationale) rather than retuned to LibriSpeech-specific values.
+
+Real numbers landed:
+- Speaker verification: **EER 0.90 %** on LibriSpeech test-clean (paper baseline 0.79 % on VoxCeleb1-O).
+- Anti-spoofing: **EER 29.0 %** on LibriSpeech bonafide vs `say` spoofs — measured proof of the cross-distribution gap already documented at audit time.
+
+Plots + per-utterance CSVs live at `docs/paper/results/`. Reproducible via `docs/benchmarks.md` "Reproducing on a fresh box".
+
 ## Update — v1.0.1 (2026-05-10)
 
 `v1.0.1` (`Plan.md` HF1–HF8, see `CHANGELOG.md`) closes:

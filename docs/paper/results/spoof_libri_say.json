@@ -1,0 +1,17 @@
+{
+  "dataset": "spoof_libri_say",
+  "deepfake_threshold": 0.5,
+  "hardware": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "torch_device": "cpu"
+  },
+  "checkpoint_sha256": "51d2d9cf0738172f61e2a384ec50a54a55363240f67c971ed55a92435bc1a1c0",
+  "completed_at": "2026-05-10T13:08:18.904860+00:00",
+  "spoof_libri_say": {
+    "n_clips": 600,
+    "eer": 0.29000000000000004,
+    "eer_threshold": 0.9774001240730286,
+    "wall_seconds": 49.32530887500616
+  }
+}
