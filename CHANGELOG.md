@@ -2,6 +2,41 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.3] — 2026-05-12
+
+Real visualisations. Closes the last two "schematic" / "approx" surfaces in the operator console — the EmbeddingConstellation now plots real ReDimNet 192-d → PCA(3) projections of every enrolled profile (centroid + per-sample dispersion + live moving point), and the LiveFeatures panel now uses real DSP (autocorrelation pitch, Levinson-Durbin LPC formants, cycle-to-cycle jitter, VAD-gated SNR) instead of FFT-bin shortcuts and a `+18 dB` SNR offset.
+
+### Added
+
+- **`GET /users/embeddings`** — bulk dump of every profile's stored centroid + per-sample 192-d embeddings. No schema migration: `users.sample_embeddings_json` already existed.
+- **`POST /embed`** — encoder-only pass for the constellation's live point. Decodes + trims + encodes; **does not** write to DB, call AASIST, or bump verification metrics. ~50–100 ms on M2 CPU.
+- **`backend/app/services/verification.py:embed_only()`** — new method backing `/embed`.
+- **`frontend/src/lib/pca.ts`** — pure-JS PCA (covariance + power iteration with deflation) for projecting 192-d → 3-d. ~140 LoC, no deps.
+- **`frontend/src/lib/dsp.ts`** — pure-JS DSP: autocorrelation pitch, pre-emphasis + Hamming + Levinson-Durbin LPC + Durand-Kerner roots for formants, cycle-to-cycle jitter, VAD-gated SNR. ~210 LoC, no deps.
+- **`frontend/src/hooks/useEmbeddingProjection.ts`** — fetches `/users/embeddings`, fits a 3-component PCA over centroids ∪ samples, exposes projected coords. Refits when the enrolment list changes.
+- **`frontend/src/hooks/useLiveEmbedding.ts`** — slices the last 1.5 s of mic audio every 500 ms, posts to `/embed`, projects through the shared basis. Settings toggle `biovoice.constellation.liveOn` (default `true`); off = no requests + no live point.
+- **`backend/tests/test_embeddings_route.py`** (8 cases): shape, empty case, no-PII fields, `/embed` returns 192-d, no DB write, 400 on empty / silent, encoder parity with the enrolment path.
+- **`frontend/src/lib/pca.test.ts`** (4 cases): synthetic 3-cluster gaussian separates, eigenvalues monotone, mean projects to ~zero.
+- **`frontend/src/lib/dsp.test.ts`** (10 cases): pitch on 220 / 110 Hz sines within ±2 Hz, silence + white noise return 0, formants on cascaded resonators within ±80 Hz, jitter zero on stable buffer, SNR within ±1 dB of computed truth.
+
+### Changed
+
+- **`useMicrophone`** now also maintains a 2-second Float32 ring buffer at the native sample rate (via ScriptProcessorNode). New API: `getRecentFloat(seconds)`. Powers both the constellation live point and the LiveFeatures DSP.
+- **`EmbeddingConstellation`** — gutted the seeded geometry (`hash(profile.id)` cluster centres, `seedRandom()` Gaussian noise points, 90 background "noise" points, `Math.sin(t)` "comet"). Renders real PCA(3) coords now. Tooltip updated from "Schematic — cluster centres are deterministic per profile ID, not real ReDimNet projections" to "Real ReDimNet 192-d → PCA(3). Live point updates while mic is on."
+- **`LiveFeatures`** — replaced FFT-bin peak picking + `+18 dB` SNR fudge with `dsp.ts` calls. Now also surfaces F2/F3 + a real cycle-to-cycle jitter %.
+- **`console.jsx`** label: `(live mic · approx jitter)` → `(live mic)`. Constellation panel header: `VOICE EMBEDDING SPACE (schematic)` → `VOICE EMBEDDING SPACE`. Constellation footer: added a `LIVE · ON / OFF` toggle chip.
+
+### Removed
+
+- All `(schematic)` / `(approx jitter)` strings. `rg -i "schematic|approx jitter" frontend/src/` returns nothing.
+
+### Verification
+
+- Backend: `pytest -q -m "not slow"` → 112/112 (was 104, +8 new).
+- Frontend: `vitest run` → 47/47 (was 32, +15 new).
+- Bundle size: 80.71 KB gzipped (budget 90 KB; v1.0.2 was 70 KB → +10 KB for PCA + DSP + hooks).
+- Smoke: `curl /users/embeddings` returns 192-d centroids; `POST /embed` returns 192-d embedding + `model_provenance.encoder == "redimnet_b5"`.
+
 ## [v1.0.2] — 2026-05-10
 
 Real-dataset benchmarks landed. Closes the audit's calibration gap (F-4) with measured numbers + DET / ROC / score-histogram plots. Switched from the gated VoxCeleb1 + ASVspoof datasets to public alternatives (LibriSpeech test-clean + self-built `say`-spoof set) so the eval is reproducible without licence acceptance.

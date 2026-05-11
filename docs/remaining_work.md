@@ -20,6 +20,11 @@ below is what's still genuinely outstanding.
 - ✅ Bundle: ~70 KB gzipped (down from 101 KB after the strip).
 - ✅ Backend pytest: 73 / 73.
 
+## Closed since this list was last touched
+
+- ✅ **EmbeddingConstellation now renders real ReDimNet 192-d → PCA(3)** (v1.0.3, 2026-05-12). Real per-profile centroids + per-sample orbiting dots + live point streamed via `POST /embed`. Toggleable from the panel footer.
+- ✅ **LiveFeatures now uses real DSP** (v1.0.3): autocorrelation pitch, Levinson-Durbin LPC formants, cycle-to-cycle jitter, VAD-gated SNR. The "(approx jitter)" / "(schematic)" labels are gone.
+
 ## Still outstanding
 
 ### G1 — Manual cross-browser QA

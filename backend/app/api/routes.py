@@ -20,11 +20,13 @@ from app.api.dependencies import (
 )
 from app.core.metrics import metrics
 from app.schemas import (
+    EmbedResponse,
     EnrollmentResponse,
     HealthResponse,
     IdentificationResponse,
     SpeakerResponse,
     SpoofTestResponse,
+    UserEmbedding,
     VerificationResponse,
 )
 from app.services.audio import NoSpeechDetectedError
@@ -108,6 +110,17 @@ def list_users(service: VerificationService = Depends(get_verification_service))
     return service.list_users()
 
 
+@router.get("/users/embeddings", response_model=list[UserEmbedding])
+def list_user_embeddings(
+    service: VerificationService = Depends(get_verification_service),
+) -> list[UserEmbedding]:
+    """V1 — bulk dump of every enrolled profile's centroid + per-sample
+    192-d embeddings. Feeds the operator-console EmbeddingConstellation
+    so it can render real PCA(3) projections instead of the previous
+    deterministic-hash placeholders."""
+    return service.list_user_embeddings()
+
+
 @router.post("/enroll", response_model=EnrollmentResponse)
 async def enroll(
     user_id: str = Form(...),
@@ -171,6 +184,29 @@ async def verify(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/embed", response_model=EmbedResponse)
+async def embed_audio(
+    audio: UploadFile = File(...),
+    service: VerificationService = Depends(get_verification_service),
+) -> EmbedResponse:
+    """V1 — encoder-only pass for the constellation's live point.
+
+    Takes an arbitrary uploaded WAV, returns the 192-d ReDimNet
+    embedding plus duration + SNR. Deliberately does NOT write to the
+    DB, call the deepfake detector, or bump verification metrics —
+    this is a pure stateless preview the frontend posts a few times
+    per second while the operator's mic is hot."""
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    try:
+        return service.embed_only(audio_bytes=payload)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

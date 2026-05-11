@@ -5,6 +5,7 @@
 
 import type {
   AnalysisDetails,
+  EmbedResult,
   IdentificationMatch,
   IdentificationResult,
   ModelProvenance,
@@ -12,8 +13,10 @@ import type {
   SpoofDecision,
   SpoofGenerationResult,
   SpoofTestResult,
+  UserEmbedding,
   VerificationResult,
 } from "../types";
+import { encodeWav } from "./wav";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -253,6 +256,55 @@ export async function enrollSpeaker(userId: string, file: File): Promise<EnrollR
 
 export async function deleteUser(userId: string): Promise<void> {
   await request(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}
+
+// -- Embeddings (V1 — visualization payloads) --------------------------------
+
+type UserEmbeddingResponse = {
+  user_id: string;
+  centroid: number[];
+  samples: number[][];
+  sample_count: number;
+  enrolled_at: string;
+};
+
+type EmbedResponse = {
+  embedding: number[];
+  duration_ms: number;
+  snr_db: number;
+  frame_count: number;
+  model_provenance?: ModelProvenanceResponse | null;
+};
+
+export async function getUserEmbeddings(): Promise<UserEmbedding[]> {
+  const response = await request<UserEmbeddingResponse[]>("/users/embeddings");
+  return response.map((row) => ({
+    userId: row.user_id,
+    centroid: row.centroid,
+    samples: row.samples,
+    sampleCount: row.sample_count,
+    enrolledAt: row.enrolled_at,
+  }));
+}
+
+/**
+ * Encoder-only pass for the EmbeddingConstellation's live point.
+ * Posts a 16 kHz Float32 buffer as a WAV; returns the 192-d ReDimNet
+ * vector the backend would have produced for the same audio at /verify
+ * time. Does NOT touch the verification log.
+ */
+export async function embedAudio(samples: Float32Array, sampleRate: number = 16000): Promise<EmbedResult> {
+  const blob = encodeWav(samples, sampleRate);
+  const formData = new FormData();
+  formData.append("audio", blob, "preview.wav");
+  const response = await postForm<EmbedResponse>("/embed", formData);
+  return {
+    embedding: response.embedding,
+    durationMs: response.duration_ms,
+    snrDb: response.snr_db,
+    frameCount: response.frame_count,
+    modelProvenance: toModelProvenance(response.model_provenance),
+  };
 }
 
 // -- Verification -------------------------------------------------------------

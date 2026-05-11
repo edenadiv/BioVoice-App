@@ -13,6 +13,8 @@ import {
   formatThroughput,
   formatUptime,
 } from "./lib/useMetricsSummary";
+import { useEmbeddingProjection } from "./hooks/useEmbeddingProjection";
+import { useLiveEmbedding } from "./hooks/useLiveEmbedding";
 
 // ============================================================================
 // useCounter — animated count-up
@@ -315,6 +317,15 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   // Real backend telemetry — replaces the old hardcoded "11ms / 62/s / 14d".
   const metrics = useMetricsSummary();
 
+  // V3 — real ReDimNet embeddings projected to 3-d for the constellation.
+  const projection = useEmbeddingProjection(profiles.length);
+  // V3 — live mic embedding via /embed; toggleable from the Settings panel.
+  const live = useLiveEmbedding({
+    getRecentFloat: micState === 'live' ? audio.getRecentFloat ?? null : null,
+    sampleRate: audio.sampleRateRef?.current ?? 16000,
+    basis: projection.basis,
+  });
+
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Operator console" screenName="CONSOLE"/>
@@ -468,11 +479,14 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <div className="panel" style={{ padding: '16px 20px', minWidth: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
               <span className="label-mono" style={{ fontSize: 10 }}>
-                EXTRACTED VOICE FEATURES {micState === 'live' ? '(live mic · approx jitter)' : '(idle)'}
+                EXTRACTED VOICE FEATURES {micState === 'live' ? '(live mic)' : '(idle)'}
               </span>
-              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>16 KHZ · 25MS WIN · 10MS HOP</span>
+              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>AUTOCORR PITCH · LPC FORMANTS · VAD-GATED SNR</span>
             </div>
-            <LiveFeatures freqs={audio.freqs} samples={audio.samples} level={audio.level}/>
+            <LiveFeatures
+              getRecentFloat={micState === 'live' ? audio.getRecentFloat : null}
+              sampleRate={audio.sampleRateRef?.current ?? 16000}
+            />
           </div>
 
           {/* Health bar — real backend telemetry from /metrics/summary. */}
@@ -494,26 +508,55 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span
                 className="label-mono"
                 style={{ fontSize: 10 }}
-                title="Schematic — cluster centres are deterministic per profile ID, not real ReDimNet projections."
+                title="Real ReDimNet 192-d → PCA(3). Live point updates while mic is on."
               >
-                VOICE EMBEDDING SPACE (schematic)
+                VOICE EMBEDDING SPACE
               </span>
+              {projection.error && (
+                <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
+              )}
             </div>
             <div style={{ display: 'grid', placeItems: 'center' }}>
-              <EmbeddingConstellation width={420} height={300} profiles={profiles} audioLevel={audio.level} matchId={selectedProfile}/>
+              <EmbeddingConstellation
+                width={420}
+                height={300}
+                projectedProfiles={projection.profiles}
+                livePoint={live.liveProjected}
+                matchId={selectedProfile}
+                loading={projection.loading}
+              />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff' }}></span>
-                  <span className="label-mono" style={{ fontSize: 9 }}>LIVE VOICE</span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.enabled ? 1 : 0.3 }}></span>
+                  <span className="label-mono" style={{ fontSize: 9 }}>{live.enabled ? (live.liveProjected ? 'LIVE VOICE' : 'WAITING FOR MIC') : 'LIVE OFF'}</span>
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3da9fc' }}></span>
                   <span className="label-mono" style={{ fontSize: 9 }}>{profiles.length} ENROLLED</span>
                 </span>
               </div>
-              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>UMAP · COS DIST</span>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <button
+                  onClick={() => live.setEnabled(!live.enabled)}
+                  className="label-mono"
+                  title="Toggle the streaming /embed call that drives the live point. Disable to silence the preview encoder."
+                  style={{
+                    fontSize: 9,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    border: `1px solid ${live.enabled ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
+                    background: live.enabled ? 'rgba(126,240,255,0.10)' : 'transparent',
+                    color: live.enabled ? 'var(--teal-2)' : 'var(--ink-soft)',
+                    cursor: 'pointer',
+                    transition: 'all 180ms',
+                  }}
+                >
+                  LIVE · {live.enabled ? 'ON' : 'OFF'}
+                </button>
+                <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>REDIMNET 192-D · PCA(3)</span>
+              </div>
             </div>
           </div>
 

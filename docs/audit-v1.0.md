@@ -222,6 +222,14 @@ This audit is harsh. To balance:
 
 ---
 
+## Update — v1.0.3 (2026-05-12)
+
+`v1.0.3` (`Plan.md` V0–V6) closes the last "schematic" / "approx" surfaces flagged in F-6 + F-7:
+- ✅ **F-6 (closes outright)** — `EmbeddingConstellation` no longer derives geometry from `hash(profile.id)`. It plots real ReDimNet 192-d → PCA(3) projections of every enrolled centroid + per-sample dispersion, fed by the new `GET /users/embeddings`. The live point is real audio embedded via `POST /embed` and projected through the same basis. Operator can disable the live stream from the panel footer (`biovoice.constellation.liveOn` localStorage).
+- ✅ **F-7 (closes outright)** — `LiveFeatures` no longer relies on FFT-bin shortcuts. It uses the new `frontend/src/lib/dsp.ts`: time-domain autocorrelation pitch with parabolic peak refinement, Levinson-Durbin LPC formants (order 12), cycle-to-cycle jitter from a rolling period buffer, and VAD-gated SNR (no `+18 dB` offset). Header label dropped from "(live mic · approx jitter)" to "(live mic)".
+
+The "(schematic)" / "(approx jitter)" labels are gone. F-3 / F-4 status unchanged — those wait on trained sub-classifier heads (Plan §S2) and field-room calibration data (Plan §G4) respectively.
+
 ## Update — v1.0.2 (2026-05-10)
 
 `v1.0.2` (`Plan.md` B0–B6) closes the calibration gap with measured numbers:

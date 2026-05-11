@@ -56,6 +56,15 @@ Run on every browser × every viewport.
 9. Open DeepfakeLab → target `qa_user` → "Forge & test attack" → DEEPFAKE.
 10. Activity feed shows the verification events; counters match. Devtools: no `pageerror`, no failed network requests.
 
+### V1.0.3 — Real visualisation smoke (in addition to the 10-step)
+
+Pre-condition: at least 3 enrolled profiles, each with 3 samples.
+
+1. Open Console. The "VOICE EMBEDDING SPACE" panel renders three labelled cluster points with **per-sample dots** orbiting each centroid (no synthetic background "noise points"). The panel title no longer says "(schematic)".
+2. While the mic is live, a bright cyan **live point** streams through the projection. The legend reads "LIVE VOICE" while it's tracking.
+3. Toggle the **LIVE · ON / OFF** chip in the panel footer. With `OFF`: live point disappears, legend reads "LIVE OFF", DevTools Network tab shows no further `POST /embed` calls. With `ON`: requests resume within 1 s. Setting persists across page reloads (localStorage `biovoice.constellation.liveOn`).
+4. The "EXTRACTED VOICE FEATURES" panel header reads "(live mic)" — not "(approx jitter)". Pitch / formant F1 / jitter / SNR all read non-zero plausible values while voiced; everything reads "—" while silent.
+
 ### Sign-off
 
 - [ ] All 10 steps pass on Chrome desktop @ 1920×1080

@@ -15,6 +15,12 @@ import { useAppDispatch } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 import { DegradedBanner } from "./components/DegradedBanner";
+import {
+  formantsLPC,
+  jitterPercent,
+  pitchAutocorrelation,
+  snrFromVad,
+} from "./lib/dsp";
 
 // ============================================================================
 // AmbientField — slow-drifting particles with parallax depth in the backdrop.
@@ -71,65 +77,66 @@ function AmbientField({ count = 80 }) {
 }
 
 // ============================================================================
-// EmbeddingConstellation — 3D-rotating point cloud projecting the 192-dim
-// voice space. Profile clusters are rendered as named constellations; the
-// live voice "drops in" as a bright comet that finds its match.
+// EmbeddingConstellation — 3D-rotating projection of the real ReDimNet
+// 192-d voice space (PCA(3) computed from every enrolled centroid +
+// per-sample embedding). The optional `livePoint` is the live mic
+// embedding projected through the same basis — same coordinate system
+// as the cluster centers, so spatial proximity is meaningful.
 // ============================================================================
-function EmbeddingConstellation({ width = 420, height = 340, profiles, audioLevel = 0, matchId = null }) {
+function EmbeddingConstellation({
+  width = 420,
+  height = 340,
+  projectedProfiles,
+  livePoint,
+  matchId = null,
+  loading = false,
+}) {
   const ref = useRef();
   const matchRef = useRef(matchId);
-  const levelRef = useRef(audioLevel);
+  const liveRef = useRef(livePoint);
   matchRef.current = matchId;
-  levelRef.current = audioLevel;
+  liveRef.current = livePoint;
 
-  // Generate stable cluster centers per profile (seeded from id)
-  const centers = useMemo(() => {
-    return (profiles || []).map((p, i) => {
-      const seed = hash(p.id);
-      const a = (seed % 1000) / 1000 * Math.PI * 2;
-      const b = ((seed >> 4) % 1000) / 1000 * Math.PI;
-      const r = 0.62 + ((seed >> 8) % 100) / 400;
-      return {
-        ...p,
-        cx: r * Math.sin(b) * Math.cos(a),
-        cy: r * Math.sin(b) * Math.sin(a),
-        cz: r * Math.cos(b),
-      };
-    });
-  }, [profiles]);
-
-  // Points for each cluster (small Gaussian around center)
-  const points = useMemo(() => {
-    const all = [];
-    centers.forEach((c, idx) => {
-      const n = 22;
-      const rand = seedRandom(hash(c.id) + 7);
-      for (let i = 0; i < n; i++) {
-        all.push({
-          x: c.cx + (rand() - 0.5) * 0.18,
-          y: c.cy + (rand() - 0.5) * 0.18,
-          z: c.cz + (rand() - 0.5) * 0.18,
+  // Normalise the projected coords to a unit sphere for rendering.
+  // PCA component magnitudes vary with the input scale; this keeps the
+  // canvas geometry stable regardless of how many speakers are enrolled.
+  const { centers, sampleDots, scale } = useMemo(() => {
+    const profiles = projectedProfiles || [];
+    if (profiles.length === 0) {
+      return { centers: [], sampleDots: [], scale: 1 };
+    }
+    let maxMag = 0;
+    for (const p of profiles) {
+      for (const v of [p.centroid, ...(p.samples || [])]) {
+        const m = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (m > maxMag) maxMag = m;
+      }
+    }
+    const norm = maxMag > 0 ? 0.78 / maxMag : 1;
+    const centers = profiles.map((p, idx) => ({
+      id: p.userId,
+      initials: p.initials,
+      color: p.color1 || '#7ef0ff',
+      cluster: idx,
+      x: p.centroid[0] * norm,
+      y: p.centroid[1] * norm,
+      z: p.centroid[2] * norm,
+    }));
+    const dots = [];
+    profiles.forEach((p, idx) => {
+      for (const s of p.samples || []) {
+        dots.push({
+          x: s[0] * norm,
+          y: s[1] * norm,
+          z: s[2] * norm,
           cluster: idx,
-          color: c.color1 || '#7ef0ff',
+          color: p.color1 || '#7ef0ff',
+          id: p.userId,
         });
       }
     });
-    // background noise points
-    const bgRand = seedRandom(99);
-    for (let i = 0; i < 90; i++) {
-      const a = bgRand() * Math.PI * 2;
-      const b = bgRand() * Math.PI;
-      const r = 0.35 + bgRand() * 0.55;
-      all.push({
-        x: r * Math.sin(b) * Math.cos(a),
-        y: r * Math.sin(b) * Math.sin(a),
-        z: r * Math.cos(b),
-        cluster: -1,
-        color: '#3da9fc',
-      });
-    }
-    return all;
-  }, [centers]);
+    return { centers, sampleDots: dots, scale: norm };
+  }, [projectedProfiles]);
 
   useEffect(() => {
     const c = ref.current; if (!c) return;
@@ -143,6 +150,22 @@ function EmbeddingConstellation({ width = 420, height = 340, profiles, audioLeve
     const cx = width / 2, cy = height / 2;
     const proj = 320;
     const baseR = Math.min(width, height) * 0.42;
+
+    function project(x, y, z, time) {
+      const cy_ = Math.cos(time), sy_ = Math.sin(time);
+      let x1 = x * cy_ - z * sy_;
+      let z1 = x * sy_ + z * cy_;
+      const cx_ = Math.cos(0.35), sx_ = Math.sin(0.35);
+      let y1 = y * cx_ - z1 * sx_;
+      let z2 = y * sx_ + z1 * cx_;
+      const f = proj / (proj + z2 * baseR);
+      return {
+        x: cx + x1 * baseR * f,
+        y: cy + y1 * baseR * f,
+        depth: z2,
+        scale: f,
+      };
+    }
 
     const draw = () => {
       t += 0.005;
@@ -172,54 +195,45 @@ function EmbeddingConstellation({ width = 420, height = 340, profiles, audioLeve
         ctx.stroke();
       }
 
-      // Sort points by depth for proper layering
-      const projected = points.map(p => {
+      // Per-sample dots — real per-recording 192-d embeddings projected.
+      const projected = sampleDots.map((p) => {
         const pp = project(p.x, p.y, p.z, t);
         return { ...p, ...pp };
       }).sort((a, b) => a.depth - b.depth);
 
-      function project(x, y, z, time) {
-        // rotate Y
-        const cy_ = Math.cos(time), sy_ = Math.sin(time);
-        let x1 = x * cy_ - z * sy_;
-        let z1 = x * sy_ + z * cy_;
-        // rotate X (slight tilt)
-        const cx_ = Math.cos(0.35), sx_ = Math.sin(0.35);
-        let y1 = y * cx_ - z1 * sx_;
-        let z2 = y * sx_ + z1 * cx_;
-        const f = proj / (proj + z2 * baseR);
-        return {
-          x: cx + x1 * baseR * f,
-          y: cy + y1 * baseR * f,
-          depth: z2,
-          scale: f,
-        };
-      }
-
-      // draw points
       projected.forEach(p => {
-        const alpha = p.cluster < 0 ? 0.18 + (p.scale - 0.5) * 0.4 : 0.55 + (p.scale - 0.5) * 0.6;
-        const r = (p.cluster < 0 ? 1.0 : 1.8) * p.scale;
-        const isMatch = p.cluster >= 0 && centers[p.cluster] && matchRef.current === centers[p.cluster].id;
+        const alpha = 0.45 + (p.scale - 0.5) * 0.6;
+        const r = 1.6 * p.scale;
+        const isMatch = matchRef.current === p.id;
         if (isMatch) {
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = 10;
           ctx.shadowColor = p.color;
         }
         ctx.fillStyle = hexA(p.color, isMatch ? Math.min(1, alpha + 0.3) : alpha);
         ctx.beginPath();
-        ctx.arc(p.x, p.y, r * (isMatch ? 1.4 : 1), 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, r * (isMatch ? 1.3 : 1), 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
       });
 
-      // draw cluster labels (front-most only)
-      centers.forEach((c, idx) => {
-        const pp = project(c.cx, c.cy, c.cz, t);
-        if (pp.depth > 0.1) return;             // backside hidden
+      // Cluster centres + labels.
+      centers.forEach((c) => {
+        const pp = project(c.x, c.y, c.z, t);
         const isMatch = matchRef.current === c.id;
-        ctx.fillStyle = isMatch ? '#7ef0ff' : 'rgba(231,243,255,0.65)';
-        ctx.font = `${isMatch ? 600 : 400} 9.5px "JetBrains Mono", monospace`;
-        ctx.fillText(c.initials, pp.x + 6, pp.y - 6);
+        if (isMatch) {
+          ctx.shadowBlur = 16;
+          ctx.shadowColor = c.color;
+        }
+        ctx.fillStyle = hexA(c.color, isMatch ? 0.95 : 0.8);
+        ctx.beginPath();
+        ctx.arc(pp.x, pp.y, isMatch ? 4.5 : 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        if (pp.depth <= 0.15) {
+          ctx.fillStyle = isMatch ? '#7ef0ff' : 'rgba(231,243,255,0.7)';
+          ctx.font = `${isMatch ? 600 : 400} 9.5px "JetBrains Mono", monospace`;
+          ctx.fillText(c.initials, pp.x + 6, pp.y - 6);
+        }
         if (isMatch) {
           ctx.strokeStyle = '#7ef0ff';
           ctx.lineWidth = 1;
@@ -229,113 +243,116 @@ function EmbeddingConstellation({ width = 420, height = 340, profiles, audioLeve
         }
       });
 
-      // live voice "comet" — orbiting/bouncing centroid
-      const lvl = Math.min(1, levelRef.current * 2);
-      const lt = t * 1.6;
-      const lx = Math.sin(lt * 0.7) * 0.5;
-      const ly = Math.cos(lt * 0.5) * 0.3 + lvl * 0.1;
-      const lz = Math.sin(lt * 0.3) * 0.4;
-      const lp = project(lx, ly, lz, t);
-      ctx.shadowBlur = 18; ctx.shadowColor = '#7ef0ff';
-      ctx.fillStyle = '#bff4ff';
-      ctx.beginPath();
-      ctx.arc(lp.x, lp.y, 3 + lvl * 3, 0, Math.PI * 2);
-      ctx.fill();
-      // ring
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = `rgba(126,240,255,${0.4 + lvl * 0.4})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(lp.x, lp.y, 8 + lvl * 6, 0, Math.PI * 2);
-      ctx.stroke();
-      // line to matched cluster
-      if (matchRef.current) {
-        const m = centers.find(c => c.id === matchRef.current);
-        if (m) {
-          const mp = project(m.cx, m.cy, m.cz, t);
-          const pulse = 0.4 + 0.4 * Math.sin(t * 6);
-          ctx.strokeStyle = `rgba(126,240,255,${pulse})`;
-          ctx.lineWidth = 1.2;
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.moveTo(lp.x, lp.y); ctx.lineTo(mp.x, mp.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
+      // Live voice — real /embed projection, only if we have one.
+      const live = liveRef.current;
+      if (live) {
+        const lp = project(live[0] * scale, live[1] * scale, live[2] * scale, t);
+        ctx.shadowBlur = 18; ctx.shadowColor = '#7ef0ff';
+        ctx.fillStyle = '#bff4ff';
+        ctx.beginPath();
+        ctx.arc(lp.x, lp.y, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        const pulse = 0.4 + 0.4 * Math.sin(t * 6);
+        ctx.strokeStyle = `rgba(126,240,255,${pulse})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(lp.x, lp.y, 11, 0, Math.PI * 2);
+        ctx.stroke();
+        if (matchRef.current) {
+          const m = centers.find(c => c.id === matchRef.current);
+          if (m) {
+            const mp = project(m.x, m.y, m.z, t);
+            ctx.strokeStyle = `rgba(126,240,255,${0.3 + 0.3 * Math.sin(t * 4)})`;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(lp.x, lp.y); ctx.lineTo(mp.x, mp.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
         }
+      }
+
+      // Empty / loading state.
+      if (centers.length === 0) {
+        ctx.fillStyle = 'rgba(125,200,255,0.45)';
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(loading ? 'LOADING EMBEDDINGS…' : 'NO PROFILES ENROLLED', cx, cy);
+        ctx.textAlign = 'start';
       }
       raf = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [width, height, points, centers]);
+  }, [width, height, centers, sampleDots, scale, loading]);
 
   return <canvas ref={ref} style={{ display: 'block' }}/>;
 }
 
 // ============================================================================
-// LiveFeatures — extracts pitch, formants F1/F2, jitter, shimmer from FFT.
-// Animated readouts.
+// LiveFeatures — pitch / formants / jitter / SNR computed from the real
+// rolling Float32 mic buffer using the algorithms in `lib/dsp.ts`:
+// time-domain autocorrelation pitch, Levinson-Durbin LPC formants,
+// cycle-to-cycle jitter, VAD-gated SNR. No FFT-bin shortcuts, no
+// magic offsets, no per-frame faux jitter.
 // ============================================================================
-function LiveFeatures({ freqs, samples, level }) {
-  const [feat, setFeat] = useState({ pitch: 0, f1: 0, f2: 0, f3: 0, jitter: 0, shimmer: 0, snr: 0, vad: false });
-  const histRef = useRef({ pitches: [], levels: [] });
+function LiveFeatures({ getRecentFloat, sampleRate, vadThreshold = 0.018 }) {
+  const [feat, setFeat] = useState({ pitch: 0, f1: 0, f2: 0, f3: 0, jitter: 0, snr: 0, vad: false });
+  const periodBufRef = useRef([]);
 
   useEffect(() => {
     let raf;
     const tick = () => {
-      const f = freqs || [];
-      const s = samples || [];
-      // pitch via spectral peak in 80–400 Hz range (assume 16 kHz, nyquist 8 kHz, FFT size = freqs.length*2)
-      // bin = freq / (sampleRate / fftSize); approximate sampleRate=16000, fftSize=f.length*2
-      const fftSize = f.length * 2 || 1024;
-      const sr = 16000;
-      const binToHz = (b) => b * sr / fftSize;
-      let peakBin = 0, peakVal = 0;
-      const lo = Math.floor(80 * fftSize / sr);
-      const hi = Math.floor(400 * fftSize / sr);
-      for (let i = lo; i < Math.min(hi, f.length); i++) {
-        if (f[i] > peakVal) { peakVal = f[i]; peakBin = i; }
-      }
-      const pitch = peakVal > 35 ? binToHz(peakBin) : 0;
-      // formants — first 3 spectral peaks above 200 Hz
-      const peaks = [];
-      const minBin = Math.floor(200 * fftSize / sr);
-      for (let i = minBin + 4; i < f.length - 4; i++) {
-        if (f[i] > 30 && f[i] >= f[i-2] && f[i] >= f[i+2] && f[i] > f[i-4] && f[i] > f[i+4]) {
-          peaks.push({ b: i, v: f[i] });
-          i += 6;
+      const samples = getRecentFloat ? getRecentFloat(0.5) : null;
+      if (samples && samples.length > 256) {
+        // Pitch — autocorrelation, sub-sample peak refinement.
+        const pitch = pitchAutocorrelation(samples, sampleRate);
+        // Formants — pre-emphasis + Hamming + LPC(order=12) + roots.
+        const [f1, f2, f3] = formantsLPC(samples, sampleRate, 12);
+        // Cycle-to-cycle jitter — keep a buffer of detected periods.
+        if (pitch > 0) {
+          const periodSamples = sampleRate / pitch;
+          const buf = periodBufRef.current;
+          buf.push(periodSamples);
+          if (buf.length > 20) buf.shift();
         }
+        const jitter = jitterPercent(periodBufRef.current);
+        // SNR — VAD-gated, energy-based per-sample mask.
+        // Window-averaged frame energy keeps the mask stable across short bursts.
+        const FRAME = 320; // 20 ms at 16 kHz; scales naturally to 48 kHz too
+        const energies = new Float32Array(Math.floor(samples.length / FRAME));
+        for (let f = 0; f < energies.length; f++) {
+          let sum = 0;
+          const start = f * FRAME;
+          for (let i = 0; i < FRAME; i++) {
+            const v = samples[start + i];
+            sum += v * v;
+          }
+          energies[f] = Math.sqrt(sum / FRAME);
+        }
+        // VAD threshold: bigger than absolute floor AND ≥ noise floor × 3.
+        const sortedE = Array.from(energies).sort((a, b) => a - b);
+        const noiseFloor = sortedE[Math.floor(sortedE.length * 0.2)] || 0;
+        const vadMask = new Array(samples.length);
+        for (let f = 0; f < energies.length; f++) {
+          const isVoice = energies[f] > Math.max(vadThreshold, noiseFloor * 3);
+          for (let i = 0; i < FRAME; i++) vadMask[f * FRAME + i] = isVoice;
+        }
+        for (let i = energies.length * FRAME; i < samples.length; i++) vadMask[i] = false;
+        const snr = snrFromVad(samples, vadMask);
+        const anyVoice = vadMask.some(Boolean);
+        setFeat({ pitch, f1, f2, f3, jitter, snr, vad: anyVoice });
+      } else {
+        // Mic not yet active or ring not full enough.
+        setFeat({ pitch: 0, f1: 0, f2: 0, f3: 0, jitter: 0, snr: 0, vad: false });
       }
-      peaks.sort((a, b) => a.b - b.b);
-      const f1 = peaks[0] ? binToHz(peaks[0].b) : 0;
-      const f2 = peaks[1] ? binToHz(peaks[1].b) : 0;
-      const f3 = peaks[2] ? binToHz(peaks[2].b) : 0;
-      // jitter / shimmer simulated
-      const h = histRef.current;
-      h.pitches.push(pitch); if (h.pitches.length > 30) h.pitches.shift();
-      h.levels.push(level || 0); if (h.levels.length > 30) h.levels.shift();
-      const meanP = h.pitches.reduce((a, b) => a + b, 0) / Math.max(1, h.pitches.length);
-      const jitter = meanP > 0
-        ? h.pitches.reduce((a, p) => a + Math.abs(p - meanP), 0) / h.pitches.length / meanP * 100
-        : 0;
-      const meanL = h.levels.reduce((a, b) => a + b, 0) / Math.max(1, h.levels.length);
-      const shimmer = meanL > 0
-        ? h.levels.reduce((a, l) => a + Math.abs(l - meanL), 0) / h.levels.length / meanL * 100
-        : 0;
-      // SNR approximation
-      let signal = 0, noise = 0;
-      for (let i = 0; i < f.length; i++) {
-        if (i > lo && i < hi * 4) signal += f[i];
-        else noise += f[i];
-      }
-      const snr = noise > 0 ? 10 * Math.log10(signal / noise + 0.001) : 0;
-      const vad = (level || 0) > 0.02;
-      setFeat({ pitch, f1, f2, f3, jitter, shimmer, snr: Math.max(0, snr + 18), vad });
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [freqs, samples, level]);
+  }, [getRecentFloat, sampleRate, vadThreshold]);
 
   const Cell = ({ label, value, unit, hint }) => (
     <div style={{
@@ -357,9 +374,9 @@ function LiveFeatures({ freqs, samples, level }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
       <Cell label="Pitch · F0" value={feat.pitch ? feat.pitch.toFixed(0) : '—'} unit="Hz" hint={feat.pitch > 165 ? 'female range' : feat.pitch > 0 ? 'male range' : 'silence'}/>
-      <Cell label="Formants"   value={feat.f1 ? feat.f1.toFixed(0) : '—'} unit="Hz" hint="vowel space"/>
-      <Cell label="SNR"        value={feat.snr.toFixed(1)} unit="dB" hint="signal qual"/>
-      <Cell label="Voice"      value={feat.vad ? 'ACTIVE' : 'IDLE'}    unit="" hint={feat.vad ? 'speech detected' : 'no voice'}/>
+      <Cell label="Formant F1" value={feat.f1 ? feat.f1.toFixed(0) : '—'} unit="Hz" hint={feat.f2 ? `F2 ${feat.f2.toFixed(0)} · F3 ${feat.f3.toFixed(0)}` : 'LPC'}/>
+      <Cell label="Jitter"     value={feat.jitter ? feat.jitter.toFixed(2) : '—'} unit="%" hint="cycle-to-cycle"/>
+      <Cell label="SNR"        value={feat.snr ? feat.snr.toFixed(1) : '—'} unit="dB" hint={feat.vad ? 'voiced / unvoiced' : 'no voice'}/>
     </div>
   );
 }

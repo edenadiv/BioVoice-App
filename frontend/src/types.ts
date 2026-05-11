@@ -97,3 +97,19 @@ export type ModelProvenance = {
   acousticProbe: "heuristic" | "trained_heads";
   isDegraded: boolean;
 };
+
+export type UserEmbedding = {
+  userId: string;
+  centroid: number[];
+  samples: number[][];
+  sampleCount: number;
+  enrolledAt: string;
+};
+
+export type EmbedResult = {
+  embedding: number[];
+  durationMs: number;
+  snrDb: number;
+  frameCount: number;
+  modelProvenance: ModelProvenance | null;
+};

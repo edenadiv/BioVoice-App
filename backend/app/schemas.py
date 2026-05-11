@@ -154,6 +154,34 @@ class IdentificationMatch(BaseModel):
     enrolled_at: datetime
 
 
+class UserEmbedding(BaseModel):
+    """V1 — one enrolled profile's stored 192-d centroid plus the
+    per-sample 192-d embeddings it was averaged from. Feeds the
+    operator-console EmbeddingConstellation: real ReDimNet vectors,
+    PCA(3) projected client-side."""
+
+    user_id: str
+    centroid: list[float]
+    samples: list[list[float]]
+    sample_count: int = Field(ge=0)
+    enrolled_at: datetime
+
+
+class EmbedResponse(BaseModel):
+    """V1 — encoder-only pass for the constellation's live point.
+
+    No DB write, no detector call, no metrics increment. Returns the
+    192-d ReDimNet vector for an arbitrary uploaded WAV, plus the
+    audio QC numbers the frontend needs to decide whether to render
+    the live point at full opacity."""
+
+    embedding: list[float]
+    duration_ms: float
+    snr_db: float
+    frame_count: int = Field(ge=0)
+    model_provenance: ModelProvenance | None = None
+
+
 class IdentificationResponse(BaseModel):
     """Open-set "most similar" answer. Returns the ranked top-N enrolled
     speakers given an arbitrary input WAV — no user_id required from

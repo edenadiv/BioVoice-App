@@ -13,6 +13,7 @@ from app.models import SpeakerRecord, VerificationRecord
 from app.schemas import (
     AnalysisDetails,
     DecisionReason,
+    EmbedResponse,
     EnrollmentResponse,
     IdentificationMatch,
     IdentificationResponse,
@@ -20,6 +21,7 @@ from app.schemas import (
     SampleQuality,
     SpeakerResponse,
     StageBreakdown,
+    UserEmbedding,
     VerificationResponse,
 )
 from app.services.audio import AudioService, SampleQualityRejectedError
@@ -141,6 +143,46 @@ class VerificationService:
 
     def is_user_id_available(self, user_id: str) -> bool:
         return self.store.get_speaker(user_id) is None
+
+    def list_user_embeddings(self) -> list[UserEmbedding]:
+        """V1 — bulk dump of every enrolled profile's stored centroid +
+        per-sample embeddings. Drives the operator-console
+        EmbeddingConstellation. No PII beyond user_id."""
+        return [
+            UserEmbedding(
+                user_id=record.user_id,
+                centroid=record.embedding,
+                samples=record.sample_embeddings,
+                sample_count=record.sample_count,
+                enrolled_at=record.enrolled_at,
+            )
+            for record in self.store.list_users()
+        ]
+
+    def embed_only(self, audio_bytes: bytes) -> EmbedResponse:
+        """V1 — encoder-only pass for the constellation's live point.
+
+        Decodes + trims + encodes. Skips the SNR/quality gate (live
+        previews must not 4xx — frontend uses `snr_db` to decide opacity
+        instead). Does NOT write to DB, does NOT call AASIST, does NOT
+        bump metrics. Pure stateless preview.
+
+        Errors:
+            ValueError / WaveError: bad / unspeechy / undecodable audio.
+        """
+        decoded = self.audio.decode_wav(audio_bytes)
+        # F3.3-style quality probe — informational only, not a gate.
+        quality = self.audio.score_quality(decoded)
+        trimmed, _ = self.audio.trim_to_voice(decoded)
+        embedding = self.encoder.embed(trimmed.waveform)
+        duration_ms = len(trimmed.waveform) / max(1, trimmed.sample_rate) * 1000.0
+        return EmbedResponse(
+            embedding=embedding,
+            duration_ms=duration_ms,
+            snr_db=quality.snr_db,
+            frame_count=len(trimmed.waveform),
+            model_provenance=self._collect_provenance(),
+        )
 
     def enroll(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> EnrollmentResponse:
         payload = self.audio.decode_wav(audio_bytes)

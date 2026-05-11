@@ -13,6 +13,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 //   freqs:   Uint8Array (frequency-domain, 0..255)
 //   level:   smoothed amplitude 0..1
 // ---------------------------------------------------------------------------
+// Length of the rolling Float32 buffer kept by useMicrophone — drives
+// LiveFeatures DSP + the EmbeddingConstellation live point.
+const RING_SECONDS = 2.0;
+
 function useMicrophone() {
   const [state, setState] = useState('idle');
   const [, force] = useState(0);
@@ -21,14 +25,31 @@ function useMicrophone() {
   const ctxRef = useRef(null);
   const streamRef = useRef(null);
   const analyserRef = useRef(null);
+  const procRef = useRef(null);
+  const sinkRef = useRef(null);
   const samplesRef = useRef(new Uint8Array(2048));
   const freqsRef = useRef(new Uint8Array(512));
   const levelRef = useRef(0);
   const startedAtRef = useRef(0);
   const durRef = useRef(0);
+  // V3 — rolling Float32 ring buffer (native sample rate). `floatRingFill`
+  // tracks how many leading samples are valid; once it reaches the ring
+  // length it stays there and the buffer slides on every audio chunk.
+  const floatRingRef = useRef(null);
+  const floatRingFillRef = useRef(0);
+  const sampleRateRef = useRef(16000);
 
   const stop = useCallback(() => {
     if (tickRef.current) { cancelAnimationFrame(tickRef.current); tickRef.current = null; }
+    if (procRef.current) {
+      try { procRef.current.disconnect(); } catch (e) {}
+      procRef.current.onaudioprocess = null;
+      procRef.current = null;
+    }
+    if (sinkRef.current) {
+      try { sinkRef.current.disconnect(); } catch (e) {}
+      sinkRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -39,6 +60,8 @@ function useMicrophone() {
     }
     analyserRef.current = null;
     levelRef.current = 0;
+    floatRingRef.current = null;
+    floatRingFillRef.current = 0;
     setState('stopped');
   }, []);
 
@@ -51,6 +74,7 @@ function useMicrophone() {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       const ctx = new Ctx();
       ctxRef.current = ctx;
+      sampleRateRef.current = ctx.sampleRate;
       const src = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
@@ -59,6 +83,39 @@ function useMicrophone() {
       analyserRef.current = analyser;
       samplesRef.current = new Uint8Array(analyser.fftSize);
       freqsRef.current = new Uint8Array(analyser.frequencyBinCount);
+
+      // ScriptProcessorNode is deprecated but still works in every
+      // current browser; AudioWorklet would need a separate worker
+      // file and adds complexity that isn't worth it for a 2-second
+      // ring buffer feeding the visualization layer.
+      const ringLen = Math.floor(ctx.sampleRate * RING_SECONDS);
+      floatRingRef.current = new Float32Array(ringLen);
+      floatRingFillRef.current = 0;
+      const proc = ctx.createScriptProcessor(2048, 1, 1);
+      procRef.current = proc;
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      sinkRef.current = sink;
+      src.connect(proc);
+      proc.connect(sink);
+      sink.connect(ctx.destination);
+      proc.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const ring = floatRingRef.current;
+        if (!ring) return;
+        const inLen = input.length;
+        const fill = floatRingFillRef.current;
+        if (fill + inLen <= ring.length) {
+          ring.set(input, fill);
+          floatRingFillRef.current = fill + inLen;
+        } else {
+          // Slide-left: drop the oldest `inLen` samples then append.
+          ring.copyWithin(0, inLen);
+          ring.set(input, ring.length - inLen);
+          floatRingFillRef.current = ring.length;
+        }
+      };
+
       startedAtRef.current = performance.now();
       setState('live');
 
@@ -88,6 +145,23 @@ function useMicrophone() {
 
   useEffect(() => () => stop(), []);
 
+  // Returns the latest `seconds` of Float32 audio at the native sample
+  // rate, or null if the buffer doesn't yet have that much. Allocates a
+  // fresh slice — callers can pass directly to /embed without worrying
+  // about the ring being mutated mid-request.
+  const getRecentFloat = useCallback((seconds) => {
+    const ring = floatRingRef.current;
+    if (!ring) return null;
+    const want = Math.floor(sampleRateRef.current * seconds);
+    if (want <= 0) return null;
+    const fill = floatRingFillRef.current;
+    if (fill < want) return null;
+    if (fill >= ring.length) {
+      return ring.slice(ring.length - want);
+    }
+    return ring.slice(fill - want, fill);
+  }, []);
+
   return {
     state,
     start, stop,
@@ -96,6 +170,9 @@ function useMicrophone() {
     get level() { return levelRef.current; },
     durationMs: durRef.current,
     levelRef,
+    sampleRateRef,
+    floatRingRef,
+    getRecentFloat,
   };
 }
 
@@ -191,10 +268,13 @@ function useSilentAudio() {
   // values; both are fine at zero.
   const samplesRef = useRef(new Uint8Array(2048));
   const freqsRef = useRef(new Uint8Array(512));
+  const sampleRateRef = useRef(16000);
   return {
     samples: samplesRef.current,
     freqs: freqsRef.current,
     get level() { return 0; },
+    sampleRateRef,
+    getRecentFloat: () => null,
   };
 }
 

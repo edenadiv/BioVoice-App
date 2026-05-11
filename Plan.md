@@ -1,255 +1,287 @@
-# BioVoice — Real-Dataset Benchmarks Plan (v1.0.2)
+# BioVoice — Real Visualizations Plan (v1.0.3)
 
-> **Status**: drafted 2026-05-10 · supervisor-driven · single-kiosk Mac/Linux · branch `main`
-> **Supersedes**: the v1.0.1 audit-fix plan (kept in git history; tag `v1.0.1`).
-> **Goal**: replace `_pending_` rows in `docs/benchmarks.md` with actual EER + min-tDCF numbers from ASVspoof 2019 LA + VoxCeleb1-O. Tag v1.0.2.
+> **Status**: drafted 2026-05-12 · supervisor-driven · single-kiosk · branch `main`
+> **Supersedes**: the v1.0.2 benchmarks plan (closed; B0–B6 shipped at tag `v1.0.2`).
+> **Goal**: replace the two remaining schematic / approximate visualizations in the operator console with real data end-to-end. No mocks. No "(schematic)" / "(approx)" labels left in the UI.
 
 ---
 
 ## Context
 
-`docs/benchmarks.md` currently cites paper baselines (0.79 % ReDimNet on VoxCeleb1-O, 0.83 % AASIST on ASVspoof) and marks the actual-measurement rows `_pending_`. The benchmark scripts at `backend/scripts/bench_eer_voxceleb.py` + `bench_spoof_detection.py` are wired and verified end-to-end (a 6-clip self-contained smoke runs in 0.83 s and produces real AASIST scores). What's missing is the **real run on the gated datasets**, which the audit (`docs/audit-v1.0.md` F-4) called out as the path to data-driven thresholds.
+The system already loads real ML weights (ReDimNet B5 + AASIST), ships measured EER numbers (LibriSpeech 0.90% / say-spoofs 29.0%), and surfaces model provenance via `DegradedBanner`. Two surfaces in `frontend/src/console-ext.jsx` are still **not** real:
 
-The supervisor-facing ask: **publishable EER + min-tDCF + min-DCF numbers** for both subsystems on the standard public benchmarks, with reproducibility commands + ROC plots.
+1. **`EmbeddingConstellation` (lines 78-273)** — labelled "schematic" in its own tooltip. Cluster centers are derived from `hash(profile.id)` (line 88) + `seedRandom()` (line 106) + Gaussian noise (line 109) + 90 background "noise" points (line 119). The "live voice comet" (line 232) is `Math.sin(t)` driven, not real audio. **Zero real ReDimNet vectors are involved.**
 
-Two real blockers:
-1. **Datasets are gated** (Oxford VGG for VoxCeleb1, Edinburgh DataShare for ASVspoof). Operator must register + accept the licence + download.
-2. **Scripts don't currently emit plots** (need matplotlib + sklearn to draw EER curves the supervisor can put in a slide deck).
+2. **`LiveFeatures` (lines 279-365)** — labelled "(live mic · approx jitter)". Pitch is a single FFT-bin peak (line 297, no autocorrelation refinement), formants are spectral peaks not LPC roots (line 304), jitter is per-frame F0 variance not cycle-to-cycle period diff (line 318), SNR is a band-energy ratio plus a `+18 dB` heuristic offset (line 333).
 
-What I CAN do without datasets: extend the scripts to emit ROC/DET plots + a per-utterance CSV for downstream analysis, harden the dataset-discovery code path, document the exact registration steps, and prep a slim `docs/paper/` folder for the plot artefacts.
+The supervisor-facing ask: **"full system working, no mock data"**. This plan covers the visualization layer. Trained sub-classifier heads (G2), XTTS spoof generation (S2), gated VoxCeleb/ASVspoof bench, multi-speaker volunteer study (G4), Postgres (G5), and the restore tool (G7) are explicitly **out of scope** — all carried forward to v1.1.
 
-What I CAN'T do without datasets: produce the actual EER numbers. That's the operator's run.
+### What's already in the repo (don't rebuild)
 
----
-
-## Decisions to confirm before execution
-
-| Topic | Default choice | Why |
-|---|---|---|
-| Datasets | ASVspoof 2019 LA eval split (~5 GB) + VoxCeleb1-O test pairs (~1 GB) | Standard published benchmarks; both used in the docs. |
-| Plot toolkit | matplotlib + sklearn `roc_curve` | Industry standard; minimal new deps. |
-| Output format | per-utterance CSV + summary JSON + EER/DET plot PNG | Exact format the supervisor can drop into a paper. |
-| Threshold retune | Yes if measured EER threshold differs from current default by > 0.05 | Avoid changing config for a 0.01 drift; do change for a real miss. |
-| New deps in CI | No — `[bench]` extra installed only on the operator's local box | Bench is a manual run, not CI. |
+- `users.embedding_json` + `users.sample_embeddings_json` columns + backfill (`backend/app/storage/sqlite_store.py:35-83`). Per-sample 192-d embeddings already stored at enrolment time.
+- `verification.py:enroll()` populates `sample_embeddings` (`backend/app/services/verification.py:164,173`). Centroid is `_build_reference_embedding(sample_embeddings)` (line 167).
+- `RedimNetSpeakerEncoder.encode(waveform)` (`backend/app/services/speaker_encoder.py`) — production encoder used by every flow.
+- `decode_wav_with_timings` + `trim_to_voice` (`backend/app/services/audio.py`) — same pre-processing as `/verify`.
+- `useMetricsSummary`, `useCalibratedTimeline`, `useAppDispatch`, `useVoiceRecorder` — existing hook patterns in `frontend/src/lib/`.
+- `ModelProvenance` plumbing + `DegradedBanner` — already gates UI on real-vs-fallback. Reuse for the new endpoint responses.
 
 ---
 
-## Phase B1 — Dataset acquisition (operator action)
+## Design
 
-**Goal**: both eval datasets present on the local box.
+### V1 — Backend `GET /users/embeddings` + `POST /embed`
 
-### B1.1 — VoxCeleb1-O test pairs (~1 GB)
+Two endpoints. No schema migration (storage already has per-sample data).
 
-1. Register at <https://www.robots.ox.ac.uk/~vgg/data/voxceleb/voxceleb1.html>. Email approval is usually < 24 h.
-2. Download `vox1_test_wav.zip` (~1 GB).
-3. Download `veri_test2.txt` from the same page (cleaned trial pairs, 37,720 trials).
-4. Unpack to a stable path, e.g. `~/data/voxceleb1/wav/` (preserving the `id*/{video_id}/{utt}.wav` directory tree).
-5. Note the `veri_test2.txt` path and the `wav/` root.
-
-### B1.2 — ASVspoof 2019 LA eval split (~5 GB)
-
-1. Register at <https://datashare.ed.ac.uk/handle/10283/3336>. Accept the Edinburgh DataShare licence.
-2. Download either `LA.zip` (full LA partition, ~16 GB) or just the eval split (~5 GB).
-3. Unpack to `~/data/asvspoof2019_la/`.
-4. Confirm protocol file at `ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt`.
-5. Confirm audio at `ASVspoof2019_LA_eval/flac/*.flac` (71,237 utterances).
-
-### B1.3 — Smoke check
-
-```bash
-ls ~/data/voxceleb1/wav | head        # speaker dirs
-wc -l ~/data/voxceleb1/veri_test2.txt # ~37720
-ls ~/data/asvspoof2019_la/ASVspoof2019_LA_eval/flac | head
-wc -l ~/data/asvspoof2019_la/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt
-```
-
----
-
-## Phase B2 — Extend bench scripts (matplotlib plotting + ROC/DET)
-
-**Goal**: scripts produce paper-quality EER + DET curve PNGs alongside the existing JSON summary.
-
-### B2.1 — New `[bench]` extra in `pyproject.toml`
-
-```toml
-bench = [
-  "matplotlib>=3.8",
-  "scikit-learn>=1.4",
+**`GET /users/embeddings`** — bulk dump of every enrolled profile.
+```json
+[
+  {
+    "user_id": "alice",
+    "centroid": [192 floats],
+    "samples": [[192 floats], [192 floats], [192 floats]],
+    "sample_count": 3,
+    "enrolled_at": "2026-05-12T12:00:00Z"
+  },
+  ...
 ]
 ```
+Source: `SQLiteStore.list_users()` already returns `SpeakerRecord(embedding, sample_embeddings, ...)`. Just expose via Pydantic.
 
-Operator installs locally with `pip install -e ".[model,bench]"` before running. Out of CI scope.
+**`POST /embed`** — pure encoder pass for the live point.
+- Body: `multipart/form-data` with `audio` file, same as `/verify` (reuse the FastAPI `File(...)` shape).
+- Response: `{ embedding: [192 floats], duration_ms: 1500, snr_db: 22.4, frame_count: 24000, model_provenance: {...} }`
+- Implementation: new `VerificationService.embed_only(audio_bytes)` method:
+  1. `decode_wav_with_timings` → samples
+  2. `trim_to_voice` → trimmed
+  3. **Skip** the SNR/quality gate (live preview should not 4xx; just return a low-confidence flag)
+  4. `encoder.encode(trimmed.waveform)` → 192-d
+  5. Return + provenance
+- **Does NOT** write to DB. **Does NOT** call detector. **Does NOT** increment metrics. Pure stateless preview.
+- Target latency: <100ms on M2 CPU.
 
-### B2.2 — `backend/scripts/_plotting.py` (new shared helper)
+### V2 — Frontend `lib/pca.ts` + `lib/dsp.ts`
 
-- `plot_det_curve(scores, labels, output_path, title)` — DET curve via sklearn's `det_curve`. Standard log-prob axes that all the ASVspoof papers use.
-- `plot_roc_curve(scores, labels, output_path, title)` — ROC + AUC.
-- `plot_score_histogram(scores, labels, output_path, title)` — bonafide vs spoof distribution.
+Two pure-JS modules, fully unit-testable. No new npm dependencies — all written from scratch (~200 LoC each).
 
-### B2.3 — Wire into both bench scripts
+**`pca.ts`**:
+```ts
+export function fitPCA3(vectors: number[][]): { basis: number[][]; mean: number[] };
+export function projectPCA3(vector: number[], pca: PCA): [number, number, number];
+```
+Algorithm: subtract mean → covariance matrix → top-3 eigenvectors via power iteration with deflation (192×192 cov, 3 components, ~200ms one-shot in JS — fine).
 
-- `bench_eer_voxceleb.py` — add `--plot-dir` flag. After computing EER, save `det.png`, `roc.png`, `score_hist.png` to `<plot-dir>/voxceleb1_o/`.
-- `bench_spoof_detection.py` — same. Save to `<plot-dir>/asvspoof2019_la/`.
-- Both write a per-utterance CSV (`scores.csv` with columns `utt_id, score, label`) so downstream analysis isn't gated on the bench script.
-
-### B2.4 — Output JSON shape (consistency)
-
-Both scripts emit:
-```json
-{
-  "dataset": "voxceleb1_o",
-  "n_pairs": 37720,
-  "eer": 0.0123,
-  "eer_threshold": 0.71,
-  "min_dcf_pt01": 0.087,
-  "auc": 0.997,
-  "wall_seconds": 612.5,
-  "hardware": {"cpu": "Apple M2", "torch_device": "cpu"},
-  "checkpoint_sha256": "...",
-  "completed_at": "2026-05-11T..."
-}
+**`dsp.ts`** (operates on Float32Array PCM at 16 kHz):
+```ts
+export function pitchAutocorrelation(samples: Float32Array, sr: number): number;  // Hz, 0 if silence
+export function formantsLPC(samples: Float32Array, sr: number, order?: number): [number, number, number];  // F1, F2, F3 in Hz
+export function jitterPercent(periodSamples: number[]): number;  // cycle-to-cycle, 0–100
+export function snrFromVad(samples: Float32Array, vadMask: boolean[]): number;  // dB
 ```
 
-The `checkpoint_sha256` lets us prove the same weights produced the numbers later.
+Algorithms:
+- **Pitch**: Boersma-style autocorrelation over [80, 400] Hz. Window with Hann, normalise by zero-lag, parabolic interpolation around the peak. No FFT needed.
+- **Formants**: Pre-emphasis (`α=0.97`) → Hamming window → autocorrelation → Levinson-Durbin to LPC coefficients (order 12 for 16 kHz speech) → polynomial root-finding (Bairstow or Durand-Kerner) → roots inside unit circle → angles → frequencies → return first 3 above 90 Hz with bandwidth filter.
+- **Jitter**: cycle-to-cycle relative absolute period difference. Buffer of last N=20 detected periods.
+- **SNR**: 10·log10(mean(|samples[vad=true]|²) / mean(|samples[vad=false]|²)). No magic offset.
 
-### B2.5 — Tests
+### V3 — Frontend hooks
 
-- `backend/tests/test_bench_helpers.py` (new) — unit tests for `compute_eer`, `compute_min_dcf`, the new ROC/DET plot writers (assert files exist + are valid PNG).
-
----
-
-## Phase B3 — Run the evals (operator triggers; I monitor)
-
-### B3.1 — VoxCeleb1-O smoke first (~10 min)
-
-```bash
-cd backend
-.venv/bin/python scripts/bench_eer_voxceleb.py \
-  --pairs ~/data/voxceleb1/veri_test2.txt \
-  --audio-root ~/data/voxceleb1/wav \
-  --output docs/paper/results/voxceleb1_o.json \
-  --plot-dir docs/paper/results/plots/ \
-  --limit 1000   # smoke first
+**`hooks/useEmbeddingProjection.ts`**:
+```ts
+export function useEmbeddingProjection(): {
+  loading: boolean;
+  error: Error | null;
+  basis: PCA | null;
+  profiles: Array<{
+    user_id: string;
+    centroidProjected: [number, number, number];
+    sampleProjections: Array<[number, number, number]>;
+    color: string;
+  }>;
+  refresh: () => void;
+};
 ```
+- Mounts → `getUserEmbeddings()` → `fitPCA3(allCentroids ∪ allSamples)` → projects all, returns memoised. Refits when profile list changes.
 
-Verify output JSON + plot PNGs exist + EER lands in a sane range (1–10 %).
-
-### B3.2 — VoxCeleb1-O full run (~25–40 min on M2)
-
-Same command, drop `--limit`.
-
-### B3.3 — ASVspoof 2019 LA smoke (~5 min)
-
-```bash
-.venv/bin/python scripts/bench_spoof_detection.py \
-  --asvspoof-protocol ~/data/asvspoof2019_la/ASVspoof2019_LA_cm_protocols/ASVspoof2019.LA.cm.eval.trl.txt \
-  --asvspoof-dir ~/data/asvspoof2019_la/ASVspoof2019_LA_eval/flac \
-  --output docs/paper/results/asvspoof2019_la.json \
-  --plot-dir docs/paper/results/plots/ \
-  --limit 500
+**`hooks/useLiveEmbedding.ts`**:
+```ts
+export function useLiveEmbedding(opts: {
+  enabled: boolean;
+  audioBuffer: Float32Array | null;
+  basis: PCA | null;
+  intervalMs?: number;  // default 500
+}): {
+  liveProjected: [number, number, number] | null;
+  liveEmbedding: Float32Array | null;
+  loading: boolean;
+};
 ```
+- Slices the **last 1500ms** from `audioBuffer`, encodes to WAV (reuse `frontend/src/lib/audio.ts:samplesToWav`), POSTs to `/embed`, projects via `basis`. Polls every `intervalMs` while `enabled`.
+- Concurrency: at most one in-flight request; new ones short-circuit. Request budget: 2 req/s.
 
-### B3.4 — ASVspoof 2019 LA full run (~30–60 min on M2)
+### V4 — Frontend rewrites
 
-Same, drop `--limit`. Capture wall time + log all-utterances throughput.
+**`EmbeddingConstellation` (`console-ext.jsx:78-273`)** — gut the seeded geometry:
+- Remove `centers` (lines 86-99) — replace with `profiles` from `useEmbeddingProjection`.
+- Remove `points` (lines 102-132) — render `profile.centroidProjected` as the labelled cluster center, render `profile.sampleProjections` as small orbiting dots (real per-sample dispersion).
+- Remove the synthetic background-noise loop (lines 118-130) entirely.
+- Remove the `Math.sin(t)` "comet" (lines 232-265) — replace with `liveProjected` from `useLiveEmbedding`. Live point only updates on actual audio; otherwise hidden.
+- Update title tooltip from "Schematic — cluster centres are deterministic per profile ID, not real ReDimNet projections" to "Real ReDimNet 192-d → PCA(3). Live point updates while mic is on."
+
+**`LiveFeatures` (`console-ext.jsx:279-365`)** — replace the inline FFT math:
+- Drop `freqs` prop. Replace with `samples` (Float32Array PCM at 16 kHz).
+- Replace lines 290-312 with `dsp.pitchAutocorrelation` + `dsp.formantsLPC`.
+- Replace lines 313-324 with `dsp.jitterPercent` over a period buffer.
+- Replace lines 325-333 (including the `+18` SNR fudge) with `dsp.snrFromVad`. VAD mask comes from existing recorder (`audio.level > 0.02` per-frame, already computed).
+- Update the parent label in `console.jsx` from `(live mic · approx jitter)` to `(live mic)`.
+
+### V5 — Settings toggle
+
+Add a single boolean in localStorage: `biovoice.constellation.liveOn` (default `true`). Settings panel in `console.jsx` gets a row:
+
+> **Constellation live point** — Stream a 192-d embedding every 500ms to project your live voice into the cluster space. Disable to silence the preview encoder. **[ON / OFF]**
+
+When OFF, `useLiveEmbedding` short-circuits (no requests, no live point rendered). Setting persists across reloads.
+
+### V6 — Tests
+
+**Backend** (`backend/tests/test_embeddings_route.py`, new):
+- `GET /users/embeddings` returns 200, list of dicts with `centroid` length 192, `samples[i]` length 192, `sample_count` matches `len(samples)`.
+- `GET /users/embeddings` on empty DB returns `[]`.
+- `POST /embed` with valid WAV returns 200 + 192-floats + finite SNR + `model_provenance.encoder=="redimnet_b5"`.
+- `POST /embed` does NOT write a row (compare `list_results()` count before/after).
+- `POST /embed` short audio (<1s) returns 200 with low `frame_count` flag (no 4xx).
+- Same audio through `enroll` and `embed` produces identical embedding (within 1e-6 cosine).
+
+**Frontend** (`frontend/src/lib/pca.test.ts` + `dsp.test.ts`, new):
+- `pca.test.ts`: synthetic 3-cluster gaussian (3 clusters of 50 points in 50-d) → PCA → cluster means in 3-d are pairwise ≥1.0 apart.
+- `pca.test.ts`: identity inputs → projections are zero (within tolerance).
+- `dsp.test.ts`: 220 Hz sine, 16 kHz, 0.1s → `pitchAutocorrelation` returns 220 ± 2 Hz.
+- `dsp.test.ts`: silent input → pitch returns 0.
+- `dsp.test.ts`: synthesised 3-formant signal (sum of 3 narrow-band noise bursts at known F1/F2/F3) → `formantsLPC` returns within ±50 Hz of truth.
+- `dsp.test.ts`: stable 220 Hz period buffer → jitter ≈ 0 (<0.1 %); modulated buffer → jitter > 1 %.
+- `dsp.test.ts`: known SNR mixture (sine + scaled gaussian, VAD true on sine) → `snrFromVad` within ±1 dB of computed truth.
+
+**Visual smoke (manual, document in `docs/qa.md`)**:
+1. Enrol 3 distinct voices (3 samples each).
+2. Open Console. Three labelled clusters appear, visibly separated, each with 3 small orbiting sample points.
+3. Click VERIFY for one of them. While recording, a bright live point streams through the projection; on completion, it parks near the matching cluster.
+4. Toggle the Settings switch off → live point disappears, no `/embed` requests in DevTools network tab.
 
 ---
 
-## Phase B4 — Threshold calibration
+## Phases
 
-**Goal**: if the measured EER threshold differs significantly from the current `config.py` defaults (0.75 sim, 0.50 deepfake), retune.
+### Phase V0 — Sync this plan to repo `Plan.md`
+- Copy this file to `Plan.md`, replacing the closed v1.0.2 benchmarks plan.
 
-- Read `eer_threshold` from each JSON output.
-- If `|measured - default| > 0.05`, edit `backend/app/core/config.py`:
-  - `similarity_threshold = <measured EER threshold from VoxCeleb run>`
-  - `deepfake_threshold = <measured EER threshold from ASVspoof run>`
-- If retuned, re-run `deploy/smoke.sh` to confirm the system still passes a self-verify.
-- Document the chosen threshold + reasoning in `docs/thresholds.md` "Calibration history" section (new).
-- Update the `Note: SDD convention, not calibrated` comment in `config.py` to "Calibrated against VoxCeleb1-O + ASVspoof 2019 LA on YYYY-MM-DD; see `docs/benchmarks.md`."
+### Phase V1 — Backend (~3h)
+- `backend/app/schemas.py` — `UserEmbedding`, `UsersEmbeddingsResponse`, `EmbedResponse`.
+- `backend/app/services/verification.py` — `embed_only(audio_bytes)` method.
+- `backend/app/api/routes.py` — register `GET /users/embeddings` + `POST /embed` (multipart audio).
+- `backend/tests/test_embeddings_route.py` — new (6 cases above).
+- Run `pytest -q -m "not slow"` → all green.
 
----
+### Phase V2 — Frontend pure modules (~5h)
+- `frontend/src/lib/pca.ts` — fit + project, with TS types.
+- `frontend/src/lib/dsp.ts` — pitch + formants + jitter + SNR.
+- `frontend/src/lib/pca.test.ts` + `dsp.test.ts` — new vitest cases.
+- `frontend/src/lib/api.ts` — `getUserEmbeddings()`, `embedAudio(samples)` helpers.
+- `frontend/src/types.ts` — `UserEmbeddingPayload`, `EmbedResponsePayload` types.
+- Run `pnpm vitest run` → all green.
 
-## Phase B5 — Update `docs/benchmarks.md`
+### Phase V3 — Frontend hooks (~2h)
+- `frontend/src/hooks/useEmbeddingProjection.ts` — new.
+- `frontend/src/hooks/useLiveEmbedding.ts` — new (with toggle support).
 
-**Goal**: every `_pending_` row in the Results tables is replaced with real numbers; plots are linked.
+### Phase V4 — Frontend rewrites (~3h)
+- `frontend/src/console-ext.jsx` — rewrite `EmbeddingConstellation` + `LiveFeatures`.
+- `frontend/src/console.jsx` — wire new hooks, remove "(schematic)" / "(approx jitter)" labels, add settings toggle row.
+- Tooltip text updates.
 
-- Fill in:
-  - `### VoxCeleb1-O` table: full eval + smoke rows with `EER`, `minDCF (P=0.01)`, `Threshold`, `Wall (CPU)`.
-  - `### ASVspoof 2019 LA` table: full eval + smoke rows with `EER`, `EER threshold`, `Wall (CPU)`.
-- Embed plots inline:
-  ```markdown
-  ![VoxCeleb1-O DET curve](paper/results/plots/voxceleb1_o/det.png)
-  ![ASVspoof DET curve](paper/results/plots/asvspoof2019_la/det.png)
-  ```
-- Replace the "Self-contained smoke" row's caveat with the now-real eval numbers.
-- Update the threshold cross-validation section with the actual EER threshold + the chosen production value.
-- Mark `docs/remaining_work.md` G3 as ✅ done.
+### Phase V5 — Manual smoke + docs (~1h)
+- Walk the 4-step manual smoke above. Capture two screenshots (constellation with 3 enrolled, constellation with live point landing).
+- `docs/qa.md` — add the visualization smoke to the operator checklist.
+- `docs/remaining_work.md` — strike the implicit visualization gaps off.
 
----
-
-## Phase B6 — Release v1.0.2 (calibrated)
-
-- CHANGELOG entry: "Real benchmark numbers landed; thresholds calibrated against VoxCeleb1-O + ASVspoof 2019 LA."
-- `git tag -a v1.0.2 -m "..."` + push.
-- Update `docs/audit-v1.0.md` verdict footer: "v1.0.2 closes the calibration gap (audit F-4) outright via measured EER thresholds."
+### Phase V6 — Release v1.0.3 (~30min)
+- `CHANGELOG.md` v1.0.3 entry: "Real ReDimNet PCA(3) constellation + real DSP (autocorrelation pitch, LPC formants, cycle-to-cycle jitter, VAD-gated SNR). All `(schematic)` / `(approx)` labels gone."
+- `git tag -a v1.0.3 -m "..."` + push.
+- Update `docs/audit-v1.0.md` footer: "v1.0.3 closes the visualization-honesty gap."
 
 ---
 
 ## Critical files
 
-### Backend
-- `backend/pyproject.toml` — new `[bench]` extra (matplotlib + sklearn)
-- `backend/scripts/_plotting.py` — new shared helper
-- `backend/scripts/bench_eer_voxceleb.py` — `--plot-dir` + CSV output + checkpoint SHA + new JSON shape
-- `backend/scripts/bench_spoof_detection.py` — same
-- `backend/app/core/config.py` — recalibrated threshold defaults + updated docstring (Phase B4)
-- `backend/tests/test_bench_helpers.py` — new
+### Backend (modify)
+- `backend/app/api/routes.py` — register two new routes
+- `backend/app/services/verification.py` — add `embed_only`
+- `backend/app/schemas.py` — three new Pydantic types
+
+### Backend (new)
+- `backend/tests/test_embeddings_route.py`
+
+### Frontend (modify)
+- `frontend/src/console-ext.jsx` — gut + rewrite the two components
+- `frontend/src/console.jsx` — wire hooks + settings toggle + label fixes
+- `frontend/src/lib/api.ts` — two helper functions
+- `frontend/src/types.ts` — two TS types
+
+### Frontend (new)
+- `frontend/src/lib/pca.ts` + `pca.test.ts`
+- `frontend/src/lib/dsp.ts` + `dsp.test.ts`
+- `frontend/src/hooks/useEmbeddingProjection.ts`
+- `frontend/src/hooks/useLiveEmbedding.ts`
 
 ### Docs
-- `Plan.md` — this file (B0)
-- `docs/benchmarks.md` — Results tables filled in + plots embedded
-- `docs/thresholds.md` — Calibration history section
-- `docs/remaining_work.md` — mark G3 done
-- `docs/audit-v1.0.md` — v1.0.2 footer
-- `docs/paper/results/voxceleb1_o.json` — new
-- `docs/paper/results/asvspoof2019_la.json` — new
-- `docs/paper/results/plots/voxceleb1_o/{det,roc,score_hist}.png` — new
-- `docs/paper/results/plots/asvspoof2019_la/{det,roc,score_hist}.png` — new
-- `CHANGELOG.md` — v1.0.2 entry
-
-### Ops
-- `.gitignore` — `docs/paper/results/scores.csv` is fine to commit (small); raw FLAC stays local.
+- `Plan.md` — overwrite (V0)
+- `docs/qa.md` — add smoke test
+- `docs/remaining_work.md` — mark visualization items closed
+- `docs/audit-v1.0.md` — v1.0.3 footer
+- `CHANGELOG.md` — v1.0.3 entry
 
 ---
 
-## Verification (run before tagging v1.0.2)
+## Verification (run before tagging v1.0.3)
 
-1. **Smoke runs land**: both `--limit 500/1000` runs produce JSONs with finite EER values (not NaN, not 0).
-2. **Full runs land**: both unrestricted runs complete + JSONs land in `docs/paper/results/`.
-3. **Plot files exist** + open in any image viewer (PNG, > 50 KB each).
-4. **EER sanity**: VoxCeleb1-O EER < 5 % (ReDimNet B5 paper hits 0.79 %; expect us within an order of magnitude). ASVspoof EER < 10 %.
-5. **Threshold check**: if defaults retuned, `deploy/smoke.sh` still passes (`SUBMIT VERIFICATION` returns ACCEPT on the operator's own voice).
-6. **docs/benchmarks.md scan**: no `_pending_` rows left. Plot links resolve.
-7. **`pytest -q -m "not slow"`** still 97/97 (no regression from the bench scripts).
-8. **Tag**: `git tag v1.0.2` + push + GitHub release notes.
+1. **Backend tests**: `pytest -q -m "not slow"` → all green (existing 97 + 6 new = 103).
+2. **Frontend tests**: `pnpm vitest run` → all green.
+3. **`/users/embeddings`** smoke: `curl localhost:8000/users/embeddings | jq '.[0].centroid | length'` → 192.
+4. **`/embed`** smoke: post a recorded WAV → response has `embedding` length 192, `model_provenance.encoder == "redimnet_b5"`.
+5. **No `(schematic)` / `(approx)`** strings remain in `frontend/src/`: `rg -i "schematic|approx jitter" frontend/src/` returns nothing.
+6. **Visual smoke**: 4-step manual walk above passes.
+7. **Settings toggle**: flipping it off stops `/embed` requests within 1s.
+8. **Bundle size**: `pnpm build` → gzipped main bundle still under 90 KB (PCA + DSP add ~6 KB; budget allows).
+9. **Tag**: `git tag v1.0.3` + push.
+
+---
+
+## UX preference (locked in this brainstorm)
+
+- **Live point in constellation = always-on by default**, with a settings toggle to disable. Encoder budget ~2 req/s while mic is granted; toggle off stops the stream entirely. (User: "always on with ability in setting to turn off".)
 
 ---
 
 ## Effort summary
 
-| Phase | What | Engineer-days |
+| Phase | What | Engineer-hours |
 |---|---|---|
-| B1 — Dataset acquisition | Registration + downloads (operator) | 0.5 (mostly waiting) |
-| B2 — Extend bench scripts | Plot helpers + JSON shape + tests | 0.7 |
-| B3 — Run evals | Smoke + full runs (mostly waiting on CPU) | 0.5 (1–2 h compute) |
-| B4 — Threshold calibration | Read EER, retune if needed | 0.2 |
-| B5 — Update docs/benchmarks.md | Tables + embedded plots | 0.3 |
-| B6 — Release v1.0.2 | CHANGELOG + tag + push | 0.2 |
-| **Total** | | **~2.4 engineer-days** (mostly compute-bound, not engineer-bound) |
+| V0 | Sync plan to Plan.md | 0.2 |
+| V1 | Backend endpoints + tests | 3 |
+| V2 | Pure-JS PCA + DSP modules + tests | 5 |
+| V3 | React hooks | 2 |
+| V4 | Component rewrites + label fixes | 3 |
+| V5 | Manual smoke + doc updates | 1 |
+| V6 | Release v1.0.3 | 0.5 |
+| **Total** | | **~15 engineer-hours (~1.5 days)** |
 
-Critical path: **B1 dataset acquisition** is the gating item. Everything after is mechanical. While B1 is waiting on Oxford VGG email approval, I execute B2 (script extensions) in parallel — that work is dataset-agnostic and lands plot helpers + new JSON shape ready for the eval run.
+Critical path: V2 (the LPC + autocorrelation implementations) — everything else is mechanical wire-up.
 
 Out of scope (carried forward to v1.1):
-- S2 (XTTS voice cloning).
-- S7 (Tauri native installer).
-- Trained sub-classifier heads (research-grade, gated by labelled training data).
+- G2 trained sub-classifier heads
+- S2 XTTS voice cloning
+- G4 multi-speaker volunteer study
+- G5 Postgres
+- G7 restore tool
+- Gated VoxCeleb1-O / ASVspoof 2019 LA bench (operator can run anytime via `--dataset-name` flags already in place)
