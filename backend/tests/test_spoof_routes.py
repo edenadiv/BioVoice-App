@@ -44,6 +44,8 @@ class _StubSpoofService:
             audio_bytes=make_wav(1.0),
             file_name="clone.wav",
             source_description="stub",
+            engine_id="stub",
+            voice_id=None,
         )
 
 

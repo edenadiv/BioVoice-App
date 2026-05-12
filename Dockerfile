@@ -73,6 +73,8 @@ RUN groupadd --system biovoice --gid 10000 && \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsndfile1 \
         curl \
+        espeak-ng \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Bring in compiled site-packages from the backend stage.

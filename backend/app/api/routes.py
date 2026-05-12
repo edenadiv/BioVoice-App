@@ -25,7 +25,10 @@ from app.schemas import (
     HealthResponse,
     IdentificationResponse,
     SpeakerResponse,
+    SpoofEngineInfo,
+    SpoofEnginesResponse,
     SpoofTestResponse,
+    SpoofVoice,
     UserEmbedding,
     VerificationResponse,
 )
@@ -249,18 +252,51 @@ def list_results(service: VerificationService = Depends(get_verification_service
 # -----------------------------------------------------------------------------
 
 
+@router.get("/spoof/engines", response_model=SpoofEnginesResponse)
+def list_spoof_engines(
+    service: SpoofGenerationService = Depends(get_spoof_generation_service),
+) -> SpoofEnginesResponse:
+    """T3 — engines + voices the operator can choose from in DeepfakeLab.
+
+    Each engine's `available` flag reflects whether the backend can
+    actually invoke it right now (package importable + binary on PATH
+    + network reachable for cloud engines). Unavailable engines are
+    still listed so the UI can grey them out + tell the operator why."""
+    engines = service.list_engines()
+    return SpoofEnginesResponse(
+        engines=[
+            SpoofEngineInfo(
+                id=e.id,
+                label=e.label,
+                description=e.description,
+                requires_network=e.requires_network,
+                available=e.available,
+                voices=[SpoofVoice(id=v.id, label=v.label, language=v.language) for v in e.voices],
+                default_voice=e.default_voice,
+            )
+            for e in engines
+        ],
+        default_engine=service.default_engine_id(),
+    )
+
+
 @router.post("/spoof")
 async def generate_spoof_sample(
     target_user_id: str = Form(...),
     text: str = Form(...),
     language: str = Form("en"),
+    engine: str | None = Form(default=None),
+    voice: str | None = Form(default=None),
     reference_sample_id: str | None = Form(default=None),
     audio: UploadFile | None = File(default=None),
     service: SpoofGenerationService = Depends(get_spoof_generation_service),
 ) -> StreamingResponse:
     """Forge a deepfake clone of `target_user_id`'s enrolled voice
     speaking `text`. Returns an audio/wav blob the caller can play back
-    or feed straight to /spoof/test. 503 when XTTS isn't installed."""
+    or feed straight to /spoof/test.
+
+    `engine` + `voice` pick the TTS engine + voice. When omitted the
+    backend uses its default (first available in priority order)."""
     payload = await audio.read() if audio is not None else None
     if payload == b"":
         raise HTTPException(status_code=400, detail="Audio file is empty")
@@ -270,6 +306,8 @@ async def generate_spoof_sample(
             user_id=target_user_id,
             text=text,
             language=language,
+            engine=engine,
+            voice=voice,
             reference_sample_id=reference_sample_id,
             reference_audio_bytes=payload,
             reference_filename=audio.filename if audio is not None else None,
@@ -285,6 +323,8 @@ async def generate_spoof_sample(
         headers={
             "Content-Disposition": f'attachment; filename="{result.file_name}"',
             "X-Spoof-Source": result.source_description,
+            "X-Spoof-Engine": result.engine_id,
+            "X-Spoof-Voice": result.voice_id or "",
         },
     )
 

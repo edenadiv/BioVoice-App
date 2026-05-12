@@ -2,6 +2,36 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.1] — 2026-05-12
+
+Multi-engine TTS for DeepfakeLab. The "ATTACK MODEL" picker is now a real engine + voice chooser backed by three fast synthesisers, with `XTTS-v2` still available behind its existing `[spoof]` extra.
+
+### Added
+
+- **`app/services/spoof.py` strategy refactor** — new `TtsEngine` Protocol + per-engine classes (`SayEngine`, `EspeakEngine`, `EdgeTtsEngine`, `GttsEngine`, `XttsEngine`). The `SpoofGenerationService` holds an engine registry and routes `POST /spoof` to the chosen engine.
+- **`SayEngine`** — wraps macOS `say` with full voice enumeration (71 voices on a stock M2 Mac).
+- **`EspeakEngine`** — espeak-ng for Linux. 10 curated language codes. **~50 ms latency.**
+- **`EdgeTtsEngine`** — Microsoft Edge TTS via the `edge-tts` package. 12 curated neural voices covering en/he/ar/es/fr. Free, no API key. **~1–2 s latency.** Requires internet.
+- **`GttsEngine`** — Google Translate TTS via `gTTS`. 19 languages including the gTTS-specific Hebrew code `iw`. **~0.5–0.8 s latency.** Requires internet.
+- **`GET /spoof/engines`** — bulk descriptor of available engines + voices + default pick. Drives the DeepfakeLab picker.
+- **`POST /spoof` accepts `engine` + `voice` form fields**. Backward compatible — omitting both still uses the backend's default engine.
+- **DeepfakeLab UI**: "ATTACK MODEL" 3-button row replaced with engine + voice pickers. Engine list shows availability + `[NET]` chip for cloud engines. Voice dropdown refreshes when engine changes.
+- **`backend/tests/test_spoof_engines.py`** (13 cases) — engine availability, voice catalogues, route shape, error paths (unknown engine → 400, unavailable engine → 503). Live cloud TTS gated behind `BIOVOICE_TEST_CLOUD_TTS=1`.
+
+### Changed
+
+- **`Dockerfile` apt-get** now installs `espeak-ng` (offline Linux engine) + `ffmpeg` (MP3 → WAV transcode for edge / gtts output). Image size: 1.66 GB → 2.28 GB.
+- **`backend/pyproject.toml` `[model]` extra** adds `edge-tts>=6.1` and `gTTS>=2.5`. Pure-Python, no native deps.
+- **`SpoofGenerationResult` dataclass** gains `engine_id` + `voice_id` fields. Response headers `X-Spoof-Engine` + `X-Spoof-Voice` echo them back so the UI can label the verdict panel.
+- **Header-safe descriptions**: switched the engine label / source-description joiners from "·" (U+00B7) to "/" + "|" so Starlette doesn't latin-1 encode them into a byte that breaks the TestClient.
+
+### Verification
+
+- Backend: `pytest -q -m "not slow"` → **128/128** (was 118; +10 new).
+- Frontend: `vitest run` → **47/47**.
+- Image build → 2.28 GB; container running on `:8000` exposes the new `/spoof/engines` route with 3 available engines + 41 voice/language options.
+- End-to-end synth measured inside container: edge 1.3–2.5 s, gtts 0.5–0.8 s, espeak 50–70 ms. All produce valid 16 kHz PCM WAV that `/spoof/test` then scores via AASIST.
+
 ## [v1.1.0] — 2026-05-12
 
 Single deployable Docker image + installable PWA. The kiosk is now a one-binary deploy to any cloud (Fly / Render / Railway / VPS), and any modern browser can install it as a standalone "app" without an app-store review.

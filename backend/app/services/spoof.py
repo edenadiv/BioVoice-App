@@ -1,27 +1,39 @@
-"""Spoof sample generation.
+"""Spoof sample generation — multi-engine strategy pattern.
 
-Two engines:
-  1. XTTS-v2 (preferred) — voice-cloning TTS that conditions on a
-     reference WAV. Requires the `coqui-ai/TTS` package + a local XTTS-v2
-     checkpoint. Doesn't install cleanly on Python 3.13+.
-  2. macOS `say` (fallback) — calls the system text-to-speech binary to
-     produce a real synthetic WAV. No voice cloning, but real synthesis
-     that AASIST should classify as FAKE. Used when XTTS isn't
-     available. Pure Python, no extra deps.
+The DeepfakeLab synthesises an utterance from text and feeds it into
+the verification pipeline. v1.1.1 ships five interchangeable engines:
+
+1. **macOS `say`** (id=`say`) — native system TTS. Instant; tens of
+   voices including premium neural ones. Mac-only.
+2. **espeak / espeak-ng** (id=`espeak`) — robotic formant TTS for Linux.
+3. **Microsoft Edge TTS** (id=`edge`) — neural cloud TTS via the
+   public Edge endpoint. Free, no API key. ~400 voices. Requires net.
+4. **Google Translate TTS** (id=`gtts`) — simple cloud fallback.
+   Language-based. Requires net.
+5. **XTTS-v2** (id=`xtts`) — voice cloning; conditions on a reference
+   WAV. Slow on CPU. Lives behind the `[spoof]` extra.
+
+Each engine exposes a stable id + a list of "voices" it can speak as.
+The route layer surfaces the available engines via `GET /spoof/engines`
+and accepts `engine` + `voice` form fields on `POST /spoof`.
 """
 
 from __future__ import annotations
 
+import asyncio
+import io
 import logging
+import re
 import shutil
 import subprocess
 import wave
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from threading import Lock
-from typing import Any, Protocol
+from typing import Any, Iterable, Protocol
 
 from app.models import ReferenceSampleRecord
 from app.schemas import ReferenceSampleResponse
@@ -41,6 +53,444 @@ class SpoofGenerationResult:
     audio_bytes: bytes
     file_name: str
     source_description: str
+    engine_id: str
+    voice_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceDescriptor:
+    """One selectable voice within an engine. `id` is the stable handle
+    the frontend sends back to /spoof; `label` is human-readable."""
+
+    id: str
+    label: str
+    language: str | None = None
+
+
+@dataclass(slots=True)
+class EngineInfo:
+    """Engine metadata surfaced by GET /spoof/engines."""
+
+    id: str
+    label: str
+    description: str
+    requires_network: bool
+    available: bool
+    voices: list[VoiceDescriptor] = field(default_factory=list)
+    default_voice: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Engine Protocol + implementations
+# ---------------------------------------------------------------------------
+
+
+class TtsEngine(Protocol):
+    id: str
+    label: str
+    description: str
+    requires_network: bool
+
+    def is_available(self) -> bool: ...
+
+    def list_voices(self) -> list[VoiceDescriptor]: ...
+
+    def default_voice(self) -> str | None: ...
+
+    def synthesize(
+        self,
+        text: str,
+        voice_id: str | None,
+        language: str,
+        target_sample_rate: int,
+    ) -> bytes: ...
+
+
+# ---- macOS `say` -----------------------------------------------------------
+
+
+class SayEngine:
+    id = "say"
+    label = "macOS / say"
+    description = "Native system TTS. Instant. Tens of voices including premium neural ones."
+    requires_network = False
+
+    _BUILTIN_DEFAULT = "Samantha"
+
+    def __init__(self) -> None:
+        self._voices_cache: list[VoiceDescriptor] | None = None
+
+    def is_available(self) -> bool:
+        return shutil.which("say") is not None
+
+    def list_voices(self) -> list[VoiceDescriptor]:
+        if not self.is_available():
+            return []
+        if self._voices_cache is not None:
+            return self._voices_cache
+        try:
+            proc = subprocess.run(["say", "-v", "?"], capture_output=True, timeout=10)
+        except (subprocess.TimeoutExpired, OSError):
+            self._voices_cache = []
+            return self._voices_cache
+        voices: list[VoiceDescriptor] = []
+        # `say -v ?` lines look like: "Alex                en_US    # Most…"
+        for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
+            m = re.match(r"^([A-Za-z0-9 .'()\-]+?)\s{2,}([a-z]{2}_[A-Z]{2})\b", line)
+            if not m:
+                continue
+            voice_id = m.group(1).strip()
+            lang = m.group(2)
+            voices.append(VoiceDescriptor(id=voice_id, label=voice_id, language=lang))
+        voices.sort(key=lambda v: v.id.lower())
+        self._voices_cache = voices
+        return voices
+
+    def default_voice(self) -> str | None:
+        voices = {v.id for v in self.list_voices()}
+        return self._BUILTIN_DEFAULT if self._BUILTIN_DEFAULT in voices else (sorted(voices)[0] if voices else None)
+
+    def synthesize(self, text, voice_id, language, target_sample_rate):
+        binary = shutil.which("say")
+        if not binary:
+            raise RuntimeError("`say` binary not found on PATH.")
+        fmt = f"LEI16@{target_sample_rate}"
+        cmd = [binary, "-o", "__OUT__", "--data-format", fmt]
+        if voice_id:
+            cmd.extend(["-v", voice_id])
+        cmd.append(text)
+        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            out_path = tmp.name
+        cmd[cmd.index("__OUT__")] = out_path
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=60)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"`say` failed (exit {result.returncode}): {result.stderr.decode('utf-8', errors='replace')[:200]}"
+                )
+            return _read_wav_bytes(out_path)
+        finally:
+            Path(out_path).unlink(missing_ok=True)
+
+
+# ---- espeak-ng (Linux fallback) -------------------------------------------
+
+
+class EspeakEngine:
+    id = "espeak"
+    label = "espeak-ng"
+    description = "Classic formant TTS — extremely fast, robotic. Good for adversarial smoke tests."
+    requires_network = False
+
+    # Conservative language list; espeak-ng ships many more, but this
+    # covers the languages the kiosk surfaces.
+    _LANGS = [
+        ("en", "English (US/UK)"),
+        ("en-us", "English (US)"),
+        ("en-gb", "English (UK)"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("he", "Hebrew"),
+        ("ar", "Arabic"),
+    ]
+
+    def is_available(self) -> bool:
+        return any(shutil.which(b) for b in ("espeak-ng", "espeak"))
+
+    def list_voices(self) -> list[VoiceDescriptor]:
+        if not self.is_available():
+            return []
+        return [VoiceDescriptor(id=code, label=label, language=code) for code, label in self._LANGS]
+
+    def default_voice(self) -> str | None:
+        return "en" if self.is_available() else None
+
+    def synthesize(self, text, voice_id, language, target_sample_rate):
+        binary = shutil.which("espeak-ng") or shutil.which("espeak")
+        if not binary:
+            raise RuntimeError("espeak-ng binary not found on PATH.")
+        lang = voice_id or language or "en"
+        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            out_path = tmp.name
+        try:
+            result = subprocess.run(
+                [binary, "-w", out_path, "-v", lang, text],
+                capture_output=True, timeout=60,
+            )
+            if result.returncode != 0:
+                # Retry without -v in case the language flag is rejected.
+                result = subprocess.run([binary, "-w", out_path, text], capture_output=True, timeout=60)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"espeak failed (exit {result.returncode}): {result.stderr.decode('utf-8', errors='replace')[:200]}"
+                    )
+            return _read_wav_bytes(out_path)
+        finally:
+            Path(out_path).unlink(missing_ok=True)
+
+
+# ---- Microsoft Edge TTS (free cloud) --------------------------------------
+
+
+class EdgeTtsEngine:
+    id = "edge"
+    label = "Microsoft Edge TTS"
+    description = "Neural cloud TTS, free, ~400 voices. Fast (~1 s latency). Requires internet."
+    requires_network = True
+
+    # Hand-picked subset that's nicely spread across genders + accents.
+    # The full edge-tts catalogue has 400+ voices; we ship the 12 most
+    # useful ones for the deepfake-lab UI and document how to expand.
+    _CURATED_VOICES = [
+        # English
+        VoiceDescriptor("en-US-AriaNeural",     "Aria (US, female)",        "en-US"),
+        VoiceDescriptor("en-US-GuyNeural",      "Guy (US, male)",           "en-US"),
+        VoiceDescriptor("en-US-JennyNeural",    "Jenny (US, female)",       "en-US"),
+        VoiceDescriptor("en-GB-RyanNeural",     "Ryan (UK, male)",          "en-GB"),
+        VoiceDescriptor("en-GB-SoniaNeural",    "Sonia (UK, female)",       "en-GB"),
+        VoiceDescriptor("en-AU-NatashaNeural",  "Natasha (AU, female)",     "en-AU"),
+        VoiceDescriptor("en-IN-NeerjaNeural",   "Neerja (IN, female)",      "en-IN"),
+        # Hebrew / Arabic — the kiosk's natural deployment locale.
+        VoiceDescriptor("he-IL-AvriNeural",     "Avri (IL, male)",          "he-IL"),
+        VoiceDescriptor("he-IL-HilaNeural",     "Hila (IL, female)",        "he-IL"),
+        VoiceDescriptor("ar-SA-HamedNeural",    "Hamed (SA, male)",         "ar-SA"),
+        # Other Europeans
+        VoiceDescriptor("es-ES-AlvaroNeural",   "Alvaro (ES, male)",        "es-ES"),
+        VoiceDescriptor("fr-FR-DeniseNeural",   "Denise (FR, female)",      "fr-FR"),
+    ]
+
+    def __init__(self) -> None:
+        self._pkg_ok: bool | None = None
+
+    def _import(self):
+        if self._pkg_ok is False:
+            return None
+        try:
+            import edge_tts  # type: ignore
+        except ImportError:
+            self._pkg_ok = False
+            return None
+        self._pkg_ok = True
+        return edge_tts
+
+    def is_available(self) -> bool:
+        return self._import() is not None
+
+    def list_voices(self) -> list[VoiceDescriptor]:
+        # We deliberately return the curated list rather than calling
+        # edge_tts.list_voices() — the full catalogue is overwhelming for
+        # a picker and the network round-trip would block /spoof/engines.
+        return list(self._CURATED_VOICES) if self.is_available() else []
+
+    def default_voice(self) -> str | None:
+        return "en-US-AriaNeural" if self.is_available() else None
+
+    def synthesize(self, text, voice_id, language, target_sample_rate):
+        edge_tts = self._import()
+        if edge_tts is None:
+            raise RuntimeError("edge-tts is not installed. Add `edge-tts` to the backend [model] extra.")
+        voice = voice_id or self.default_voice() or "en-US-AriaNeural"
+
+        # edge-tts returns MP3 audio chunks; we collect them then decode
+        # to PCM WAV via the AudioService so the rest of the pipeline
+        # sees a uniform WAV regardless of engine.
+        async def _collect() -> bytes:
+            communicate = edge_tts.Communicate(text, voice)
+            buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            return buf.getvalue()
+
+        # `service.generate()` is called from a sync code path inside an
+        # async FastAPI route, so an event loop is already running on
+        # this thread. `asyncio.run()` refuses to nest. Spin up a tiny
+        # worker thread that owns its own loop and block on its result.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(lambda: asyncio.run(_collect()))
+            mp3_bytes = future.result(timeout=30)
+        if not mp3_bytes:
+            raise RuntimeError("Edge TTS returned no audio (network failure?).")
+        return _transcode_mp3_to_wav(mp3_bytes, target_sample_rate)
+
+
+# ---- Google Translate TTS -------------------------------------------------
+
+
+class GttsEngine:
+    id = "gtts"
+    label = "Google Translate TTS"
+    description = "Free cloud TTS, simple language-based picker. Requires internet."
+    requires_network = True
+
+    # gTTS-specific language codes. Notably "iw" for Hebrew (Google's
+    # legacy ISO 639-1 code, not "he"). The picker labels stay
+    # human-readable so operators don't need to know these quirks.
+    _LANGS = [
+        ("en", "English (default)"),
+        ("en-uk", "English (UK)"),
+        ("en-au", "English (AU)"),
+        ("en-in", "English (IN)"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("ru", "Russian"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh-CN", "Chinese (Mainland)"),
+        ("zh-TW", "Chinese (Taiwan)"),
+        ("ar", "Arabic"),
+        ("iw", "Hebrew"),
+        ("tr", "Turkish"),
+        ("pl", "Polish"),
+        ("nl", "Dutch"),
+    ]
+
+    def __init__(self) -> None:
+        self._pkg_ok: bool | None = None
+
+    def _import(self):
+        if self._pkg_ok is False:
+            return None
+        try:
+            from gtts import gTTS  # type: ignore  # noqa: F401
+        except ImportError:
+            self._pkg_ok = False
+            return None
+        self._pkg_ok = True
+        from gtts import gTTS as gTtsClass  # noqa: N813
+        return gTtsClass
+
+    def is_available(self) -> bool:
+        return self._import() is not None
+
+    def list_voices(self) -> list[VoiceDescriptor]:
+        return [VoiceDescriptor(id=code, label=label, language=code) for code, label in self._LANGS] if self.is_available() else []
+
+    def default_voice(self) -> str | None:
+        return "en" if self.is_available() else None
+
+    def synthesize(self, text, voice_id, language, target_sample_rate):
+        gTtsClass = self._import()
+        if gTtsClass is None:
+            raise RuntimeError("gTTS is not installed. Add `gTTS` to the backend [model] extra.")
+        lang = voice_id or language or "en"
+        # gTTS accepts an optional `tld` for accent control on English.
+        # We split codes like "en-uk" into ("en", "co.uk") to opt into
+        # the UK English voice without flooding the picker.
+        tld = "com"
+        base_lang = lang
+        if "-" in lang:
+            head, region = lang.split("-", 1)
+            region = region.lower()
+            if head == "en":
+                tld = {"uk": "co.uk", "au": "com.au", "in": "co.in"}.get(region, "com")
+                base_lang = "en"
+            else:
+                base_lang = head
+        try:
+            tts = gTtsClass(text=text, lang=base_lang, tld=tld)
+            buf = io.BytesIO()
+            tts.write_to_fp(buf)
+        except Exception as exc:
+            raise RuntimeError(f"gTTS failed: {exc}") from exc
+        return _transcode_mp3_to_wav(buf.getvalue(), target_sample_rate)
+
+
+# ---- XTTS-v2 (voice cloning, slow) ----------------------------------------
+
+
+class XttsEngine:
+    id = "xtts"
+    label = "Coqui XTTS-v2 (voice cloning)"
+    description = "Conditions on a reference WAV — clones the target's voice. Slow on CPU. Optional `[spoof]` extra."
+    requires_network = False
+
+    def __init__(self, model_path: Path) -> None:
+        self.model_path = Path(model_path)
+        self._load_lock = Lock()
+        self._model: Any | None = None
+        self._config: Any | None = None
+        self._pkg_ok: bool | None = None
+
+    def _import(self):
+        if self._pkg_ok is False:
+            return False
+        try:
+            import TTS.tts.configs.xtts_config  # noqa: F401
+            import TTS.tts.models.xtts  # noqa: F401
+        except (ImportError, ModuleNotFoundError):
+            self._pkg_ok = False
+            return False
+        self._pkg_ok = True
+        return True
+
+    def is_available(self) -> bool:
+        if not self._import():
+            return False
+        return (self.model_path / "config.json").exists() and (self.model_path / "model.pth").exists()
+
+    def list_voices(self) -> list[VoiceDescriptor]:
+        # XTTS is conditioned on a reference WAV per-call, not a
+        # canonical voice list. The frontend should use a reference-
+        # sample picker in tandem with this engine.
+        return [] if not self.is_available() else [
+            VoiceDescriptor(id="enrolled", label="Selected operator's enrolled samples", language=None),
+        ]
+
+    def default_voice(self) -> str | None:
+        return "enrolled" if self.is_available() else None
+
+    def synthesize(self, text, voice_id, language, target_sample_rate):
+        # The reference-WAV plumbing lives in SpoofGenerationService
+        # because it needs access to the store. The engine itself is
+        # called from `generate()` after the reference context is opened.
+        # `synthesize()` here is intentionally NOT used for XTTS; the
+        # service detects engine == "xtts" and routes through
+        # `_generate_with_xtts`. We keep this method on the protocol so
+        # the type checker is happy.
+        raise RuntimeError("XTTS engine is invoked via SpoofGenerationService._generate_with_xtts().")
+
+    def ensure_loaded(self):
+        if self._model is not None and self._config is not None:
+            return self._model, self._config
+        with self._load_lock:
+            if self._model is not None and self._config is not None:
+                return self._model, self._config
+            import torch
+            from TTS.tts.configs.xtts_config import XttsConfig
+            from TTS.tts.models.xtts import Xtts
+            config_path = self.model_path / "config.json"
+            checkpoint_path = self.model_path / "model.pth"
+            if not config_path.exists() or not checkpoint_path.exists():
+                raise RuntimeError(f"XTTS checkpoint is incomplete at '{self.model_path}'.")
+            config = XttsConfig()
+            config.load_json(str(config_path))
+            model = Xtts.init_from_config(config)
+            model.load_checkpoint(config, checkpoint_dir=str(self.model_path), eval=True)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if device == "cuda":
+                model.cuda()
+            elif hasattr(model, "to"):
+                model.to(device)
+            self._model = model
+            self._config = config
+            return model, config
+
+
+# ---------------------------------------------------------------------------
+# SpoofGenerationService — engine registry + reference-sample plumbing
+# ---------------------------------------------------------------------------
+
+
+# Engines are returned to the picker in this order. The first available
+# engine becomes the default when the operator doesn't pass `engine=`.
+_DEFAULT_ENGINE_PRIORITY = ("say", "edge", "gtts", "espeak", "xtts")
 
 
 class SpoofGenerationService:
@@ -59,9 +509,39 @@ class SpoofGenerationService:
         self.default_language = default_language
         self.output_sample_rate = output_sample_rate
         self.audio = AudioService()
-        self._load_lock = Lock()
-        self._model: Any | None = None
-        self._config: Any | None = None
+        self._engines: dict[str, TtsEngine] = {
+            "say": SayEngine(),
+            "espeak": EspeakEngine(),
+            "edge": EdgeTtsEngine(),
+            "gtts": GttsEngine(),
+            "xtts": XttsEngine(model_path),
+        }
+
+    # -- introspection ------------------------------------------------------
+
+    def list_engines(self) -> list[EngineInfo]:
+        out: list[EngineInfo] = []
+        for eid in _DEFAULT_ENGINE_PRIORITY:
+            engine = self._engines[eid]
+            available = engine.is_available()
+            out.append(
+                EngineInfo(
+                    id=engine.id,
+                    label=engine.label,
+                    description=engine.description,
+                    requires_network=engine.requires_network,
+                    available=available,
+                    voices=engine.list_voices() if available else [],
+                    default_voice=engine.default_voice() if available else None,
+                )
+            )
+        return out
+
+    def default_engine_id(self) -> str | None:
+        for eid in _DEFAULT_ENGINE_PRIORITY:
+            if self._engines[eid].is_available():
+                return eid
+        return None
 
     def list_reference_samples(self, user_id: str) -> list[ReferenceSampleResponse]:
         return [
@@ -75,11 +555,15 @@ class SpoofGenerationService:
             for sample in self.store.list_reference_samples(user_id)
         ]
 
+    # -- public synth entry point ------------------------------------------
+
     def generate(
         self,
         user_id: str,
         text: str,
         language: str | None = None,
+        engine: str | None = None,
+        voice: str | None = None,
         reference_sample_id: str | None = None,
         reference_audio_bytes: bytes | None = None,
         reference_filename: str | None = None,
@@ -87,15 +571,26 @@ class SpoofGenerationService:
         message_text = text.strip()
         if not message_text:
             raise ValueError("Text is required to generate a spoof sample")
-
         language_code = (language or self.default_language).strip().lower()
 
-        # Decide which engine to use up-front. XTTS needs both the
-        # `TTS` package AND a checkpoint dir on disk. If either is
-        # missing we go straight to the system-TTS fallback so the
-        # operator gets a real synthetic clip even on a Py 3.13+ venv
-        # where XTTS won't install.
-        if _xtts_available(self.model_path):
+        chosen_id = engine or self.default_engine_id()
+        if chosen_id is None:
+            raise RuntimeError(
+                "No TTS engine is available. Install macOS `say` / `espeak-ng`, "
+                "or ensure edge-tts + gTTS are reachable on the network."
+            )
+        if chosen_id not in self._engines:
+            raise ValueError(f"Unknown TTS engine '{chosen_id}'. Available: {sorted(self._engines)}")
+        chosen = self._engines[chosen_id]
+        if not chosen.is_available():
+            raise RuntimeError(
+                f"TTS engine '{chosen_id}' isn't available on this host. "
+                f"Try one of: {[e.id for e in self.list_engines() if e.available]}"
+            )
+
+        # XTTS is the only engine that needs the reference-WAV plumbing.
+        # All other engines speak as their own neural/system voices.
+        if chosen_id == "xtts":
             return self._generate_with_xtts(
                 user_id=user_id,
                 text=message_text,
@@ -104,11 +599,22 @@ class SpoofGenerationService:
                 reference_audio_bytes=reference_audio_bytes,
                 reference_filename=reference_filename,
             )
-        return self._generate_with_system_tts(
-            user_id=user_id,
+
+        audio_bytes = chosen.synthesize(
             text=message_text,
-            language_code=language_code,
+            voice_id=voice,
+            language=language_code,
+            target_sample_rate=self.output_sample_rate,
         )
+        return self._persist(
+            user_id=user_id,
+            audio_bytes=audio_bytes,
+            engine_id=chosen.id,
+            voice_id=voice or chosen.default_voice(),
+            source_description=f"{chosen.label} | {voice or chosen.default_voice() or 'default voice'}",
+        )
+
+    # -- XTTS path (kept compatible with the prior contract) ---------------
 
     def _generate_with_xtts(
         self,
@@ -119,13 +625,15 @@ class SpoofGenerationService:
         reference_audio_bytes: bytes | None,
         reference_filename: str | None,
     ) -> SpoofGenerationResult:
+        engine = self._engines["xtts"]
+        assert isinstance(engine, XttsEngine)
         with self._reference_context(
             user_id=user_id,
             reference_sample_id=reference_sample_id,
             reference_audio_bytes=reference_audio_bytes,
             reference_filename=reference_filename,
         ) as (reference_paths, source_description):
-            model, config = self._ensure_model_loaded()
+            model, config = engine.ensure_loaded()
             output = model.synthesize(
                 text,
                 config,
@@ -135,83 +643,37 @@ class SpoofGenerationService:
             )
         waveform = self._coerce_waveform(output.get("wav") if isinstance(output, dict) else output)
         audio_bytes = self.audio.encode_wav(waveform, sample_rate=self.output_sample_rate)
-        return self._persist(user_id, audio_bytes, source_description)
-
-    def _generate_with_system_tts(
-        self,
-        user_id: str,
-        text: str,
-        language_code: str,
-    ) -> SpoofGenerationResult:
-        """Fallback: produce real synthetic speech using a system TTS
-        binary (`say` on macOS, `espeak`/`espeak-ng` on Linux). No voice
-        cloning — the synthesized audio uses a generic system voice — but
-        AASIST treats this as FAKE because the spectral signature of
-        formant-based / neural-vocoder TTS is recognisable as synthetic."""
-        backend, binary = _select_system_tts()
-        if backend == "say":
-            audio_bytes = _synthesize_with_say(binary, text, self.output_sample_rate)
-        elif backend == "espeak":
-            audio_bytes = _synthesize_with_espeak(binary, text, language_code, self.output_sample_rate)
-        else:
-            raise RuntimeError(
-                "No system TTS available. Install the 'spoof' extra to enable XTTS, "
-                "or install `espeak-ng` (Linux) so the fallback can synthesise."
-            )
         return self._persist(
-            user_id,
-            audio_bytes,
-            f"system TTS fallback ({backend}; XTTS not installed)",
+            user_id=user_id,
+            audio_bytes=audio_bytes,
+            engine_id="xtts",
+            voice_id="enrolled",
+            source_description=f"XTTS-v2 | {source_description}",
         )
 
-    def _persist(self, user_id: str, audio_bytes: bytes, source_description: str) -> SpoofGenerationResult:
+    # -- helpers -----------------------------------------------------------
+
+    def _persist(
+        self,
+        user_id: str,
+        audio_bytes: bytes,
+        engine_id: str,
+        voice_id: str | None,
+        source_description: str,
+    ) -> SpoofGenerationResult:
         safe_user_id = "".join(
             character if character.isalnum() or character in {"-", "_"} else "_"
             for character in user_id
         )
-        file_name = f"{safe_user_id}-spoof.wav"
+        file_name = f"{safe_user_id}-{engine_id}-spoof.wav"
         (self.output_directory / file_name).write_bytes(audio_bytes)
         return SpoofGenerationResult(
             audio_bytes=audio_bytes,
             file_name=file_name,
             source_description=source_description,
+            engine_id=engine_id,
+            voice_id=voice_id,
         )
-
-    def _ensure_model_loaded(self) -> tuple[Any, Any]:
-        if self._model is not None and self._config is not None:
-            return self._model, self._config
-
-        with self._load_lock:
-            if self._model is not None and self._config is not None:
-                return self._model, self._config
-
-            try:
-                import torch
-                from TTS.tts.configs.xtts_config import XttsConfig
-                from TTS.tts.models.xtts import Xtts
-            except ImportError as exc:
-                raise RuntimeError(
-                    "XTTS dependencies are not installed. Reinstall the backend with the 'spoof' extra on Python 3.11 or 3.12 before generating spoof samples."
-                ) from exc
-
-            config_path = self.model_path / "config.json"
-            checkpoint_path = self.model_path / "model.pth"
-            if not config_path.exists() or not checkpoint_path.exists():
-                raise RuntimeError(f"XTTS checkpoint is incomplete at '{self.model_path}'.")
-
-            config = XttsConfig()
-            config.load_json(str(config_path))
-            model = Xtts.init_from_config(config)
-            model.load_checkpoint(config, checkpoint_dir=str(self.model_path), eval=True)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            if device == "cuda":
-                model.cuda()
-            elif hasattr(model, "to"):
-                model.to(device)
-
-            self._model = model
-            self._config = config
-            return model, config
 
     @contextmanager
     def _reference_context(
@@ -262,97 +724,83 @@ class SpoofGenerationService:
 
 
 # ---------------------------------------------------------------------------
-# Engine availability + system-TTS fallback
+# Module helpers
 # ---------------------------------------------------------------------------
 
 
-def _xtts_available(model_path: Path) -> bool:
-    """True iff the XTTS Python package is importable AND the checkpoint
-    directory contains both `config.json` and `model.pth`. We cache the
-    package-import outcome on the module so we don't pay the import cost
-    on every call."""
-    cached = globals().get("_XTTS_PKG_OK")
-    if cached is None:
-        try:
-            import TTS.tts.configs.xtts_config  # noqa: F401
-            import TTS.tts.models.xtts  # noqa: F401
-            cached = True
-        except (ImportError, ModuleNotFoundError):
-            cached = False
-        globals()["_XTTS_PKG_OK"] = cached
-    if not cached:
-        return False
-    return (model_path / "config.json").exists() and (model_path / "model.pth").exists()
+def _transcode_mp3_to_wav(mp3_bytes: bytes, target_sample_rate: int) -> bytes:
+    """Convert an MP3 buffer (from edge-tts or gTTS) into a PCM WAV at
+    the requested sample rate. Uses torchaudio if available (already a
+    backend dependency); falls back to ffmpeg on PATH."""
+    try:
+        return _transcode_with_soundfile(mp3_bytes, target_sample_rate)
+    except Exception:
+        pass
+    return _transcode_with_ffmpeg(mp3_bytes, target_sample_rate)
 
 
-def _select_system_tts() -> tuple[str, str]:
-    """Return (backend, binary_path) for the first available system TTS.
-    Backend ∈ {"say", "espeak", "none"}."""
-    say = shutil.which("say")
-    if say:
-        return "say", say
-    for binary in ("espeak-ng", "espeak"):
-        path = shutil.which(binary)
-        if path:
-            return "espeak", path
-    return "none", ""
+def _transcode_with_soundfile(mp3_bytes: bytes, target_sample_rate: int) -> bytes:
+    import io as _io
+    import soundfile as sf  # bundled via the [bench] extra; also pulled in by torchaudio
+    import numpy as np
+
+    samples, source_rate = sf.read(_io.BytesIO(mp3_bytes), dtype="float32", always_2d=False)
+    if samples.ndim > 1:
+        samples = samples.mean(axis=1)
+    if source_rate != target_sample_rate:
+        # Simple linear resample — good enough for the kiosk's spoof-test
+        # workflow; AASIST + the audio service tolerate mild artefacts.
+        ratio = target_sample_rate / source_rate
+        n_out = int(round(len(samples) * ratio))
+        x_out = np.linspace(0, len(samples) - 1, n_out)
+        samples = np.interp(x_out, np.arange(len(samples)), samples).astype("float32")
+    return _encode_int16_wav(samples.tolist(), target_sample_rate)
 
 
-def _synthesize_with_say(binary: str, text: str, target_sample_rate: int) -> bytes:
-    """Run macOS `say` and return the synthesized WAV bytes resampled to
-    `target_sample_rate`. `say` writes LE int16 WAV directly when given
-    `--data-format=LEI16@<rate>`."""
-    # Use the requested rate directly so we don't need a resample step.
-    # `say` clamps to a small set of supported rates; 22050 + 24000 +
-    # 16000 are all accepted on Apple silicon.
-    fmt = f"LEI16@{target_sample_rate}"
-    with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        out_path = tmp.name
+def _transcode_with_ffmpeg(mp3_bytes: bytes, target_sample_rate: int) -> bytes:
+    binary = shutil.which("ffmpeg")
+    if not binary:
+        raise RuntimeError(
+            "Cannot decode MP3 audio — install `soundfile` (already in [bench]) or `ffmpeg` on the host."
+        )
+    with NamedTemporaryFile(suffix=".mp3", delete=False) as inp:
+        inp.write(mp3_bytes)
+        in_path = inp.name
+    with NamedTemporaryFile(suffix=".wav", delete=False) as outp:
+        out_path = outp.name
     try:
         result = subprocess.run(
-            [binary, "-o", out_path, "--data-format", fmt, text],
-            capture_output=True,
-            timeout=60,
+            [binary, "-y", "-i", in_path, "-ar", str(target_sample_rate), "-ac", "1", out_path],
+            capture_output=True, timeout=60,
         )
         if result.returncode != 0:
             raise RuntimeError(
-                f"`say` failed (exit {result.returncode}): {result.stderr.decode('utf-8', errors='replace')[:200]}"
+                f"ffmpeg transcode failed (exit {result.returncode}): "
+                f"{result.stderr.decode('utf-8', errors='replace')[:200]}"
             )
         return _read_wav_bytes(out_path)
     finally:
+        Path(in_path).unlink(missing_ok=True)
         Path(out_path).unlink(missing_ok=True)
 
 
-def _synthesize_with_espeak(binary: str, text: str, language_code: str, target_sample_rate: int) -> bytes:
-    """Run espeak-ng with `-w` to write a WAV. espeak-ng's output sample
-    rate is fixed (22050 by default) — we rewrite the header if needed."""
-    with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        out_path = tmp.name
-    try:
-        # `-v <lang>` selects voice; `-w` writes WAV. Some installs don't
-        # accept "-v en" without a variant; fall back to default voice on
-        # error.
-        cmd = [binary, "-w", out_path, "-v", language_code or "en", text]
-        result = subprocess.run(cmd, capture_output=True, timeout=60)
-        if result.returncode != 0:
-            # Retry without the voice flag.
-            result = subprocess.run([binary, "-w", out_path, text], capture_output=True, timeout=60)
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"`espeak` failed (exit {result.returncode}): {result.stderr.decode('utf-8', errors='replace')[:200]}"
-                )
-        # espeak-ng emits at its own native rate; the AASIST detector
-        # tolerates the rate mismatch since AcousticProbe + the audio
-        # service decode-then-resample on ingest.
-        return _read_wav_bytes(out_path)
-    finally:
-        Path(out_path).unlink(missing_ok=True)
+def _encode_int16_wav(samples: Iterable[float], sample_rate: int) -> bytes:
+    """Encode a float waveform [-1, 1] as 16-bit PCM mono WAV bytes."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        chunks = bytearray()
+        for sample in samples:
+            v = max(-1.0, min(1.0, float(sample)))
+            chunks += int(v * 32767).to_bytes(2, "little", signed=True)
+        handle.writeframes(bytes(chunks))
+    return buf.getvalue()
 
 
 def _read_wav_bytes(path: str) -> bytes:
-    """Slurp a WAV file as bytes, validating it's actually PCM. Re-raise
-    anything weird as RuntimeError so the caller can present a clean
-    503."""
+    """Slurp a WAV file as bytes, validating it's actually PCM."""
     try:
         with wave.open(path, "rb") as handle:
             if handle.getnchannels() not in (1, 2):

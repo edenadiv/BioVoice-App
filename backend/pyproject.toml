@@ -25,6 +25,11 @@ model = [
   "torch>=2.2",
   "torchaudio>=2.2",
   "scipy>=1.11",
+  # T1 (v1.1.1) — fast TTS engines for DeepfakeLab. Pure-Python, no
+  # native deps; safe to bake into the standard runtime image so the
+  # operator can pick from multiple synthesisers out of the box.
+  "edge-tts>=6.1",       # Microsoft Edge TTS — neural voices, free, cloud
+  "gTTS>=2.5",           # Google Translate TTS — simple cloud fallback
 ]
 # F1.4 — XTTS spoof generation. Lives behind its own extra because
 # `TTS>=0.22,<0.23` does not resolve cleanly on Python 3.12+ (the

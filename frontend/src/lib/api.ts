@@ -11,6 +11,7 @@ import type {
   ModelProvenance,
   Speaker,
   SpoofDecision,
+  SpoofEngines,
   SpoofGenerationResult,
   SpoofTestResult,
   UserEmbedding,
@@ -333,6 +334,8 @@ export async function generateSpoof(payload: {
   targetUserId: string;
   text: string;
   language?: string;
+  engine?: string;
+  voice?: string;
   referenceSampleId?: string;
   file?: File | null;
 }): Promise<SpoofGenerationResult> {
@@ -340,6 +343,8 @@ export async function generateSpoof(payload: {
   formData.append("target_user_id", payload.targetUserId);
   formData.append("text", payload.text);
   formData.append("language", payload.language ?? "en");
+  if (payload.engine) formData.append("engine", payload.engine);
+  if (payload.voice) formData.append("voice", payload.voice);
   if (payload.referenceSampleId) {
     formData.append("reference_sample_id", payload.referenceSampleId);
   }
@@ -365,6 +370,39 @@ export async function generateSpoof(payload: {
     sourceDescription: response.headers.get("X-Spoof-Source") ?? "Reference sample",
     text: payload.text,
     language: payload.language ?? "en",
+    engine: response.headers.get("X-Spoof-Engine") ?? undefined,
+    voice: response.headers.get("X-Spoof-Voice") ?? undefined,
+  };
+}
+
+type SpoofVoiceResponse = { id: string; label: string; language: string | null };
+type SpoofEngineInfoResponse = {
+  id: string;
+  label: string;
+  description: string;
+  requires_network: boolean;
+  available: boolean;
+  voices: SpoofVoiceResponse[];
+  default_voice: string | null;
+};
+type SpoofEnginesResponse = {
+  engines: SpoofEngineInfoResponse[];
+  default_engine: string | null;
+};
+
+export async function getSpoofEngines(): Promise<SpoofEngines> {
+  const response = await request<SpoofEnginesResponse>("/spoof/engines");
+  return {
+    defaultEngine: response.default_engine,
+    engines: response.engines.map((e) => ({
+      id: e.id,
+      label: e.label,
+      description: e.description,
+      requiresNetwork: e.requires_network,
+      available: e.available,
+      voices: e.voices,
+      defaultVoice: e.default_voice,
+    })),
   };
 }
 

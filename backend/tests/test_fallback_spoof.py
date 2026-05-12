@@ -42,7 +42,11 @@ def test_fallback_synthesis_produces_valid_wav(tmp_path):
 
     assert result.audio_bytes, "fallback should produce non-empty audio"
     assert result.file_name.endswith(".wav")
-    assert "fallback" in result.source_description.lower()
+    # T2 (v1.1.1) — the "system TTS fallback" terminology was retired
+    # in favour of explicit engine selection. The default engine is now
+    # `say` on macOS / `espeak` on Linux; either is acceptable here.
+    assert result.engine_id in {"say", "espeak"}
+    assert result.source_description
 
     # Verify the produced bytes are a real WAV (not, say, a Python error
     # message accidentally written to disk).

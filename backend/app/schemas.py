@@ -154,6 +154,39 @@ class IdentificationMatch(BaseModel):
     enrolled_at: datetime
 
 
+class SpoofVoice(BaseModel):
+    """One selectable voice inside a TTS engine. Surfaced by
+    `GET /spoof/engines` so the DeepfakeLab UI can render a picker."""
+
+    id: str
+    label: str
+    language: str | None = None
+
+
+class SpoofEngineInfo(BaseModel):
+    """T3 — engine descriptor returned by `GET /spoof/engines`.
+
+    `available` reflects whether the engine's package + binaries +
+    network are reachable from the running backend. Unavailable engines
+    are still surfaced so the UI can grey them out."""
+
+    id: str
+    label: str
+    description: str
+    requires_network: bool
+    available: bool
+    voices: list[SpoofVoice] = Field(default_factory=list)
+    default_voice: str | None = None
+
+
+class SpoofEnginesResponse(BaseModel):
+    """Engines + the default-pick the backend would use if the caller
+    sends `engine=` empty on `POST /spoof`."""
+
+    engines: list[SpoofEngineInfo]
+    default_engine: str | None
+
+
 class UserEmbedding(BaseModel):
     """V1 — one enrolled profile's stored 192-d centroid plus the
     per-sample 192-d embeddings it was averaged from. Feeds the

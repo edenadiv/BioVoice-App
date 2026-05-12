@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { generateSpoof, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
+import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
@@ -83,7 +83,11 @@ function Sidebar({ page, setPage }) {
 function DeepfakeLab({ audio, profiles }) {
   const [target, setTarget] = useState(profiles[0]?.id ?? null);
   const [text, setText] = useState("Authorize transfer of two million dollars.");
-  const [model, setModel] = useState('clone-v3');
+  // T4 — engine + voice pickers. Loaded once from /spoof/engines on
+  // mount; the voice list refreshes when the engine selection changes.
+  const [enginesPayload, setEnginesPayload] = useState(null); // { engines, defaultEngine } | null
+  const [engineId, setEngineId] = useState('');
+  const [voiceId, setVoiceId] = useState('');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -93,6 +97,40 @@ function DeepfakeLab({ audio, profiles }) {
   useEffect(() => {
     if (!target && profiles[0]) setTarget(profiles[0].id);
   }, [profiles, target]);
+
+  // Fetch the engine catalogue on mount; auto-pick the backend's
+  // default engine + that engine's default voice.
+  useEffect(() => {
+    let cancelled = false;
+    getSpoofEngines()
+      .then((payload) => {
+        if (cancelled) return;
+        setEnginesPayload(payload);
+        const defaultEngine =
+          payload.engines.find((e) => e.id === payload.defaultEngine && e.available)
+          ?? payload.engines.find((e) => e.available)
+          ?? null;
+        if (defaultEngine) {
+          setEngineId(defaultEngine.id);
+          setVoiceId(defaultEngine.defaultVoice ?? defaultEngine.voices[0]?.id ?? '');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEnginesPayload({ engines: [], defaultEngine: null });
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // When the engine changes, reset the voice to that engine's default.
+  const selectedEngine = useMemo(
+    () => enginesPayload?.engines.find((e) => e.id === engineId) ?? null,
+    [enginesPayload, engineId],
+  );
+  const handleEngineChange = useCallback((newEngineId) => {
+    setEngineId(newEngineId);
+    const eng = enginesPayload?.engines.find((e) => e.id === newEngineId);
+    if (eng) setVoiceId(eng.defaultVoice ?? eng.voices[0]?.id ?? '');
+  }, [enginesPayload]);
 
   const targetProfile = profiles.find(p => p.id === target) || profiles[0];
 
@@ -108,12 +146,15 @@ function DeepfakeLab({ audio, profiles }) {
     const startedAt = performance.now();
 
     try {
-      // Step 1 — XTTS clone of `target` saying `text`. Returns a blob
-      // URL we can play AND the fileName for the spoof-test round-trip.
+      // Step 1 — synthesise the utterance via the chosen TTS engine.
+      // Returns a blob URL we can play AND the fileName for the
+      // spoof-test round-trip.
       const generation = await generateSpoof({
         targetUserId: target,
         text,
         language: 'en',
+        engine: engineId || undefined,
+        voice: voiceId || undefined,
       });
       setStage(2);
 
@@ -133,7 +174,8 @@ function DeepfakeLab({ audio, profiles }) {
         analysisDetails: detection.analysisDetails,
         modelProvenance: detection.modelProvenance,
         time: (elapsedMs / 1000).toFixed(2),
-        model,
+        engine: generation.engine ?? engineId,
+        voice: generation.voice ?? voiceId,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -148,7 +190,7 @@ function DeepfakeLab({ audio, profiles }) {
     } finally {
       setGenerating(false);
     }
-  }, [target, text, model]);
+  }, [target, text, engineId, voiceId]);
 
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
@@ -213,46 +255,75 @@ function DeepfakeLab({ audio, profiles }) {
                 }}/>
             </Field>
 
-            <Field label="ATTACK MODEL">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                {[
-                  { id: 'clone-v3', label: 'Voice clone', sub: 'system TTS / XTTS', planned: false },
-                  { id: 'replay',   label: 'Replay',      sub: 'Recorded attack',   planned: true  },
-                  { id: 'splice',   label: 'Splice',      sub: 'Concatenative',     planned: true  },
-                ].map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => { if (!m.planned) setModel(m.id); }}
-                    disabled={m.planned}
-                    title={m.planned ? "Planned for v1.1 — currently routes to Voice clone." : undefined}
-                    className="lift"
-                    style={{
-                      padding: '10px 12px', borderRadius: 10,
-                      cursor: m.planned ? 'not-allowed' : 'pointer',
-                      background: model === m.id ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
-                      border: model === m.id ? '1px solid rgba(255,178,74,0.5)' : '1px solid var(--line)',
-                      color: m.planned ? 'var(--ink-mute)' : 'var(--ink)',
-                      textAlign: 'left',
-                      transition: 'all 200ms',
-                      position: 'relative',
-                      opacity: m.planned ? 0.55 : 1,
-                    }}>
-                    <div style={{ fontSize: 12 }}>{m.label}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2 }}>{m.sub}</div>
-                    {m.planned && (
-                      <div className="label-mono" style={{
-                        position: 'absolute', top: 8, right: 8,
-                        fontSize: 7, padding: '2px 6px', borderRadius: 3,
-                        background: 'rgba(125,200,255,0.08)',
-                        color: 'var(--ink-mute)',
-                        border: '1px solid rgba(125,200,255,0.2)',
-                        letterSpacing: '0.08em',
-                      }}>PLANNED</div>
-                    )}
-                  </button>
-                ))}
-              </div>
+            <Field label="TTS ENGINE">
+              {enginesPayload === null ? (
+                <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>
+                  LOADING ENGINES…
+                </div>
+              ) : enginesPayload.engines.filter((e) => e.available).length === 0 ? (
+                <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>
+                  No TTS engines available on the backend. Install macOS `say` / espeak-ng, or expose internet for edge-tts / gTTS.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                  {enginesPayload.engines.map((e) => {
+                    const disabled = !e.available;
+                    const selected = engineId === e.id;
+                    return (
+                      <button
+                        key={e.id}
+                        onClick={() => !disabled && handleEngineChange(e.id)}
+                        disabled={disabled}
+                        title={disabled ? `${e.label} isn't available on this backend.` : e.description}
+                        className="lift"
+                        style={{
+                          padding: '10px 12px', borderRadius: 10,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          background: selected ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
+                          border: selected ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
+                          color: disabled ? 'var(--ink-mute)' : 'var(--ink)',
+                          textAlign: 'left', transition: 'all 200ms',
+                          position: 'relative', opacity: disabled ? 0.5 : 1,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                          <span style={{ fontSize: 12 }}>{e.label}</span>
+                          {e.requiresNetwork && (
+                            <span className="label-mono" style={{ fontSize: 7, color: 'var(--teal-2)', letterSpacing: '0.18em' }}>NET</span>
+                          )}
+                        </div>
+                        <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                          {disabled ? 'UNAVAILABLE' : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}`}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </Field>
+
+            {selectedEngine && selectedEngine.voices.length > 0 && (
+              <Field label={`VOICE  ·  ${selectedEngine.label}`}>
+                <select
+                  value={voiceId}
+                  onChange={(e) => setVoiceId(e.target.value)}
+                  style={{
+                    width: '100%', padding: '10px 12px',
+                    background: 'rgba(125,200,255,0.04)',
+                    border: '1px solid var(--line-2)',
+                    borderRadius: 10, color: 'var(--ink)',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
+                    outline: 'none', cursor: 'pointer',
+                  }}
+                >
+                  {selectedEngine.voices.map((v) => (
+                    <option key={v.id} value={v.id} style={{ background: '#04070d', color: 'var(--ink)' }}>
+                      {v.label}{v.language ? `  ·  ${v.language}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
 
             <button onClick={generate} disabled={generating} className="btn btn-primary"
               style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,

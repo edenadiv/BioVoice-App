@@ -61,6 +61,8 @@ export type SpoofGenerationResult = {
   sourceDescription: string;
   text: string;
   language: string;
+  engine?: string;
+  voice?: string;
 };
 
 export type SpoofDecision = "FAKE" | "GENUINE";
@@ -112,4 +114,25 @@ export type EmbedResult = {
   snrDb: number;
   frameCount: number;
   modelProvenance: ModelProvenance | null;
+};
+
+export type SpoofVoice = {
+  id: string;
+  label: string;
+  language: string | null;
+};
+
+export type SpoofEngineInfo = {
+  id: string;
+  label: string;
+  description: string;
+  requiresNetwork: boolean;
+  available: boolean;
+  voices: SpoofVoice[];
+  defaultVoice: string | null;
+};
+
+export type SpoofEngines = {
+  engines: SpoofEngineInfo[];
+  defaultEngine: string | null;
 };
