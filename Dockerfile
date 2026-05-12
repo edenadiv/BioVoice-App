@@ -1,24 +1,40 @@
-# F7.5 — multi-stage Dockerfile for the BioVoice backend.
+# P2 — single deployable image (v1.1.0+).
 #
-# Stage 1 builds the Python wheel + installs the [model] extra against
-# Python 3.12 (TTS pin requirement — F1.4). Stage 2 copies the
-# resulting site-packages into a slim runtime image. Final image
-# weighs ~1.4 GB with the TTS extras included; ~700 MB without.
+# Builds the React frontend in stage 1, installs the FastAPI backend
+# (with the [model] extras) in stage 2, and produces a slim runtime
+# image in stage 3 that serves both at port 8000. The bundled React UI
+# is mounted by `app.main` whenever `/app/frontend_dist` exists.
+#
+# ML weights (aasist.pt + redimnet_b5.pt) are baked into the image
+# under /app/models — operators don't have to mount them separately.
 #
 # Build:
-#   docker build -f Dockerfile -t biovoice-backend:latest backend
+#   docker build -t biovoice:1.1.0 .
 #
-# Build with the spoof / TTS extras:
-#   docker build --build-arg INSTALL_EXTRAS=model,spoof \
-#       -f Dockerfile -t biovoice-backend:latest backend
+# Run:
+#   docker run -p 8000:8000 -v biovoice-data:/app/data biovoice:1.1.0
 #
-# Model weights (aasist.pt, redimnet_b5.pt) MUST be mounted at runtime
-# under /app/backend/models — see docs/deployment.md for the procedure.
+# The legacy backend-only build at backend/Dockerfile is still wired
+# into docker-compose.yml for the original three-service local stack
+# (backend + nginx static + nginx TLS). For ANY new deployment, use
+# this top-level Dockerfile.
 
 # -----------------------------------------------------------------------------
-# Build stage — install deps + compile.
+# Stage 1 — build the React bundle.
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS build
+FROM node:20-alpine AS frontend
+
+WORKDIR /build
+RUN corepack enable
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2 — install Python deps + backend code.
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim AS backend
 
 ARG INSTALL_EXTRAS=model
 
@@ -29,19 +45,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY pyproject.toml ./
-COPY app ./app
-COPY scripts ./scripts
+COPY backend/pyproject.toml ./
+COPY backend/app ./app
+COPY backend/scripts ./scripts
 
-RUN pip install --upgrade pip && \
+RUN pip install --upgrade pip setuptools wheel
+
+# Pre-install CPU-only torch wheels — the default x86_64 wheels bundle
+# CUDA libs (~2 GB). The kiosk runs on CPU only; CUDA support would
+# bloat the image to ~8 GB without ever being exercised.
+RUN pip install --prefix=/install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch>=2.2,<3" "torchaudio>=2.2,<3"
+
+RUN PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --prefix=/install --no-build-isolation -e ".[${INSTALL_EXTRAS}]"
 
 # -----------------------------------------------------------------------------
-# Runtime stage — slim image, app + deps, no compilers.
+# Stage 3 — slim runtime image, frontend + backend served on one port.
 # -----------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
-# Non-root operator account. The kiosk never needs root at runtime.
+# Non-root operator account — no ambient root at runtime.
 RUN groupadd --system biovoice --gid 10000 && \
     useradd  --system biovoice --gid biovoice --uid 10000 --create-home --shell /bin/bash
 
@@ -50,28 +75,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Bring in the compiled site-packages from the build stage.
-COPY --from=build /install /usr/local
+# Bring in compiled site-packages from the backend stage.
+COPY --from=backend /install /usr/local
 
-WORKDIR /app
-COPY app /app/app
-COPY scripts /app/scripts
+# `app.core.config.Settings` derives data + model paths from
+# `Path(__file__).resolve().parents[3]`. Putting the backend at
+# /app/backend/ makes those paths resolve to /app/backend/data and
+# /app/backend/models — no env-var overrides needed.
+WORKDIR /app/backend
+COPY backend/app /app/backend/app
+COPY backend/scripts /app/backend/scripts
+COPY backend/models /app/backend/models
+COPY --from=frontend /build/dist /app/frontend_dist
 
-# Mountable volumes:
-#   /app/data       persistent SQLite + reference samples (use a host volume)
-#   /app/models     pre-bundled ML weights (aasist.pt, redimnet_b5.pt)
-RUN mkdir -p /app/data /app/models && \
+# Mountable volume:
+#   /app/backend/data       persistent SQLite + reference samples
+RUN mkdir -p /app/backend/data && \
     chown -R biovoice:biovoice /app
 
 USER biovoice
 
-# F7.4 — readiness lives at /readyz (deep check); /health is liveness.
+# Liveness via /health, deep readiness via /readyz.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl --fail http://127.0.0.1:8000/readyz || exit 1
 
-# F7.2 — JSON logs by default; flip BIOVOICE_LOG_FORMAT=plain for dev.
+# JSON logs by default; flip BIOVOICE_LOG_FORMAT=plain for human-readable dev.
+# BIOVOICE_FRONTEND_DIST is honoured by app.main as an override; pinned to the
+# baked-in path here so reverse-proxy deployments don't have to re-export it.
 ENV BIOVOICE_LOG_FORMAT=json \
-    LOG_LEVEL=INFO
+    LOG_LEVEL=INFO \
+    BIOVOICE_FRONTEND_DIST=/app/frontend_dist
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

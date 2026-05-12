@@ -1,138 +1,249 @@
 # Deployment guide
 
-> Single-kiosk Mac/Linux field deployment. No auth surface (operator-driven physical environment); see `docs/operator-guide.md` for day-to-day usage and `docs/hardware.md` for procurement specs.
+> **v1.1.0+**: ship the single Docker image at `Dockerfile` (repo root). FastAPI serves the React UI on port 8000 — no separate frontend container.
+> **Pre-1.1.0**: the three-service `docker-compose.yml` stack (backend + nginx static + nginx TLS) is still present for the original kiosk topology — see "[Local Docker Compose](#local-docker-compose-legacy)" at the bottom.
 
-## TL;DR
+The kiosk is auth-free by design. Operator-driven physical environment; see `docs/operator-guide.md` for day-to-day usage and `docs/hardware.md` for procurement specs.
+
+---
+
+## Build the image
 
 ```bash
 git clone https://github.com/edenadiv/BioVoice-App.git
 cd BioVoice-App
-
-# 1. Provision optional config
-cp backend/.env.example backend/.env
-# (edit if you need non-default CORS_ORIGINS or LOG_LEVEL)
-
-# 2. Provision TLS certs (optional for closed-network kiosks)
-mkdir -p deploy/certs
-# drop fullchain.pem + privkey.pem here, OR use self-signed for closed networks
-
-# 3. Build the frontend
-cd frontend && npm ci && npm run build && cd ..
-
-# 4. Stand up the stack
-docker compose up -d --build
-
-# 5. Verify
-curl --insecure https://localhost/readyz
+docker build -t biovoice:1.1.0 .
 ```
 
-The full kiosk should now be reachable at `https://<host>/`.
+What you get: a ~1.66 GB image with the FastAPI backend + bundled React UI + ML weights baked in. CPU-only torch (no CUDA bloat). Runs as the `biovoice` non-root user.
 
-## Stack overview
+Smoke locally before pushing anywhere:
 
-| Component | Image | Port | Purpose |
-|---|---|---|---|
-| `backend` | `biovoice-backend:latest` (built from `Dockerfile`) | internal :8000 | FastAPI app + SQLite + ReDimNet + AASIST |
-| `frontend` | `nginx:1.27-alpine` | internal :80 | Static SPA bundle (Vite output from `frontend/dist`) |
-| `nginx` | `nginx:1.27-alpine` | host :80 + :443 | TLS + HSTS + edge rate-limit |
+```bash
+docker run -p 8000:8000 -v biovoice-data:/app/backend/data biovoice:1.1.0
+# In another shell:
+curl http://localhost:8000/health           # {"status":"ok"}
+curl http://localhost:8000/users/embeddings # []
+open http://localhost:8000                  # kiosk UI
+```
 
-All traffic flows in through `nginx` → `frontend` (for `/`) or `backend` (for `/api/*`, `/readyz`, `/healthz`). The backend container has no host-published port.
+---
 
-## Environment variables
+## Hosting paths
 
-The kiosk is auth-free by design (operator-driven physical environment). All env vars are optional with sensible defaults.
+The image is provider-neutral. Pick the one your team already runs.
+
+### Fly.io
+
+Auto-TLS on `*.fly.dev`, free tier, single binary deploy.
+
+`fly.toml` (commit at repo root, override the app name):
+
+```toml
+app = "biovoice"               # change to your unique app name
+primary_region = "iad"
+
+[build]
+dockerfile = "Dockerfile"
+
+[http_service]
+internal_port = 8000
+force_https = true
+auto_stop_machines = false     # ML cold-start is slow; keep warm
+auto_start_machines = true
+min_machines_running = 1
+
+[mounts]
+source = "biovoice_data"
+destination = "/app/backend/data"
+
+[[vm]]
+cpu_kind = "shared"
+cpus = 2
+memory_mb = 2048               # CPU torch needs ~1.5 GB at peak
+```
+
+Then:
+
+```bash
+fly launch --no-deploy         # if app doesn't exist; otherwise skip
+fly volumes create biovoice_data --size 5 --region iad
+fly deploy
+```
+
+### Render
+
+Web Service → "Build & deploy from a Git repository":
+- Runtime: Docker
+- Dockerfile path: `./Dockerfile`
+- Health check path: `/readyz`
+- Disk: 5 GB at `/app/backend/data`
+- Plan: "Standard" or larger (≥ 2 GB RAM for torch)
+
+### Railway
+
+```bash
+railway init
+railway up                    # picks up the Dockerfile
+railway volume create --name data --mount-path /app/backend/data
+```
+
+Set the public domain in the Railway dashboard; HTTPS is automatic.
+
+### Self-hosted VPS (DigitalOcean / Hetzner / your own)
+
+A reverse proxy with auto-TLS is the simplest path. With **Caddy**:
+
+```bash
+docker run -d --name biovoice \
+  -p 8000:8000 \
+  -v biovoice_data:/app/backend/data \
+  --restart unless-stopped \
+  biovoice:1.1.0
+```
+
+`/etc/caddy/Caddyfile`:
+
+```
+biovoice.example.com {
+    reverse_proxy localhost:8000
+}
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+Caddy fetches a Let's Encrypt cert automatically. No nginx config to maintain.
+
+---
+
+## Persistent data
+
+The container stores SQLite + reference recordings under `/app/backend/data/`. Mount a volume there so a redeploy doesn't reset enrolled profiles. ML weights are baked into the image — no separate mount.
+
+| Path | What | Volume? |
+|---|---|---|
+| `/app/backend/data/biovoice.sqlite3` | Profiles, verification log, daily seq counter | YES |
+| `/app/backend/data/reference_samples/` | The original WAVs from each enrolment | YES |
+| `/app/backend/models/aasist.pt` | AASIST checkpoint | NO (in image) |
+| `/app/backend/models/redimnet_b5.pt` | ReDimNet B5 checkpoint | NO (in image) |
+| `/app/frontend_dist/` | Built React bundle | NO (in image) |
+
+---
+
+## Environment variables (optional)
 
 | Var | Default | Use |
 |---|---|---|
-| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list for the browser. Set to your kiosk hostname in production: `CORS_ORIGINS=https://kiosk.example.com`. |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allow-list. Set to your kiosk hostname in production: `CORS_ORIGINS=https://kiosk.example.com`. |
 | `LOG_LEVEL` | `INFO` | Standard Python logging level. |
-| `BIOVOICE_LOG_FORMAT` | `json` | F7.2 — `plain` for human-readable dev. |
-| `DATABASE_URL` | (SQLite at `./data/biovoice.db`) | Reserved for the v1.1 Postgres migration (see below). |
+| `BIOVOICE_LOG_FORMAT` | `json` | Set `plain` for human-readable dev. |
+| `BIOVOICE_FRONTEND_DIST` | `/app/frontend_dist` | Override only if you bind-mount a custom UI build over the baked one. |
 
-See `backend/.env.example` for the canonical reference.
+---
 
-## TLS certificates
+## Health + readiness
 
-The `nginx` container expects the cert files at:
+| Check | Endpoint | Returns |
+|---|---|---|
+| Liveness | `GET /health` | `{"status":"ok"}` once the process is accepting requests |
+| Readiness (deep) | `GET /readyz` | `{"ready":true,"checks":{database,aasist_weights,redimnet_weights}}` — 503 if SQLite is unreachable |
+| Prometheus | `GET /metrics` | Standard exposition format |
+| Operator summary | `GET /metrics/summary` | Compact JSON (verifications/sec, p50 latency, uptime) |
 
-```
-/etc/nginx/certs/fullchain.pem
-/etc/nginx/certs/privkey.pem
-```
+If weights are missing, `/readyz` reports a `models_note` and the backend falls back to its heuristic detector + encoder. Verification still works but accuracy degrades — production must serve real weights. (The image bakes them in, so this only happens if you mount over `/app/backend/models`.)
 
-Mounted from `./deploy/certs/` on the host. Three common provisioning paths:
-
-1. **Let's Encrypt** with `certbot` on the host: `certbot certonly --standalone -d kiosk.example.com`, then symlink `/etc/letsencrypt/live/<domain>/{fullchain,privkey}.pem` into `./deploy/certs/`. Reload nginx after each renewal.
-2. **Self-signed** for closed-network kiosks: `openssl req -x509 -newkey rsa:4096 -keyout privkey.pem -out fullchain.pem -days 825 -nodes -subj "/CN=biovoice-kiosk.local"`. The browser will prompt the operator to accept the cert once.
-3. **Customer PKI**: drop their fullchain + key directly into `./deploy/certs/` and document the renewal cadence.
-
-## ML weights
-
-`backend/models/aasist.pt` (~1.2 MB) and `backend/models/redimnet_b5.pt` (~30 MB) are the production checkpoints.
-
-- **Bake into the image**: add `COPY models /app/models` to the `Dockerfile` (rebuild on every weight update). Increases image size but simplifies deploys.
-- **Mount at runtime** (default in `docker-compose.yml`): keep the weights on the host (or an object store) and mount as a read-only volume:
-
-```bash
-docker run --rm -v biovoice_biovoice-models:/models -v "$(pwd)/backend/models:/src" alpine \
-    cp -a /src/. /models
-```
-
-If the weights are missing, `/readyz` reports `models_note` and the backend falls back to its heuristic detector + encoder. Verification still works but accuracy degrades — production must serve real weights.
-
-## Spoof generation engine
-
-The `/spoof` route uses the system text-to-speech as the default engine:
-- macOS containers: `say` (bundled with the OS, no extra config)
-- Linux containers: install `espeak-ng` via `apt-get install -y espeak-ng` in the Dockerfile (or use the macOS host directly)
-
-XTTS-v2 voice cloning is **planned for v1.1** — see `Plan.md` §S2 for the migration steps (Py 3.12 venv switch + 1.8 GB checkpoint + docker-compose volume mount). The current kiosk's spoof verdicts on system-TTS audio are documented as a known limitation in `docs/operator-guide.md`.
-
-## Operational checks
-
-| Check | Command |
-|---|---|
-| Liveness | `curl https://kiosk.example.com/healthz` → `{"status":"ok"}` |
-| Readiness (deep) | `curl https://kiosk.example.com/readyz` → `{"ready":true,"checks":{...}}` |
-| Prometheus metrics | `curl https://kiosk.example.com/api/metrics` |
-| Operator summary | `curl https://kiosk.example.com/api/metrics/summary` (powers the Console panel — same numbers visible in the UI) |
-
-### What `/readyz` checks
-
-1. SQLite connection (`SELECT 1`).
-2. `aasist.pt` exists on disk.
-3. `redimnet_b5.pt` exists on disk.
-
-Returns 503 if (1) fails. Missing weights are reported as a `models_note` but **do not** fail the readiness probe — the heuristic fallback keeps the kiosk operational. Tighten this when your deployment cannot accept that fallback.
+---
 
 ## Backup + restore
 
-`./deploy/backup.sh` produces a single `tar.gz` containing the SQLite DB + reference samples. Run from cron:
+`deploy/backup.sh` produces a single `tar.gz` of the SQLite DB + reference samples. Run from the host that holds the data volume:
 
 ```cron
 30 2 * * * /opt/biovoice/deploy/backup.sh
 ```
 
-Retention: 30 days, configurable inside `backup.sh`.
+Default retention: 30 days; edit the script to change.
 
-To restore: stop the backend, run `./deploy/restore.sh <archive>`, restart. Existing data is moved aside (not deleted) so the restore is reversible.
+To restore: stop the container, `./deploy/restore.sh <archive>`, restart.
 
-## Postgres migration (v1.1 — planned)
+---
 
-The current SQLite store is functional for single-instance deployments up to a few thousand enrolled users. Beyond that — or for a multi-instance HA setup — migrate to Postgres:
+## TLS
 
-1. Implement `app/storage/postgres_store.py` against the existing `VerificationStore` Protocol.
-2. Add `DATABASE_URL=postgres://…` env var; `core/container.py` chooses store based on the URL scheme.
-3. Alembic migration that creates the schema documented in `app/storage/sqlite_store.py:_ensure_schema`.
-4. Cutover: stop traffic, run `scripts/migrate_sqlite_to_postgres.py`, redeploy with `DATABASE_URL` set.
+The container itself speaks plain HTTP on :8000. Terminate TLS at the layer in front:
 
-The Protocol-driven storage layer means no service code changes — only the store implementation and the container wiring. See `docs/postgres_migration.md` for the full playbook.
+- **Fly.io / Render / Railway**: automatic, nothing to do.
+- **VPS + Caddy**: automatic Let's Encrypt as shown above.
+- **VPS + nginx**: see `deploy/nginx.conf` for a hardened reference (Mozilla intermediate profile, HSTS, edge rate limit). Drop your fullchain + privkey in `deploy/certs/`.
+- **Closed network kiosk**: self-signed cert is fine; the operator accepts it once.
+
+---
+
+## PWA install
+
+After the kiosk is reachable over HTTPS, end-users can install it as a Progressive Web App:
+
+- iPhone Safari: Share → Add to Home Screen
+- Android Chrome: menu → Install app
+- Desktop Chrome / Edge: install icon in the URL bar
+
+See `docs/pwa-install.md` for screenshots + quirks.
+
+PWA install requires HTTPS (or `localhost`); HTTP-only LAN deployments won't surface the install prompt.
+
+---
+
+## Operational sanity
+
+| Question | Command |
+|---|---|
+| Is the container alive? | `curl https://kiosk.example.com/health` |
+| Is the deep stack ready? | `curl https://kiosk.example.com/readyz` |
+| Verification throughput? | `curl https://kiosk.example.com/metrics/summary` |
+| Container logs | `docker logs -f biovoice` (or your platform's log viewer) |
+| Restart | `docker restart biovoice` (or platform-specific) |
+
+---
+
+## Postgres migration (still planned, deferred)
+
+The current SQLite store is fine for single-instance deployments up to a few thousand enrolled users. Beyond that — or for multi-instance HA — migrate per `docs/postgres_migration.md`. The store layer is Protocol-based, so service code doesn't change; only the store implementation + container wiring.
+
+---
 
 ## Hardening checklist
 
-For closed-network single-kiosk deployments, the threat model is mostly local (operator misuse + physical access). For wider exposure, revisit:
+For closed-network single-kiosk deployments, the threat model is mostly local (operator misuse + physical access). For wider exposure:
 
-- File upload paths (`/enroll`, `/verify`, `/spoof`, `/spoof/test`) — multipart parser limits configured in nginx (10 MB body limit). Verify on your nginx version.
-- TLS config — A+ on SSL Labs is the floor. The bundled `deploy/nginx.conf` aims for Mozilla "intermediate" profile.
-- Rate-limit at the edge: 50 r/s per IP, burst 100, configured in `deploy/nginx.conf`.
-- If the kiosk becomes network-reachable beyond the operator console, **add an auth layer** — the v1.0 strip removed cookie sessions because the kiosk was operator-controlled. See `docs/remaining_work.md` G8.
+- **TLS**: A+ on SSL Labs is the floor. The bundled `deploy/nginx.conf` aims for Mozilla "intermediate" profile; Caddy gets you the same automatically.
+- **Body size**: nginx config limits multipart uploads to 10 MB. Verify on your reverse proxy.
+- **Rate limit at the edge**: 50 r/s per IP, burst 100 in the bundled nginx config. Caddy's per-IP rate-limit plugin can do the same.
+- **Auth**: the v1.0 strip removed cookie sessions because the kiosk was operator-controlled. If the kiosk becomes network-reachable beyond the operator console, **add an auth layer** — see `docs/remaining_work.md` G8.
+- **Observability**: scrape `/metrics` into Prometheus; alert on `/readyz` 503 streaks.
+
+---
+
+## Local Docker Compose (legacy)
+
+The original three-service stack is still in the repo for the local kiosk topology (backend + nginx static + nginx TLS). It uses `backend/Dockerfile` rather than the unified top-level one.
+
+```bash
+cd frontend && npm ci && npm run build && cd ..
+docker compose up -d --build
+curl --insecure https://localhost/readyz
+```
+
+Use this when you specifically want the host-published TLS-terminated nginx layout. For a hosted deploy, prefer the single-image path above.
+
+---
+
+## ML weights
+
+The current image bakes both checkpoints in. To swap:
+1. Replace `backend/models/aasist.pt` and/or `backend/models/redimnet_b5.pt` on the host.
+2. Rebuild the image (`docker build -t biovoice:1.1.x .`).
+3. Redeploy.
+
+If you'd prefer to mount the weights at runtime (so updates don't require a rebuild), bind-mount over `/app/backend/models` and document the source-of-truth path on your infra.

@@ -1,265 +1,208 @@
-# BioVoice — Real Visualizations Plan (v1.0.3)
+# BioVoice — Web Image + PWA Plan (v1.1.0)
 
-> **Status**: drafted 2026-05-12 · supervisor-driven · single-kiosk · branch `main`
-> **Supersedes**: the v1.0.2 benchmarks plan (closed; B0–B6 shipped at tag `v1.0.2`).
-> **Goal**: replace the two remaining schematic / approximate visualizations in the operator console with real data end-to-end. No mocks. No "(schematic)" / "(approx)" labels left in the UI.
+> **Status**: drafted 2026-05-12 · supervisor-driven · branch `main`
+> **Supersedes**: the v1.0.3 visualisations plan (closed; V0–V6 shipped at tag `v1.0.3`).
+> **Goal**: produce a single Docker image deployable to any cloud (FastAPI serves both API + the built React UI), and make the kiosk installable as a Progressive Web App from any browser.
+> **Design spec**: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). Covers v1.1.0 (this plan) + v1.2.0 (desktop bundled installer, follow-up plan).
 
 ---
 
 ## Context
 
-The system already loads real ML weights (ReDimNet B5 + AASIST), ships measured EER numbers (LibriSpeech 0.90% / say-spoofs 29.0%), and surfaces model provenance via `DegradedBanner`. Two surfaces in `frontend/src/console-ext.jsx` are still **not** real:
+After v1.0.3, the kiosk renders real ML data end-to-end but only ships as a local-dev experience: `pnpm dev` + `uvicorn` on two ports, `docker-compose.yml` for single-host staging only. The user-facing ask is "create the native installer. i want also web version and also app". The packaging spec decomposed that into three deliverables — the web image and the PWA-installable surface land in v1.1.0; the desktop bundled installer ships in v1.2.0 because PyInstaller bundling of torch is the only ~2-week effort in the stack.
 
-1. **`EmbeddingConstellation` (lines 78-273)** — labelled "schematic" in its own tooltip. Cluster centers are derived from `hash(profile.id)` (line 88) + `seedRandom()` (line 106) + Gaussian noise (line 109) + 90 background "noise" points (line 119). The "live voice comet" (line 232) is `Math.sin(t)` driven, not real audio. **Zero real ReDimNet vectors are involved.**
+This plan covers v1.1.0 only.
 
-2. **`LiveFeatures` (lines 279-365)** — labelled "(live mic · approx jitter)". Pitch is a single FFT-bin peak (line 297, no autocorrelation refinement), formants are spectral peaks not LPC roots (line 304), jitter is per-frame F0 variance not cycle-to-cycle period diff (line 318), SNR is a band-energy ratio plus a `+18 dB` heuristic offset (line 333).
+### What's in the repo today
 
-The supervisor-facing ask: **"full system working, no mock data"**. This plan covers the visualization layer. Trained sub-classifier heads (G2), XTTS spoof generation (S2), gated VoxCeleb/ASVspoof bench, multi-speaker volunteer study (G4), Postgres (G5), and the restore tool (G7) are explicitly **out of scope** — all carried forward to v1.1.
-
-### What's already in the repo (don't rebuild)
-
-- `users.embedding_json` + `users.sample_embeddings_json` columns + backfill (`backend/app/storage/sqlite_store.py:35-83`). Per-sample 192-d embeddings already stored at enrolment time.
-- `verification.py:enroll()` populates `sample_embeddings` (`backend/app/services/verification.py:164,173`). Centroid is `_build_reference_embedding(sample_embeddings)` (line 167).
-- `RedimNetSpeakerEncoder.encode(waveform)` (`backend/app/services/speaker_encoder.py`) — production encoder used by every flow.
-- `decode_wav_with_timings` + `trim_to_voice` (`backend/app/services/audio.py`) — same pre-processing as `/verify`.
-- `useMetricsSummary`, `useCalibratedTimeline`, `useAppDispatch`, `useVoiceRecorder` — existing hook patterns in `frontend/src/lib/`.
-- `ModelProvenance` plumbing + `DegradedBanner` — already gates UI on real-vs-fallback. Reuse for the new endpoint responses.
+- `Dockerfile` (root) and `backend/Dockerfile` — currently only the backend builds; image ~1.4 GB with `[model]` extras.
+- `docker-compose.yml` — three services (`backend`, `frontend` via nginx static, `nginx` TLS).
+- `frontend/src/lib/api.ts:18` — `const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";` — the same-origin refactor target.
+- `backend/app/main.py` — pure API, no static-files mount.
+- `backend/models/{aasist.pt, redimnet_b5.pt}` — 1.2 MB + 30 MB. Baked into the image.
+- `frontend/src/lib/audio.ts:37-42` — MediaRecorder candidates include `audio/mp4`, so iOS Safari recording works untouched.
 
 ---
 
 ## Design
 
-### V1 — Backend `GET /users/embeddings` + `POST /embed`
+### P1 — Backend serves built React (same-origin)
 
-Two endpoints. No schema migration (storage already has per-sample data).
+**Change**: drop the two-port architecture for production. FastAPI on :8000 handles both API routes AND the built React UI.
 
-**`GET /users/embeddings`** — bulk dump of every enrolled profile.
-```json
-[
+- `backend/app/main.py` — after `app.include_router(router)`, add a `StaticFiles` mount at `/` with `html=True` (SPA fallback for unmatched non-API paths). The mount points at `/app/frontend_dist` inside the container. Mount only when the directory exists so local-dev (`uvicorn` without `pnpm build`) still works.
+- The static mount sits AFTER all `@router` routes, so registered API routes always win. SPA fallback only catches paths that aren't API routes AND aren't real static files.
+- `frontend/src/lib/api.ts:18` — change default to empty string. `fetch("/users/embeddings", …)` becomes same-origin. Local dev keeps working: set `VITE_API_BASE_URL=http://localhost:8000` in `frontend/.env.local` (documented in deployment.md).
+- New test `backend/tests/test_static_mount.py` (3 cases): index returns HTML when `frontend_dist` exists; SPA fallback works on unknown paths; without `frontend_dist`, mount is absent and routes still 404 normally.
+
+### P2 — Top-level multi-stage Dockerfile
+
+**Change**: replace the backend-only `Dockerfile` with a 3-stage image that builds the frontend, installs the backend, and runs the unified server.
+
+```
+stage 1 (node:20-alpine)
+  ├── enable corepack, pnpm install --frozen-lockfile
+  ├── pnpm build → /build/dist
+stage 2 (python:3.12-slim)
+  ├── apt: build-essential, libsndfile1, git
+  ├── pip install -e ".[model]" → /install site-packages
+stage 3 (python:3.12-slim runtime)
+  ├── COPY --from=stage1 /build/dist /app/frontend_dist
+  ├── COPY --from=stage2 /install /usr/local
+  ├── COPY backend/app /app/app
+  ├── COPY backend/models /app/models   ← weights baked in
+  ├── CMD ["uvicorn","app.main:app","--host","0.0.0.0","--port","8000"]
+```
+
+- Image target: ≤ 1.5 GB. Current backend-only is 1.4 GB; adding the bundled `dist/` adds ~270 KB unzipped, negligible.
+- Keep `backend/Dockerfile` for the legacy compose stack; document the top-level `Dockerfile` as the new deploy target.
+- `.dockerignore` updated to prevent test fixtures + node_modules + venvs from inflating the build context.
+
+### P3 — PWA install surface
+
+**Change**: turn the web app into a Progressive Web App so iPhone/iPad/Android/desktop browsers can "Add to Home Screen".
+
+- `frontend/package.json` — add `vite-plugin-pwa` (devDependency).
+- `frontend/vite.config.ts` — register the plugin:
+  ```ts
+  VitePWA({
+    registerType: 'autoUpdate',
+    includeAssets: ['icons/*'],
+    manifest: { /* see below */ },
+    workbox: {
+      navigateFallback: '/index.html',
+      // API routes always hit the network — they need a live backend.
+      navigateFallbackDenylist: [/^\/users/, /^\/verify/, /^\/embed/, /^\/identify/, /^\/spoof/, /^\/results/, /^\/metrics/, /^\/readyz/, /^\/health/, /^\/enroll/],
+    },
+  })
+  ```
+- Manifest:
+  ```json
   {
-    "user_id": "alice",
-    "centroid": [192 floats],
-    "samples": [[192 floats], [192 floats], [192 floats]],
-    "sample_count": 3,
-    "enrolled_at": "2026-05-12T12:00:00Z"
-  },
-  ...
-]
-```
-Source: `SQLiteStore.list_users()` already returns `SpeakerRecord(embedding, sample_embeddings, ...)`. Just expose via Pydantic.
+    "name": "BioVoice",
+    "short_name": "BioVoice",
+    "theme_color": "#04070d",
+    "background_color": "#04070d",
+    "display": "standalone",
+    "start_url": "/",
+    "icons": [
+      { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+      { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+      { "src": "/icons/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ]
+  }
+  ```
+- Icons: a single `frontend/public/icons/source.svg` (generated from the existing kiosk colour palette), plus the three rasterised PNGs committed alongside.
+- `frontend/index.html` — add `<link rel="manifest">`, `<meta name="theme-color" content="#04070d">`, iOS bits: `<link rel="apple-touch-icon" href="/icons/icon-192.png">`, `<meta name="apple-mobile-web-app-capable" content="yes">`, `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`.
+- Lighthouse PWA audit ≥ 90 as the verification.
 
-**`POST /embed`** — pure encoder pass for the live point.
-- Body: `multipart/form-data` with `audio` file, same as `/verify` (reuse the FastAPI `File(...)` shape).
-- Response: `{ embedding: [192 floats], duration_ms: 1500, snr_db: 22.4, frame_count: 24000, model_provenance: {...} }`
-- Implementation: new `VerificationService.embed_only(audio_bytes)` method:
-  1. `decode_wav_with_timings` → samples
-  2. `trim_to_voice` → trimmed
-  3. **Skip** the SNR/quality gate (live preview should not 4xx; just return a low-confidence flag)
-  4. `encoder.encode(trimmed.waveform)` → 192-d
-  5. Return + provenance
-- **Does NOT** write to DB. **Does NOT** call detector. **Does NOT** increment metrics. Pure stateless preview.
-- Target latency: <100ms on M2 CPU.
+### P4 — Deployment docs + release notes
 
-### V2 — Frontend `lib/pca.ts` + `lib/dsp.ts`
-
-Two pure-JS modules, fully unit-testable. No new npm dependencies — all written from scratch (~200 LoC each).
-
-**`pca.ts`**:
-```ts
-export function fitPCA3(vectors: number[][]): { basis: number[][]; mean: number[] };
-export function projectPCA3(vector: number[], pca: PCA): [number, number, number];
-```
-Algorithm: subtract mean → covariance matrix → top-3 eigenvectors via power iteration with deflation (192×192 cov, 3 components, ~200ms one-shot in JS — fine).
-
-**`dsp.ts`** (operates on Float32Array PCM at 16 kHz):
-```ts
-export function pitchAutocorrelation(samples: Float32Array, sr: number): number;  // Hz, 0 if silence
-export function formantsLPC(samples: Float32Array, sr: number, order?: number): [number, number, number];  // F1, F2, F3 in Hz
-export function jitterPercent(periodSamples: number[]): number;  // cycle-to-cycle, 0–100
-export function snrFromVad(samples: Float32Array, vadMask: boolean[]): number;  // dB
-```
-
-Algorithms:
-- **Pitch**: Boersma-style autocorrelation over [80, 400] Hz. Window with Hann, normalise by zero-lag, parabolic interpolation around the peak. No FFT needed.
-- **Formants**: Pre-emphasis (`α=0.97`) → Hamming window → autocorrelation → Levinson-Durbin to LPC coefficients (order 12 for 16 kHz speech) → polynomial root-finding (Bairstow or Durand-Kerner) → roots inside unit circle → angles → frequencies → return first 3 above 90 Hz with bandwidth filter.
-- **Jitter**: cycle-to-cycle relative absolute period difference. Buffer of last N=20 detected periods.
-- **SNR**: 10·log10(mean(|samples[vad=true]|²) / mean(|samples[vad=false]|²)). No magic offset.
-
-### V3 — Frontend hooks
-
-**`hooks/useEmbeddingProjection.ts`**:
-```ts
-export function useEmbeddingProjection(): {
-  loading: boolean;
-  error: Error | null;
-  basis: PCA | null;
-  profiles: Array<{
-    user_id: string;
-    centroidProjected: [number, number, number];
-    sampleProjections: Array<[number, number, number]>;
-    color: string;
-  }>;
-  refresh: () => void;
-};
-```
-- Mounts → `getUserEmbeddings()` → `fitPCA3(allCentroids ∪ allSamples)` → projects all, returns memoised. Refits when profile list changes.
-
-**`hooks/useLiveEmbedding.ts`**:
-```ts
-export function useLiveEmbedding(opts: {
-  enabled: boolean;
-  audioBuffer: Float32Array | null;
-  basis: PCA | null;
-  intervalMs?: number;  // default 500
-}): {
-  liveProjected: [number, number, number] | null;
-  liveEmbedding: Float32Array | null;
-  loading: boolean;
-};
-```
-- Slices the **last 1500ms** from `audioBuffer`, encodes to WAV (reuse `frontend/src/lib/audio.ts:samplesToWav`), POSTs to `/embed`, projects via `basis`. Polls every `intervalMs` while `enabled`.
-- Concurrency: at most one in-flight request; new ones short-circuit. Request budget: 2 req/s.
-
-### V4 — Frontend rewrites
-
-**`EmbeddingConstellation` (`console-ext.jsx:78-273`)** — gut the seeded geometry:
-- Remove `centers` (lines 86-99) — replace with `profiles` from `useEmbeddingProjection`.
-- Remove `points` (lines 102-132) — render `profile.centroidProjected` as the labelled cluster center, render `profile.sampleProjections` as small orbiting dots (real per-sample dispersion).
-- Remove the synthetic background-noise loop (lines 118-130) entirely.
-- Remove the `Math.sin(t)` "comet" (lines 232-265) — replace with `liveProjected` from `useLiveEmbedding`. Live point only updates on actual audio; otherwise hidden.
-- Update title tooltip from "Schematic — cluster centres are deterministic per profile ID, not real ReDimNet projections" to "Real ReDimNet 192-d → PCA(3). Live point updates while mic is on."
-
-**`LiveFeatures` (`console-ext.jsx:279-365`)** — replace the inline FFT math:
-- Drop `freqs` prop. Replace with `samples` (Float32Array PCM at 16 kHz).
-- Replace lines 290-312 with `dsp.pitchAutocorrelation` + `dsp.formantsLPC`.
-- Replace lines 313-324 with `dsp.jitterPercent` over a period buffer.
-- Replace lines 325-333 (including the `+18` SNR fudge) with `dsp.snrFromVad`. VAD mask comes from existing recorder (`audio.level > 0.02` per-frame, already computed).
-- Update the parent label in `console.jsx` from `(live mic · approx jitter)` to `(live mic)`.
-
-### V5 — Settings toggle
-
-Add a single boolean in localStorage: `biovoice.constellation.liveOn` (default `true`). Settings panel in `console.jsx` gets a row:
-
-> **Constellation live point** — Stream a 192-d embedding every 500ms to project your live voice into the cluster space. Disable to silence the preview encoder. **[ON / OFF]**
-
-When OFF, `useLiveEmbedding` short-circuits (no requests, no live point rendered). Setting persists across reloads.
-
-### V6 — Tests
-
-**Backend** (`backend/tests/test_embeddings_route.py`, new):
-- `GET /users/embeddings` returns 200, list of dicts with `centroid` length 192, `samples[i]` length 192, `sample_count` matches `len(samples)`.
-- `GET /users/embeddings` on empty DB returns `[]`.
-- `POST /embed` with valid WAV returns 200 + 192-floats + finite SNR + `model_provenance.encoder=="redimnet_b5"`.
-- `POST /embed` does NOT write a row (compare `list_results()` count before/after).
-- `POST /embed` short audio (<1s) returns 200 with low `frame_count` flag (no 4xx).
-- Same audio through `enroll` and `embed` produces identical embedding (within 1e-6 cosine).
-
-**Frontend** (`frontend/src/lib/pca.test.ts` + `dsp.test.ts`, new):
-- `pca.test.ts`: synthetic 3-cluster gaussian (3 clusters of 50 points in 50-d) → PCA → cluster means in 3-d are pairwise ≥1.0 apart.
-- `pca.test.ts`: identity inputs → projections are zero (within tolerance).
-- `dsp.test.ts`: 220 Hz sine, 16 kHz, 0.1s → `pitchAutocorrelation` returns 220 ± 2 Hz.
-- `dsp.test.ts`: silent input → pitch returns 0.
-- `dsp.test.ts`: synthesised 3-formant signal (sum of 3 narrow-band noise bursts at known F1/F2/F3) → `formantsLPC` returns within ±50 Hz of truth.
-- `dsp.test.ts`: stable 220 Hz period buffer → jitter ≈ 0 (<0.1 %); modulated buffer → jitter > 1 %.
-- `dsp.test.ts`: known SNR mixture (sine + scaled gaussian, VAD true on sine) → `snrFromVad` within ±1 dB of computed truth.
-
-**Visual smoke (manual, document in `docs/qa.md`)**:
-1. Enrol 3 distinct voices (3 samples each).
-2. Open Console. Three labelled clusters appear, visibly separated, each with 3 small orbiting sample points.
-3. Click VERIFY for one of them. While recording, a bright live point streams through the projection; on completion, it parks near the matching cluster.
-4. Toggle the Settings switch off → live point disappears, no `/embed` requests in DevTools network tab.
+- Rewrite `docs/deployment.md`:
+  - **Fly.io**: `fly launch --image biovoice:1.1.0 --internal-port 8000`. Auto-TLS on `*.fly.dev`. Volume mount for `/app/data`.
+  - **Render**: Web Service from this repo. `dockerfilePath: ./Dockerfile`. Disk for `/app/data`.
+  - **Railway**: similar pattern.
+  - **VPS + Caddy**: docker run + Caddyfile reverse-proxy with auto-Let's-Encrypt. Documented snippet.
+  - Persistent volumes: `/app/data` (SQLite + reference samples). `/app/models` is baked into the image, not mounted.
+- New `docs/pwa-install.md`:
+  - iPhone: Safari → Share → Add to Home Screen.
+  - Android Chrome: menu → Install app.
+  - Desktop Chrome / Edge: install icon in URL bar.
+  - Note: install requires HTTPS (or localhost). Kiosk via plain http on a LAN won't be installable.
+- `CHANGELOG.md` v1.1.0 entry.
+- `docs/audit-v1.0.md` v1.1.0 footer.
+- `docs/remaining_work.md` — strike "no hosted deployment" item.
 
 ---
 
 ## Phases
 
-### Phase V0 — Sync this plan to repo `Plan.md`
-- Copy this file to `Plan.md`, replacing the closed v1.0.2 benchmarks plan.
+### Phase P0 — Sync this plan to repo `Plan.md`
+Already done; this file IS Plan.md.
 
-### Phase V1 — Backend (~3h)
-- `backend/app/schemas.py` — `UserEmbedding`, `UsersEmbeddingsResponse`, `EmbedResponse`.
-- `backend/app/services/verification.py` — `embed_only(audio_bytes)` method.
-- `backend/app/api/routes.py` — register `GET /users/embeddings` + `POST /embed` (multipart audio).
-- `backend/tests/test_embeddings_route.py` — new (6 cases above).
-- Run `pytest -q -m "not slow"` → all green.
+### Phase P1 — Backend static mount + same-origin refactor (~3h)
+- `backend/app/main.py` — register the static mount.
+- `frontend/src/lib/api.ts` — change `API_BASE` default to `""`.
+- `backend/tests/test_static_mount.py` — new (3 cases).
+- `pytest -q -m "not slow"` green.
+- `pnpm vitest run` green.
 
-### Phase V2 — Frontend pure modules (~5h)
-- `frontend/src/lib/pca.ts` — fit + project, with TS types.
-- `frontend/src/lib/dsp.ts` — pitch + formants + jitter + SNR.
-- `frontend/src/lib/pca.test.ts` + `dsp.test.ts` — new vitest cases.
-- `frontend/src/lib/api.ts` — `getUserEmbeddings()`, `embedAudio(samples)` helpers.
-- `frontend/src/types.ts` — `UserEmbeddingPayload`, `EmbedResponsePayload` types.
-- Run `pnpm vitest run` → all green.
+### Phase P2 — Top-level Dockerfile (~3h)
+- New 3-stage `Dockerfile` at the repo root (replaces the existing backend-only one as the deploy target).
+- `.dockerignore` updates.
+- `docker build -t biovoice:1.1.0 .` completes; image ≤ 1.5 GB.
+- `docker run -p 8000:8000 biovoice:1.1.0` → `curl localhost:8000/health` returns `ok`.
+- Browser to `http://localhost:8000` → kiosk renders + verify works against the embedded backend.
 
-### Phase V3 — Frontend hooks (~2h)
-- `frontend/src/hooks/useEmbeddingProjection.ts` — new.
-- `frontend/src/hooks/useLiveEmbedding.ts` — new (with toggle support).
+### Phase P3 — PWA assets (~3h)
+- Install `vite-plugin-pwa`.
+- Generate icons from the source SVG; commit the three PNGs.
+- Wire `vite.config.ts` + `index.html`.
+- `pnpm build` produces `dist/sw.js` + `dist/manifest.webmanifest`.
+- Lighthouse PWA audit ≥ 90 against the running container.
 
-### Phase V4 — Frontend rewrites (~3h)
-- `frontend/src/console-ext.jsx` — rewrite `EmbeddingConstellation` + `LiveFeatures`.
-- `frontend/src/console.jsx` — wire new hooks, remove "(schematic)" / "(approx jitter)" labels, add settings toggle row.
-- Tooltip text updates.
+### Phase P4 — Docs + release notes (~2h)
+- `docs/deployment.md` rewrite.
+- `docs/pwa-install.md` new.
+- `CHANGELOG.md` v1.1.0 entry.
+- `docs/audit-v1.0.md` v1.1.0 footer.
 
-### Phase V5 — Manual smoke + docs (~1h)
-- Walk the 4-step manual smoke above. Capture two screenshots (constellation with 3 enrolled, constellation with live point landing).
-- `docs/qa.md` — add the visualization smoke to the operator checklist.
-- `docs/remaining_work.md` — strike the implicit visualization gaps off.
-
-### Phase V6 — Release v1.0.3 (~30min)
-- `CHANGELOG.md` v1.0.3 entry: "Real ReDimNet PCA(3) constellation + real DSP (autocorrelation pitch, LPC formants, cycle-to-cycle jitter, VAD-gated SNR). All `(schematic)` / `(approx)` labels gone."
-- `git tag -a v1.0.3 -m "..."` + push.
-- Update `docs/audit-v1.0.md` footer: "v1.0.3 closes the visualization-honesty gap."
+### Phase P5 — Release v1.1.0 (~1h)
+- Full test sweep: backend `pytest -q -m "not slow"`, frontend `pnpm vitest run`, frontend `pnpm build`.
+- Docker build smoke.
+- `git tag -a v1.1.0 -m "Web image + installable PWA"` + push.
 
 ---
 
 ## Critical files
 
-### Backend (modify)
-- `backend/app/api/routes.py` — register two new routes
-- `backend/app/services/verification.py` — add `embed_only`
-- `backend/app/schemas.py` — three new Pydantic types
+### Backend
+- `backend/app/main.py` — modify (add static mount)
+- `backend/tests/test_static_mount.py` — new
 
-### Backend (new)
-- `backend/tests/test_embeddings_route.py`
+### Frontend
+- `frontend/src/lib/api.ts` — modify (`API_BASE` default → empty)
+- `frontend/vite.config.ts` — modify (`VitePWA` plugin)
+- `frontend/package.json` — modify (add `vite-plugin-pwa` devDep)
+- `frontend/index.html` — modify (manifest + iOS metas)
+- `frontend/public/icons/source.svg` — new
+- `frontend/public/icons/{icon-192,icon-512,icon-maskable}.png` — new
 
-### Frontend (modify)
-- `frontend/src/console-ext.jsx` — gut + rewrite the two components
-- `frontend/src/console.jsx` — wire hooks + settings toggle + label fixes
-- `frontend/src/lib/api.ts` — two helper functions
-- `frontend/src/types.ts` — two TS types
-
-### Frontend (new)
-- `frontend/src/lib/pca.ts` + `pca.test.ts`
-- `frontend/src/lib/dsp.ts` + `dsp.test.ts`
-- `frontend/src/hooks/useEmbeddingProjection.ts`
-- `frontend/src/hooks/useLiveEmbedding.ts`
+### Repo root
+- `Dockerfile` — modify (new 3-stage that builds frontend + backend together)
+- `.dockerignore` — modify
 
 ### Docs
-- `Plan.md` — overwrite (V0)
-- `docs/qa.md` — add smoke test
-- `docs/remaining_work.md` — mark visualization items closed
-- `docs/audit-v1.0.md` — v1.0.3 footer
-- `CHANGELOG.md` — v1.0.3 entry
+- `Plan.md` — overwrite (this file)
+- `docs/deployment.md` — rewrite
+- `docs/pwa-install.md` — new
+- `docs/remaining_work.md` — modify (mark hosted-deploy item closed)
+- `docs/audit-v1.0.md` — modify (v1.1.0 footer)
+- `CHANGELOG.md` — modify (v1.1.0 entry)
 
 ---
 
-## Verification (run before tagging v1.0.3)
+## Verification (run before tagging v1.1.0)
 
-1. **Backend tests**: `pytest -q -m "not slow"` → all green (existing 97 + 6 new = 103).
-2. **Frontend tests**: `pnpm vitest run` → all green.
-3. **`/users/embeddings`** smoke: `curl localhost:8000/users/embeddings | jq '.[0].centroid | length'` → 192.
-4. **`/embed`** smoke: post a recorded WAV → response has `embedding` length 192, `model_provenance.encoder == "redimnet_b5"`.
-5. **No `(schematic)` / `(approx)`** strings remain in `frontend/src/`: `rg -i "schematic|approx jitter" frontend/src/` returns nothing.
-6. **Visual smoke**: 4-step manual walk above passes.
-7. **Settings toggle**: flipping it off stops `/embed` requests within 1s.
-8. **Bundle size**: `pnpm build` → gzipped main bundle still under 90 KB (PCA + DSP add ~6 KB; budget allows).
-9. **Tag**: `git tag v1.0.3` + push.
+1. **Backend tests**: `pytest -q -m "not slow"` → all green (existing 112 + 3 new = 115).
+2. **Frontend tests**: `pnpm vitest run` → all green (currently 47).
+3. **Frontend build**: `pnpm build` produces `dist/sw.js` + `dist/manifest.webmanifest`. Bundle ≤ 90 KB gzipped main chunk.
+4. **Docker build**: `docker build -t biovoice:1.1.0 .` exits 0; image ≤ 1.5 GB.
+5. **Docker smoke**: `docker run -p 8000:8000 biovoice:1.1.0` → `curl localhost:8000/health` returns 200; browser to `http://localhost:8000` shows kiosk.
+6. **PWA score**: `lighthouse --only-categories=pwa` ≥ 90 against the running container.
+7. **Tag**: `git tag v1.1.0` + push.
 
 ---
 
-## UX preference (locked in this brainstorm)
+## Out of scope
 
-- **Live point in constellation = always-on by default**, with a settings toggle to disable. Encoder budget ~2 req/s while mic is granted; toggle off stops the stream entirely. (User: "always on with ability in setting to turn off".)
+- Code signing for desktop installers — v1.2.0
+- PyInstaller-bundled Python backend — v1.2.0
+- Tauri desktop wrapper — v1.2.0
+- Capacitor / native mobile — explicitly chose PWA
+- Hosted deployment — operator deploys the image
+- Postgres migration — SQLite is fine
+- Multi-instance / Redis / load balancer — single container
 
 ---
 
@@ -267,21 +210,12 @@ When OFF, `useLiveEmbedding` short-circuits (no requests, no live point rendered
 
 | Phase | What | Engineer-hours |
 |---|---|---|
-| V0 | Sync plan to Plan.md | 0.2 |
-| V1 | Backend endpoints + tests | 3 |
-| V2 | Pure-JS PCA + DSP modules + tests | 5 |
-| V3 | React hooks | 2 |
-| V4 | Component rewrites + label fixes | 3 |
-| V5 | Manual smoke + doc updates | 1 |
-| V6 | Release v1.0.3 | 0.5 |
-| **Total** | | **~15 engineer-hours (~1.5 days)** |
+| P0 | Sync plan | 0.2 |
+| P1 | Backend static mount | 3 |
+| P2 | Top-level Dockerfile | 3 |
+| P3 | PWA assets | 3 |
+| P4 | Deploy + PWA docs | 2 |
+| P5 | Release v1.1.0 | 1 |
+| **Total** | | **~12 hours (~1.5 days)** |
 
-Critical path: V2 (the LPC + autocorrelation implementations) — everything else is mechanical wire-up.
-
-Out of scope (carried forward to v1.1):
-- G2 trained sub-classifier heads
-- S2 XTTS voice cloning
-- G4 multi-speaker volunteer study
-- G5 Postgres
-- G7 restore tool
-- Gated VoxCeleb1-O / ASVspoof 2019 LA bench (operator can run anytime via `--dataset-name` flags already in place)
+Critical path: P1 (everything else builds on the same-origin refactor).

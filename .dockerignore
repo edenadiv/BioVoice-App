@@ -1,0 +1,48 @@
+# Keep the build context lean — anything under here is shipped as the
+# Docker context to the daemon and slows every `docker build`.
+
+# Node + Python build artefacts
+node_modules/
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tsbuildinfo
+**/tsconfig.tsbuildinfo
+
+# Frontend build outputs (the Dockerfile rebuilds these in stage 1)
+frontend/dist/
+
+# Test artefacts + coverage
+**/coverage/
+**/test-results/
+**/playwright-report/
+**/.lighthouseci/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI/local secrets
+**/.env
+**/.env.*
+deploy/certs/
+backend/data/
+
+# Docs + design specs (not needed in the image)
+docs/
+*.md
+!backend/README.md
+
+# Misc
+.DS_Store
+**/.DS_Store

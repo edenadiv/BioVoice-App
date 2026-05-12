@@ -18,7 +18,12 @@ import type {
 } from "../types";
 import { encodeWav } from "./wav";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+// P1 — same-origin by default. The production Docker image serves the
+// built React bundle from FastAPI on :8000, so all `fetch("/users/…")`
+// calls hit the same host. For local dev where the backend is on :8000
+// and `vite` is on :5173, set `VITE_API_BASE_URL=http://localhost:8000`
+// in `frontend/.env.local`.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 type SpeakerResponse = {
   user_id: string;

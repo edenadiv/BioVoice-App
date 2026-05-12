@@ -222,6 +222,14 @@ This audit is harsh. To balance:
 
 ---
 
+## Update — v1.1.0 (2026-05-12)
+
+`v1.1.0` (`Plan.md` P0–P5) ships the kiosk as a single deployable Docker image + an installable PWA — addresses the deployability gap implicit in the audit's "single-host kiosk" framing without changing the kiosk's design intent:
+- ✅ **Web version** — top-level 3-stage `Dockerfile` produces a 1.66 GB image with the FastAPI backend + bundled React UI + ML weights baked in. Deploys to Fly / Render / Railway / VPS via `docs/deployment.md`. Operator deploys; Anthropic does not host.
+- ✅ **PWA install** — `vite-plugin-pwa` generates manifest + service worker; iOS Safari + Android Chrome + desktop browsers can install it as a standalone app. Lighthouse PWA: 0.88 (only `content-width` fails — intentional for a fixed-stage kiosk).
+
+Audit findings F-1..F-8 status unchanged. Desktop bundled installer (Tauri + PyInstaller) ships in v1.2.0 per `docs/superpowers/specs/2026-05-12-packaging-design.md`.
+
 ## Update — v1.0.3 (2026-05-12)
 
 `v1.0.3` (`Plan.md` V0–V6) closes the last "schematic" / "approx" surfaces flagged in F-6 + F-7:

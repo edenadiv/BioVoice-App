@@ -2,6 +2,43 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.0] — 2026-05-12
+
+Single deployable Docker image + installable PWA. The kiosk is now a one-binary deploy to any cloud (Fly / Render / Railway / VPS), and any modern browser can install it as a standalone "app" without an app-store review.
+
+Design spec: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). Covers v1.1.0 (this release) + v1.2.0 (desktop bundled installer, follow-up).
+
+### Added
+
+- **Top-level `Dockerfile`** — 3-stage build: node 20 builds the React bundle, Python 3.12 installs the FastAPI app + CPU-only torch, slim runtime serves both at port 8000. Final image **1.66 GB** (down from 8.24 GB if we'd taken the default torch wheel that bundles CUDA libs).
+- **Same-origin frontend** — `VITE_API_BASE_URL` defaults to empty string so all `fetch()` calls hit the backend on the same host. CORS-free deploys; one URL for everything.
+- **Static-files mount in `app.main`** — when `/app/frontend_dist/` exists, FastAPI serves the SPA at `/`. SPA fallback handler routes unmatched HTML-accepting GETs back to `index.html` so React Router deep-links work.
+- **`vite-plugin-pwa`** wiring (`injectManifest` strategy with a hand-written `frontend/src/sw/sw.ts`) — precaches static assets, passes API routes straight through to the network. Generates `/manifest.webmanifest` + `/sw.js` at build.
+- **PWA icons** — `frontend/public/icons/` with `source.svg` + 192/512/maskable PNGs. Themed dark teal matching the kiosk palette.
+- **iOS PWA metas** in `index.html` — `apple-touch-icon`, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `theme-color`.
+- **`docs/pwa-install.md`** — iPhone Safari, Android Chrome, desktop install instructions + cache strategy explainer.
+- **`docs/deployment.md`** rewrite — Fly.io / Render / Railway / VPS-with-Caddy paths for the unified single-image deploy. Legacy compose stack docs moved to a footer section.
+- **`backend/tests/test_static_mount.py`** (6 cases) — index renders, SPA fallback works, real assets serve, API routes outrank SPA fallback, JSON 404s stay JSON, no mount when dist missing.
+- **Root `.dockerignore`** — keeps build context lean (no node_modules, no venvs, no test artefacts in the image).
+
+### Changed
+
+- `Dockerfile` (root) — was a backend-only build context; now builds the unified image.
+- `backend/Dockerfile` — copy of the legacy backend-only Dockerfile, kept for `docker-compose.yml`.
+- `docker-compose.yml` — points at `backend/Dockerfile` directly (the path-up trick was tying it to the old root layout).
+- `frontend/src/lib/api.ts:18` — `API_BASE` default `"http://localhost:8000"` → `""` (same-origin).
+- `frontend/index.html` — added PWA metas; viewport meta clarified with rationale.
+- `frontend/vite.config.ts` — adds `VitePWA` plugin in `injectManifest` mode (workaround for upstream workbox-build bug on paths with apostrophes — fails with `"Eden's Files"`).
+- `backend/app/main.py` — adds `_resolve_frontend_dist()` + `_mount_spa()`; honours `BIOVOICE_FRONTEND_DIST` env override for non-default install layouts.
+
+### Verification
+
+- Backend: `pytest -q -m "not slow"` → **118/118** (was 112; +6 new for the static mount).
+- Frontend: `vitest run` → **47/47**.
+- `docker build` → 1.66 GB image; `docker run -p 8000:8000` → kiosk reachable; `/health` ok; `/users/embeddings` returns valid JSON; `/manifest.webmanifest` + `/sw.js` + `/icons/icon-192.png` all 200.
+- Lighthouse PWA category: **0.88** (Lighthouse 11). All 5 actionable PWA criteria pass; only `content-width` fails — intentional for the fixed 1920×1080 kiosk stage.
+- Bundle size: **80.70 KB gzipped main chunk** (budget 90 KB).
+
 ## [v1.0.3] — 2026-05-12
 
 Real visualisations. Closes the last two "schematic" / "approx" surfaces in the operator console — the EmbeddingConstellation now plots real ReDimNet 192-d → PCA(3) projections of every enrolled profile (centroid + per-sample dispersion + live moving point), and the LiveFeatures panel now uses real DSP (autocorrelation pitch, Levinson-Durbin LPC formants, cycle-to-cycle jitter, VAD-gated SNR) instead of FFT-bin shortcuts and a `+18 dB` SNR offset.
