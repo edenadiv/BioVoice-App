@@ -255,7 +255,7 @@ function DeepfakeLab({ audio, profiles }) {
                 }}/>
             </Field>
 
-            <Field label="TTS ENGINE">
+            <Field label="TTS ENGINE  ·  PICK ONE">
               {enginesPayload === null ? (
                 <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>
                   LOADING ENGINES…
@@ -269,6 +269,7 @@ function DeepfakeLab({ audio, profiles }) {
                   {enginesPayload.engines.map((e) => {
                     const disabled = !e.available;
                     const selected = engineId === e.id;
+                    const isCloud = e.requiresNetwork;
                     return (
                       <button
                         key={e.id}
@@ -277,23 +278,35 @@ function DeepfakeLab({ audio, profiles }) {
                         title={disabled ? `${e.label} isn't available on this backend.` : e.description}
                         className="lift"
                         style={{
-                          padding: '10px 12px', borderRadius: 10,
+                          padding: '12px 14px', borderRadius: 10,
                           cursor: disabled ? 'not-allowed' : 'pointer',
                           background: selected ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
                           border: selected ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
                           color: disabled ? 'var(--ink-mute)' : 'var(--ink)',
                           textAlign: 'left', transition: 'all 200ms',
                           position: 'relative', opacity: disabled ? 0.5 : 1,
+                          minHeight: 70,
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                          <span style={{ fontSize: 12 }}>{e.label}</span>
-                          {e.requiresNetwork && (
-                            <span className="label-mono" style={{ fontSize: 7, color: 'var(--teal-2)', letterSpacing: '0.18em' }}>NET</span>
-                          )}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>{e.label}</span>
+                          <span
+                            className="label-mono"
+                            style={{
+                              fontSize: 8, padding: '2px 7px', borderRadius: 999,
+                              letterSpacing: '0.18em', flexShrink: 0,
+                              color: isCloud ? '#7ef0ff' : '#6affc8',
+                              border: isCloud ? '1px solid rgba(126,240,255,0.45)' : '1px solid rgba(106,255,200,0.45)',
+                              background: isCloud ? 'rgba(126,240,255,0.06)' : 'rgba(106,255,200,0.06)',
+                            }}
+                          >
+                            {isCloud ? 'CLOUD' : 'LOCAL'}
+                          </span>
                         </div>
-                        <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
-                          {disabled ? 'UNAVAILABLE' : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}`}
+                        <div className="label-mono" style={{ fontSize: 8, marginTop: 6, color: 'var(--ink-soft)' }}>
+                          {disabled
+                            ? 'UNAVAILABLE ON THIS BACKEND'
+                            : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}${e.id === 'xtts' ? ' · USES REFERENCE WAV' : ''}`}
                         </div>
                       </button>
                     );
@@ -303,12 +316,13 @@ function DeepfakeLab({ audio, profiles }) {
             </Field>
 
             {selectedEngine && selectedEngine.voices.length > 0 && (
-              <Field label={`VOICE  ·  ${selectedEngine.label}`}>
+              <Field label={`VOICE  ·  ${selectedEngine.voices.length} AVAILABLE  ·  ${selectedEngine.requiresNetwork ? 'CLOUD' : 'LOCAL'}`}>
                 <select
                   value={voiceId}
                   onChange={(e) => setVoiceId(e.target.value)}
+                  size={1}
                   style={{
-                    width: '100%', padding: '10px 12px',
+                    width: '100%', padding: '12px 14px',
                     background: 'rgba(125,200,255,0.04)',
                     border: '1px solid var(--line-2)',
                     borderRadius: 10, color: 'var(--ink)',
@@ -316,12 +330,31 @@ function DeepfakeLab({ audio, profiles }) {
                     outline: 'none', cursor: 'pointer',
                   }}
                 >
-                  {selectedEngine.voices.map((v) => (
-                    <option key={v.id} value={v.id} style={{ background: '#04070d', color: 'var(--ink)' }}>
-                      {v.label}{v.language ? `  ·  ${v.language}` : ''}
-                    </option>
-                  ))}
+                  {(() => {
+                    // Group voices by their `language` so a 400-entry
+                    // dropdown stays navigable. Browser type-ahead still
+                    // works inside each <optgroup>.
+                    const groups = new Map();
+                    for (const v of selectedEngine.voices) {
+                      const key = v.language || '—';
+                      if (!groups.has(key)) groups.set(key, []);
+                      groups.get(key).push(v);
+                    }
+                    const sortedKeys = Array.from(groups.keys()).sort();
+                    return sortedKeys.map((lang) => (
+                      <optgroup key={lang} label={lang} style={{ background: '#070b14', color: 'var(--teal-2)' }}>
+                        {groups.get(lang).map((v) => (
+                          <option key={v.id} value={v.id} style={{ background: '#04070d', color: 'var(--ink)' }}>
+                            {v.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ));
+                  })()}
                 </select>
+                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+                  TYPE A LETTER TO JUMP · GROUPED BY LANGUAGE
+                </div>
               </Field>
             )}
 

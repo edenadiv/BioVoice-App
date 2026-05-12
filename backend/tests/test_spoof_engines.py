@@ -112,14 +112,18 @@ def test_espeak_engine_lists_languages_when_binary_present():
     assert engine.default_voice() == "en"
 
 
-def test_edge_engine_returns_curated_voice_list():
+def test_edge_engine_returns_full_voice_catalogue():
     engine = EdgeTtsEngine()
     if not engine.is_available():
         pytest.skip("edge-tts package not installed")
     voices = engine.list_voices()
-    # The curated list is fixed at 12; if it changes the picker tests
-    # need to be re-verified.
-    assert len(voices) == 12
+    # U1 — full catalogue fetched from Microsoft. 50+ entries on any
+    # reachable network; the fallback list has 5 entries.
+    assert len(voices) >= 5
+    ids = {v.id for v in voices}
+    # Default voice is always present — true for both the live catalogue
+    # and the offline fallback.
+    assert "en-US-AriaNeural" in ids
     assert engine.default_voice() == "en-US-AriaNeural"
 
 

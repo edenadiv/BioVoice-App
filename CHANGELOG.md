@@ -2,6 +2,32 @@
 
 All notable changes to BioVoice. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), the project follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
+## [v1.1.2] — 2026-05-12
+
+Full TTS voice catalogues + explicit LOCAL/CLOUD labelling. The DeepfakeLab engine picker no longer ships a curated subset — every voice each available engine can synthesise is selectable from a grouped dropdown.
+
+### Added
+
+- **Edge TTS full catalogue** — first call to `GET /spoof/engines` now invokes `edge_tts.list_voices()` once and caches the result (322 neural voices on a reachable network, across 90+ locales). Includes Hebrew `he-IL-AvriNeural` / `he-IL-HilaNeural` + extensive Arabic / Asian language coverage.
+- **gTTS full catalogue** — exposes all 69 ISO languages from `gtts.lang.tts_langs()`, plus 6 English-accent aliases (`en-uk`, `en-au`, `en-in`, `en-ca`, `en-ie`, `en-za`) that the synth maps to gTTS's `tld` parameter. Total: 75 entries.
+- **espeak full catalogue** — parses `espeak-ng --voices` at first use; 140 language variants on a stock Debian slim.
+- **LOCAL / CLOUD pill** on every engine card — replaces the old `[NET]` chip. Green pill for offline-capable engines (`say`, `espeak`, `xtts`), cyan pill for cloud (`edge`, `gtts`).
+- **`<optgroup>`-grouped voice dropdown** — 322 Edge voices grouped by locale (`en-US`, `he-IL`, `fr-FR`, …) so the picker stays navigable. Browser type-ahead works inside each group.
+
+### Changed
+
+- `EdgeTtsEngine._CURATED_VOICES` renamed to `_FALLBACK_VOICES` (5 entries) — used only when the live `list_voices()` call fails (offline / Microsoft endpoint blocked).
+- `GttsEngine` voice list constructed from `gtts.lang.tts_langs()` rather than a hand-coded 19-entry tuple.
+- `EspeakEngine` voice list parsed from `espeak-ng --voices` rather than a hand-coded 10-entry tuple.
+- Voice descriptors in API responses now include rich labels (`Aria (en-US, F)`, `Avri (he-IL, M)`) rather than bare IDs.
+
+### Verification
+
+- Backend: `pytest -q -m "not slow"` → **128/128** unchanged. Updated `test_edge_engine_returns_full_voice_catalogue` to assert ≥5 (the offline fallback floor) rather than exactly 12.
+- Frontend: `vitest run` → **47/47**.
+- Container smoke: `GET /spoof/engines` returns 322 + 75 + 140 voices on a reachable network. UI dropdown renders 322 entries across 92 `<optgroup>`s without UI lag.
+- Engine pills clearly label which engines run locally vs hit the network.
+
 ## [v1.1.1] — 2026-05-12
 
 Multi-engine TTS for DeepfakeLab. The "ATTACK MODEL" picker is now a real engine + voice chooser backed by three fast synthesisers, with `XTTS-v2` still available behind its existing `[spoof]` extra.

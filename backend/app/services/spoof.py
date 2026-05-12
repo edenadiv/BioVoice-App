@@ -182,20 +182,19 @@ class EspeakEngine:
     description = "Classic formant TTS — extremely fast, robotic. Good for adversarial smoke tests."
     requires_network = False
 
-    # Conservative language list; espeak-ng ships many more, but this
-    # covers the languages the kiosk surfaces.
-    _LANGS = [
-        ("en", "English (US/UK)"),
-        ("en-us", "English (US)"),
-        ("en-gb", "English (UK)"),
+    # U1 — full voice catalogue is enumerated at runtime via
+    # `espeak-ng --voices`. The hand-coded fallback below kicks in only
+    # when parsing fails (very old espeak builds).
+    _FALLBACK_LANGS = [
+        ("en", "English"),
         ("es", "Spanish"),
         ("fr", "French"),
         ("de", "German"),
         ("it", "Italian"),
-        ("pt", "Portuguese"),
-        ("he", "Hebrew"),
-        ("ar", "Arabic"),
     ]
+
+    def __init__(self) -> None:
+        self._voices_cache: list[VoiceDescriptor] | None = None
 
     def is_available(self) -> bool:
         return any(shutil.which(b) for b in ("espeak-ng", "espeak"))
@@ -203,7 +202,38 @@ class EspeakEngine:
     def list_voices(self) -> list[VoiceDescriptor]:
         if not self.is_available():
             return []
-        return [VoiceDescriptor(id=code, label=label, language=code) for code, label in self._LANGS]
+        if self._voices_cache is not None:
+            return self._voices_cache
+        binary = shutil.which("espeak-ng") or shutil.which("espeak")
+        voices: list[VoiceDescriptor] = []
+        try:
+            proc = subprocess.run([binary, "--voices"], capture_output=True, timeout=10)
+            for line in proc.stdout.decode("utf-8", errors="replace").splitlines()[1:]:
+                # Columns: Pty Language Age/Gender VoiceName File Other
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                lang = parts[1]
+                name = parts[3]
+                if not lang or not name or name.lower() in {"variant", "mb"}:
+                    continue
+                voices.append(VoiceDescriptor(id=lang, label=f"{name} ({lang})", language=lang))
+        except (subprocess.TimeoutExpired, OSError, IndexError):
+            voices = []
+        if not voices:
+            voices = [VoiceDescriptor(id=code, label=label, language=code) for code, label in self._FALLBACK_LANGS]
+        # Dedupe by id, keeping first occurrence (espeak lists variants
+        # under the same language code).
+        seen: set[str] = set()
+        unique: list[VoiceDescriptor] = []
+        for v in voices:
+            if v.id in seen:
+                continue
+            seen.add(v.id)
+            unique.append(v)
+        unique.sort(key=lambda v: v.id)
+        self._voices_cache = unique
+        return unique
 
     def default_voice(self) -> str | None:
         return "en" if self.is_available() else None
@@ -238,32 +268,25 @@ class EspeakEngine:
 class EdgeTtsEngine:
     id = "edge"
     label = "Microsoft Edge TTS"
-    description = "Neural cloud TTS, free, ~400 voices. Fast (~1 s latency). Requires internet."
+    description = "Neural cloud TTS, free, ~400 voices across 90+ locales. Fast (~1 s latency). Requires internet."
     requires_network = True
 
-    # Hand-picked subset that's nicely spread across genders + accents.
-    # The full edge-tts catalogue has 400+ voices; we ship the 12 most
-    # useful ones for the deepfake-lab UI and document how to expand.
-    _CURATED_VOICES = [
-        # English
+    # U1 — the full catalogue is fetched once from Microsoft's endpoint
+    # at first use of /spoof/engines and cached for the process lifetime.
+    # If the fetch fails (offline), we fall back to a curated minimum so
+    # the picker isn't empty.
+    _FALLBACK_VOICES = [
         VoiceDescriptor("en-US-AriaNeural",     "Aria (US, female)",        "en-US"),
         VoiceDescriptor("en-US-GuyNeural",      "Guy (US, male)",           "en-US"),
-        VoiceDescriptor("en-US-JennyNeural",    "Jenny (US, female)",       "en-US"),
         VoiceDescriptor("en-GB-RyanNeural",     "Ryan (UK, male)",          "en-GB"),
-        VoiceDescriptor("en-GB-SoniaNeural",    "Sonia (UK, female)",       "en-GB"),
-        VoiceDescriptor("en-AU-NatashaNeural",  "Natasha (AU, female)",     "en-AU"),
-        VoiceDescriptor("en-IN-NeerjaNeural",   "Neerja (IN, female)",      "en-IN"),
-        # Hebrew / Arabic — the kiosk's natural deployment locale.
         VoiceDescriptor("he-IL-AvriNeural",     "Avri (IL, male)",          "he-IL"),
         VoiceDescriptor("he-IL-HilaNeural",     "Hila (IL, female)",        "he-IL"),
-        VoiceDescriptor("ar-SA-HamedNeural",    "Hamed (SA, male)",         "ar-SA"),
-        # Other Europeans
-        VoiceDescriptor("es-ES-AlvaroNeural",   "Alvaro (ES, male)",        "es-ES"),
-        VoiceDescriptor("fr-FR-DeniseNeural",   "Denise (FR, female)",      "fr-FR"),
     ]
 
     def __init__(self) -> None:
         self._pkg_ok: bool | None = None
+        self._voices_cache: list[VoiceDescriptor] | None = None
+        self._voices_lock = Lock()
 
     def _import(self):
         if self._pkg_ok is False:
@@ -280,10 +303,47 @@ class EdgeTtsEngine:
         return self._import() is not None
 
     def list_voices(self) -> list[VoiceDescriptor]:
-        # We deliberately return the curated list rather than calling
-        # edge_tts.list_voices() — the full catalogue is overwhelming for
-        # a picker and the network round-trip would block /spoof/engines.
-        return list(self._CURATED_VOICES) if self.is_available() else []
+        if not self.is_available():
+            return []
+        if self._voices_cache is not None:
+            return self._voices_cache
+        with self._voices_lock:
+            if self._voices_cache is not None:
+                return self._voices_cache
+            edge_tts = self._import()
+            assert edge_tts is not None
+            # `edge_tts.list_voices()` is async + hits Microsoft's
+            # catalogue endpoint. Run in a worker thread so we don't
+            # nest into FastAPI's loop.
+            async def _fetch():
+                return await edge_tts.list_voices()
+            try:
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    raw = ex.submit(lambda: asyncio.run(_fetch())).result(timeout=15)
+            except Exception:
+                self._voices_cache = list(self._FALLBACK_VOICES)
+                return self._voices_cache
+            voices: list[VoiceDescriptor] = []
+            for entry in raw:
+                short = entry.get("ShortName") or entry.get("Name")
+                if not short:
+                    continue
+                locale = entry.get("Locale") or short.rsplit("-", 1)[0]
+                gender = entry.get("Gender", "")
+                friendly = entry.get("FriendlyName", "")
+                # Extract just the first-name token from the FriendlyName
+                # ("Microsoft Aria Online (Natural) - English (United States)").
+                m = re.match(r"Microsoft\s+(\S+)", friendly or "")
+                first_name = m.group(1) if m else short.split("-")[-1].replace("Neural", "")
+                gender_short = "F" if gender.lower().startswith("f") else ("M" if gender.lower().startswith("m") else "?")
+                voices.append(VoiceDescriptor(
+                    id=short,
+                    label=f"{first_name} ({locale}, {gender_short})",
+                    language=locale,
+                ))
+            voices.sort(key=lambda v: ((v.language or ""), v.label))
+            self._voices_cache = voices or list(self._FALLBACK_VOICES)
+            return self._voices_cache
 
     def default_voice(self) -> str | None:
         return "en-US-AriaNeural" if self.is_available() else None
@@ -326,33 +386,20 @@ class GttsEngine:
     description = "Free cloud TTS, simple language-based picker. Requires internet."
     requires_network = True
 
-    # gTTS-specific language codes. Notably "iw" for Hebrew (Google's
-    # legacy ISO 639-1 code, not "he"). The picker labels stay
-    # human-readable so operators don't need to know these quirks.
-    _LANGS = [
-        ("en", "English (default)"),
-        ("en-uk", "English (UK)"),
-        ("en-au", "English (AU)"),
-        ("en-in", "English (IN)"),
-        ("es", "Spanish"),
-        ("fr", "French"),
-        ("de", "German"),
-        ("it", "Italian"),
-        ("pt", "Portuguese"),
-        ("ru", "Russian"),
-        ("ja", "Japanese"),
-        ("ko", "Korean"),
-        ("zh-CN", "Chinese (Mainland)"),
-        ("zh-TW", "Chinese (Taiwan)"),
-        ("ar", "Arabic"),
-        ("iw", "Hebrew"),
-        ("tr", "Turkish"),
-        ("pl", "Polish"),
-        ("nl", "Dutch"),
+    # English-only accent variants we promote even though gTTS exposes
+    # them via the `tld` parameter rather than as separate "languages".
+    _EN_ACCENTS = [
+        ("en-uk", "English (UK accent)"),
+        ("en-au", "English (Australian accent)"),
+        ("en-in", "English (Indian accent)"),
+        ("en-ca", "English (Canadian accent)"),
+        ("en-ie", "English (Irish accent)"),
+        ("en-za", "English (South African accent)"),
     ]
 
     def __init__(self) -> None:
         self._pkg_ok: bool | None = None
+        self._voices_cache: list[VoiceDescriptor] | None = None
 
     def _import(self):
         if self._pkg_ok is False:
@@ -370,7 +417,27 @@ class GttsEngine:
         return self._import() is not None
 
     def list_voices(self) -> list[VoiceDescriptor]:
-        return [VoiceDescriptor(id=code, label=label, language=code) for code, label in self._LANGS] if self.is_available() else []
+        if not self.is_available():
+            return []
+        if self._voices_cache is not None:
+            return self._voices_cache
+        # U1 — full catalogue via gTTS's own language registry.
+        try:
+            from gtts.lang import tts_langs  # type: ignore
+            langs = tts_langs()
+        except Exception:
+            langs = {"en": "English"}
+        voices: list[VoiceDescriptor] = [
+            VoiceDescriptor(id=code, label=label, language=code)
+            for code, label in sorted(langs.items())
+        ]
+        # Bolt on the en-* accent aliases we resolve via gTTS's `tld`
+        # parameter in synthesize().
+        for code, label in self._EN_ACCENTS:
+            voices.append(VoiceDescriptor(id=code, label=label, language="en"))
+        voices.sort(key=lambda v: (v.id != "en", v.id))
+        self._voices_cache = voices
+        return voices
 
     def default_voice(self) -> str | None:
         return "en" if self.is_available() else None
@@ -382,14 +449,17 @@ class GttsEngine:
         lang = voice_id or language or "en"
         # gTTS accepts an optional `tld` for accent control on English.
         # We split codes like "en-uk" into ("en", "co.uk") to opt into
-        # the UK English voice without flooding the picker.
+        # the UK English voice without flooding the language picker.
         tld = "com"
         base_lang = lang
         if "-" in lang:
             head, region = lang.split("-", 1)
             region = region.lower()
             if head == "en":
-                tld = {"uk": "co.uk", "au": "com.au", "in": "co.in"}.get(region, "com")
+                tld = {
+                    "uk": "co.uk", "au": "com.au", "in": "co.in",
+                    "ca": "ca", "ie": "ie", "za": "co.za",
+                }.get(region, "com")
                 base_lang = "en"
             else:
                 base_lang = head
