@@ -200,6 +200,22 @@ class UserEmbedding(BaseModel):
     enrolled_at: datetime
 
 
+class DetectorScoreResponse(BaseModel):
+    name: str
+    score: float
+    raw_score: float
+    meta: dict
+
+
+class DeepfakeCheckResponse(BaseModel):
+    verdict: Literal["REAL", "DEEPFAKE", "UNCERTAIN"]
+    score: float = Field(ge=0.0, le=1.0)
+    confidence_low: float = Field(ge=0.0, le=1.0)
+    confidence_high: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    breakdown: list[DetectorScoreResponse]
+
+
 class EmbedResponse(BaseModel):
     """V1 — encoder-only pass for the constellation's live point.
 

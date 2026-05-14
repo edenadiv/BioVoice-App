@@ -15,11 +15,14 @@ from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
     get_container,
+    get_deepfake_agent,
     get_spoof_generation_service,
     get_verification_service,
 )
 from app.core.metrics import metrics
 from app.schemas import (
+    DeepfakeCheckResponse,
+    DetectorScoreResponse,
     EmbedResponse,
     EnrollmentResponse,
     HealthResponse,
@@ -33,6 +36,8 @@ from app.schemas import (
     VerificationResponse,
 )
 from app.services.audio import NoSpeechDetectedError
+from app.services.deepfake_agent import DeepfakeAgent
+from app.services.llm import LLMError
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
 
@@ -372,4 +377,44 @@ async def test_spoof_sample(
         decision=decision,
         analysis_details=analysis_details,
         model_provenance=service._collect_provenance(),
+    )
+
+
+@router.post("/deepfake-check", response_model=DeepfakeCheckResponse)
+async def deepfake_check(
+    file: UploadFile = File(...),
+    agent: DeepfakeAgent = Depends(get_deepfake_agent),
+) -> DeepfakeCheckResponse:
+    """LLM-orchestrated deepfake verdict: runs the calibrated detector
+    ensemble and asks the model to reason over the breakdown. Returns a
+    JSON verdict with confidence band and per-detector scores."""
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="File is empty")
+    content_type = file.content_type or ""
+    filename = (file.filename or "").lower()
+    try:
+        if content_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            result = agent.check_spectrogram(payload, media_type=content_type or "image/png")
+        else:
+            result = agent.check_audio(payload)
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM provider error: {exc}") from exc
+    return DeepfakeCheckResponse(
+        verdict=result.verdict,
+        score=result.score,
+        confidence_low=result.confidence_low,
+        confidence_high=result.confidence_high,
+        reasoning=result.reasoning,
+        breakdown=[
+            DetectorScoreResponse(
+                name=b.name,
+                score=b.score,
+                raw_score=b.raw_score,
+                meta={k: v for k, v in b.meta.items()},
+            )
+            for b in result.breakdown
+        ],
     )
