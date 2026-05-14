@@ -66,5 +66,15 @@ class Settings:
     xtts_default_language: str = "en"
     xtts_output_sample_rate: int = 24000
 
+    # LLM deepfake agent — optional. Disabled when api_key is empty.
+    # Keys live in `.env` (gitignored), never in source.
+    llm_api_key: str = field(default_factory=lambda: os.environ.get("LLM_API_KEY", os.environ.get("ANTHROPIC_API_KEY", "")))
+    llm_provider: str = field(default_factory=lambda: os.environ.get("LLM_PROVIDER", "anthropic"))
+    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", "claude-sonnet-4-5"))
+    llm_base_url: str = field(default_factory=lambda: os.environ.get("LLM_BASE_URL", ""))
+
+    mlp_detector_weights_path: Path = Path(__file__).resolve().parents[2] / "models" / "mlp_detector.pkl"
+    detector_calibration_path: Path = Path(__file__).resolve().parents[2] / "models" / "calibration.json"
+
 
 settings = Settings()
