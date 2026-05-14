@@ -57,6 +57,18 @@ bench = [
   "scikit-learn>=1.4",
   "soundfile>=0.12",
 ]
+# LLM deepfake agent — calibrated detector ensemble (MLP + AASIST +
+# prosody) wrapped by a provider-agnostic LLM client (Anthropic adapter
+# today; OpenAI / Ollama plug into the same `LLMClient` interface). The
+# agent is wired only when `LLM_API_KEY` (or `ANTHROPIC_API_KEY`) is set
+# in the runtime env — install with `pip install -e ".[model,agent]"`.
+agent = [
+  "anthropic>=0.30",
+  "scikit-learn>=1.4",
+  "praat-parselmouth>=0.4",
+  "librosa>=0.10",
+  "soundfile>=0.12",
+]
 
 [tool.setuptools]
 package-dir = {"" = "."}
