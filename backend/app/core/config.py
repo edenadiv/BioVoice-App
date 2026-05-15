@@ -59,6 +59,8 @@ class Settings:
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
+    ecapa_savedir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
+    wespeaker_resnet293_dir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "wespeaker_resnet293_lm"
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
     reference_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
     generated_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"

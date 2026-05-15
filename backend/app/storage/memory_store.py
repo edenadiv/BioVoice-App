@@ -38,6 +38,7 @@ class MemoryStore:
             file_path=f"memory://{user_id}/{original_filename}",
             original_filename=original_filename,
             source=source,
+            audio_bytes=audio_bytes,
         )
         self._reference_samples.append(record)
         return record

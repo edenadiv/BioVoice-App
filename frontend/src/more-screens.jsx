@@ -863,6 +863,95 @@ function IdentifyResults({ result, profiles }) {
           </div>
         </div>
       </div>
+
+      {result.speakerModelMatches?.length > 0 && (
+        <div className="panel" style={{ padding: '16px 20px', display: 'grid', gap: 12 }}>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
+            PER-MODEL RANKINGS
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {result.speakerModelMatches.map((group) => {
+              const modelLabel =
+                group.modelKey === 'redimnet_b5' ? 'ReDimNet B5' :
+                group.modelKey === 'ecapa_voxceleb' ? 'ECAPA VoxCeleb' :
+                group.modelKey === 'wespeaker_resnet293_lm' ? 'WeSpeaker ResNet293' :
+                group.modelKey;
+              return (
+                <div
+                  key={group.modelKey}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    background: group.drivesDecision
+                      ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))'
+                      : 'rgba(125,200,255,0.03)',
+                    border: `1px solid ${group.drivesDecision ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.14)'}`,
+                    display: 'grid',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 500 }}>{modelLabel}</div>
+                      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
+                        {group.drivesDecision ? 'ACTIVE IDENTIFY MODEL' : 'COMPARISON ONLY'}
+                      </div>
+                    </div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                      TOP {group.matches.length}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {group.matches.map((match, index) => {
+                      const profile = profiles.find((p) => (p.id ?? p.userId) === match.userId);
+                      const accent = index === 0 ? (group.drivesDecision ? '#7ef0ff' : '#bff4ff') : 'var(--ink-soft)';
+                      return (
+                        <div
+                          key={`${group.modelKey}-${match.userId}`}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
+                            gap: 10,
+                            alignItems: 'center',
+                            padding: '8px 10px',
+                            borderRadius: 10,
+                            background: 'rgba(0,0,0,0.16)',
+                          }}
+                        >
+                          <div className="label-mono" style={{ fontSize: 10, color: accent, minWidth: 24 }}>
+                            #{index + 1}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {match.userId}
+                            </div>
+                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
+                              {profile?.initials ? `${profile.initials} · ` : ''}{match.sampleCount} sample{match.sampleCount === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>MATCH</div>
+                            <div className="num-mono" style={{ fontSize: 18, color: accent }}>
+                              {(match.similarityScore * 100).toFixed(1)}%
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
+                            <div className="num-mono" style={{ fontSize: 18 }}>
+                              {match.centroidSimilarity.toFixed(3)}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

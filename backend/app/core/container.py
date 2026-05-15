@@ -6,7 +6,11 @@ from dataclasses import dataclass
 
 from app.core.config import Settings
 from app.services.detector import DeepfakeDetectorService
-from app.services.speaker_encoder import RedimNetSpeakerEncoder
+from app.services.speaker_encoder import (
+    EcapaSpeakerEncoder,
+    RedimNetSpeakerEncoder,
+    WeSpeakerResNet293SpeakerEncoder,
+)
 from app.services.spoof import SpoofGenerationService
 from app.services.sub_classifier import AcousticProbe
 from app.services.verification import VerificationService
@@ -28,7 +32,20 @@ def build_container(settings: Settings) -> AppContainer:
         reference_samples_path=settings.reference_samples_path,
     )
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
+    # `verified-models` stages ECAPA + WeSpeaker loaders, but ReDimNet
+    # remains the only production encoder until those paths are vetted.
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
+    comparison_encoders = {}
+    try:
+        comparison_encoders["ecapa_voxceleb"] = EcapaSpeakerEncoder(savedir=settings.ecapa_savedir)
+    except Exception:
+        pass
+    try:
+        comparison_encoders["wespeaker_resnet293_lm"] = WeSpeakerResNet293SpeakerEncoder(
+            model_dir=settings.wespeaker_resnet293_dir
+        )
+    except Exception:
+        pass
     acoustic_probe = AcousticProbe()
     verification_service = VerificationService(
         store=store,
@@ -39,6 +56,7 @@ def build_container(settings: Settings) -> AppContainer:
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
         acoustic_probe=acoustic_probe,
+        comparison_encoders=comparison_encoders,
     )
     spoof_service = SpoofGenerationService(
         store=store,

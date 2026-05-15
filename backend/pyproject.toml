@@ -36,6 +36,11 @@ model = [
 # upstream package has fallen out of date). Operators install with
 # `pip install -e .[model,spoof]` on a pinned 3.12 venv when the spoof
 # generation route is in scope.
+speaker_models = [
+  "onnxruntime>=1.18",
+  "speechbrain>=1.0",
+  "soundfile>=0.12",
+]
 spoof = [
   "TTS>=0.22,<0.23",
 ]
