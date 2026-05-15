@@ -844,6 +844,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
   const accent = passing ? '#7ef0ff' : '#ff5577';
   const totalMs = result?.stageBreakdown?.totalMs ?? 0;
   const reason = result?.decisionReason ?? (passing ? 'accepted' : 'mismatch');
+  const modelScores = result?.speakerModelScores ?? [];
   const reasonBlurb = {
     accepted: 'Voice matches the enrolled profile.',
     mismatch: 'Speaker did not match the enrolled profile.',
@@ -891,6 +892,67 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
         <Stat label="Authenticity" value={dfScore.toFixed(2)} sub={`vs ${DF_THRESHOLD.toFixed(2)} · ${dfScore >= DF_THRESHOLD ? 'genuine voice' : 'synthetic flag'}`} accent={dfScore >= DF_THRESHOLD ? '#6affc8' : '#ff5577'}/>
         <Stat label="Latency" value={totalMs > 0 ? `${(totalMs / 1000).toFixed(2)}s` : '—'} sub="end-to-end" accent="#7ef0ff"/>
       </div>
+      {modelScores.length > 0 && (
+        <div style={{
+          padding: '16px 18px',
+          borderRadius: 14,
+          background: 'rgba(125,200,255,0.04)',
+          border: '1px solid var(--line)',
+          display: 'grid',
+          gap: 10,
+        }}>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>
+            MODEL MATCH SCORES
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {modelScores.map((score) => {
+              const modelLabel =
+                score.modelKey === 'redimnet_b5' ? 'ReDimNet B5' :
+                score.modelKey === 'ecapa_voxceleb' ? 'ECAPA VoxCeleb' :
+                score.modelKey === 'wespeaker_resnet293_lm' ? 'WeSpeaker ResNet293' :
+                score.modelKey;
+              const scoreAccent = score.drivesDecision ? '#7ef0ff' : '#bff4ff';
+              return (
+                <div
+                  key={score.modelKey}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto',
+                    gap: 12,
+                    alignItems: 'center',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: score.drivesDecision ? 'rgba(126,240,255,0.06)' : 'rgba(191,244,255,0.04)',
+                    border: `1px solid ${score.drivesDecision ? 'rgba(126,240,255,0.18)' : 'rgba(191,244,255,0.12)'}`,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, color: 'var(--ink)' }}>{modelLabel}</div>
+                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                      {score.drivesDecision ? 'ACTIVE DECISION MODEL' : 'COMPARISON ONLY'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>MATCH</div>
+                    <div className="num-mono" style={{ fontSize: 20, color: scoreAccent }}>
+                      {score.similarityScore.toFixed(3)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
+                    <div className="num-mono" style={{ fontSize: 20, color: 'var(--ink)' }}>
+                      {score.centroidSimilarity.toFixed(3)}
+                    </div>
+                  </div>
+                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', whiteSpace: 'nowrap' }}>
+                    {score.sampleSimilarities.length} sample{score.sampleSimilarities.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

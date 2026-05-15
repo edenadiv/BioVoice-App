@@ -51,7 +51,7 @@ type AnalysisDetailsResponse = {
 };
 
 type ModelProvenanceResponse = {
-  encoder: "redimnet_b5" | "heuristic_placeholder";
+  encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
   detector: "aasist" | "heuristic";
   acoustic_probe: "heuristic" | "trained_heads";
   is_degraded: boolean;
@@ -66,12 +66,21 @@ type VerificationResponse = {
   deepfake_score: number;
   centroid_similarity: number;
   sample_similarities: number[];
+  speaker_model_scores?: SpeakerModelScoreResponse[];
   message: string;
   session_id: string;
   stage_breakdown?: StageBreakdownResponse;
   analysis_details?: AnalysisDetailsResponse | null;
   model_provenance?: ModelProvenanceResponse | null;
   created_at: string;
+};
+
+type SpeakerModelScoreResponse = {
+  model_key: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  similarity_score: number;
+  centroid_similarity: number;
+  sample_similarities: number[];
+  drives_decision: boolean;
 };
 
 type SampleQualityResponse = {
@@ -108,6 +117,7 @@ type IdentificationMatchResponse = {
 
 type IdentificationResponse = {
   matches: IdentificationMatchResponse[];
+  speaker_model_matches?: SpeakerModelMatchesResponse[];
   deepfake_score: number;
   analysis_details: AnalysisDetailsResponse | null;
   would_accept_top1: boolean;
@@ -115,6 +125,12 @@ type IdentificationResponse = {
   deepfake_threshold: number;
   n_enrolled_total: number;
   model_provenance?: ModelProvenanceResponse | null;
+};
+
+type SpeakerModelMatchesResponse = {
+  model_key: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  matches: IdentificationMatchResponse[];
+  drives_decision: boolean;
 };
 
 type MetricsSummaryResponse = {
@@ -207,6 +223,13 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
     deepfakeScore: response.deepfake_score,
     centroidSimilarity: response.centroid_similarity,
     sampleSimilarities: response.sample_similarities,
+    speakerModelScores: (response.speaker_model_scores ?? []).map((score) => ({
+      modelKey: score.model_key,
+      similarityScore: score.similarity_score,
+      centroidSimilarity: score.centroid_similarity,
+      sampleSimilarities: score.sample_similarities,
+      drivesDecision: score.drives_decision,
+    })),
     message: response.message,
     sessionId: response.session_id,
     stageBreakdown: stage
@@ -427,6 +450,11 @@ export async function identifySpeaker(file: File, topN: number = 3): Promise<Ide
   const response = await postForm<IdentificationResponse>("/identify", formData);
   return {
     matches: response.matches.map((m) => toIdentificationMatch(m)),
+    speakerModelMatches: (response.speaker_model_matches ?? []).map((group) => ({
+      modelKey: group.model_key,
+      matches: group.matches.map((m) => toIdentificationMatch(m)),
+      drivesDecision: group.drives_decision,
+    })),
     deepfakeScore: response.deepfake_score,
     analysisDetails: response.analysis_details ? toAnalysisDetails(response.analysis_details) : null,
     wouldAcceptTop1: response.would_accept_top1,

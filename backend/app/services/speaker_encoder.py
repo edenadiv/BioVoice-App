@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import fmean
 from typing import Protocol
 
 import torch
+import torchaudio
+import torchaudio.compliance.kaldi as kaldi
+import yaml
 
 from app.vendor.redimnet.model import ReDimNetWrap
 
@@ -16,6 +20,44 @@ class SpeakerEncoder(Protocol):
     def embed(self, waveform: list[float]) -> list[float]: ...
 
     def cosine_similarity(self, a: list[float], b: list[float]) -> float: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SpeakerModelSpec:
+    key: str
+    provenance: str
+    loader: str
+    source: str
+    active: bool
+
+
+SUPPORTED_SPEAKER_MODELS: tuple[SpeakerModelSpec, ...] = (
+    SpeakerModelSpec(
+        key="redimnet_b5",
+        provenance="redimnet_b5",
+        loader="vendored_checkpoint",
+        source="backend/models/redimnet_b5.pt",
+        active=True,
+    ),
+    SpeakerModelSpec(
+        key="ecapa_voxceleb",
+        provenance="ecapa_voxceleb",
+        loader="speechbrain",
+        source="speechbrain/spkrec-ecapa-voxceleb",
+        active=False,
+    ),
+    SpeakerModelSpec(
+        key="wespeaker_resnet293_lm",
+        provenance="wespeaker_resnet293_lm",
+        loader="wespeaker",
+        source="Wespeaker/wespeaker-voxceleb-resnet293-LM",
+        active=False,
+    ),
+)
+
+
+def list_supported_speaker_models() -> tuple[SpeakerModelSpec, ...]:
+    return SUPPORTED_SPEAKER_MODELS
 
 
 class RedimNetSpeakerEncoder:
@@ -58,6 +100,112 @@ class RedimNetSpeakerEncoder:
         if norm <= 1e-8:
             return [0.0 for _ in embedding]
         return [value / norm for value in embedding]
+
+
+class EcapaSpeakerEncoder:
+    """Optional SpeechBrain ECAPA-TDNN encoder.
+
+    This is intentionally not wired into `core/container.py` yet. The
+    goal of this branch is to stage and validate the loader path without
+    changing production verification behavior.
+    """
+
+    provenance: str = "ecapa_voxceleb"
+
+    def __init__(self, savedir: Path | None = None, source: str = "speechbrain/spkrec-ecapa-voxceleb"):
+        try:
+            from speechbrain.inference.speaker import EncoderClassifier
+        except ImportError as exc:  # pragma: no cover - depends on optional extra
+            raise RuntimeError(
+                "SpeechBrain is not installed. Install `backend[speaker_models]` to use ECAPA."
+            ) from exc
+
+        kwargs = {"source": source}
+        if savedir is not None:
+            kwargs["savedir"] = str(savedir)
+        self.model = EncoderClassifier.from_hparams(**kwargs)
+
+    def embed(self, waveform: list[float]) -> list[float]:
+        if not waveform:
+            return [0.0] * 192
+
+        inputs = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
+        with torch.inference_mode():
+            embedding = self.model.encode_batch(inputs).squeeze()
+        return RedimNetSpeakerEncoder._normalize_embedding(embedding.tolist())
+
+    @staticmethod
+    def cosine_similarity(a: list[float], b: list[float]) -> float:
+        return RedimNetSpeakerEncoder.cosine_similarity(a, b)
+
+
+class WeSpeakerResNet293SpeakerEncoder:
+    """Optional WeSpeaker ResNet293 LM encoder.
+
+    Uses the official ONNX export from the published Hugging Face
+    checkpoint bundle. This avoids the broader WeSpeaker CLI/runtime
+    dependency graph, which currently breaks on modern torchaudio builds
+    in this Windows environment.
+    """
+
+    provenance: str = "wespeaker_resnet293_lm"
+
+    def __init__(self, model_dir: Path):
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            raise RuntimeError(
+                "onnxruntime is not installed. Install `backend[speaker_models]` to use ResNet293."
+            )
+
+        self.model_dir = Path(model_dir)
+        self.onnx_path = self.model_dir / "voxceleb_resnet293_LM.onnx"
+        self.config_path = self.model_dir / "config.yaml"
+        if not self.onnx_path.exists():
+            raise RuntimeError(
+                f"WeSpeaker ONNX checkpoint missing at '{self.onnx_path}'."
+            )
+        if not self.config_path.exists():
+            raise RuntimeError(
+                f"WeSpeaker config missing at '{self.config_path}'."
+            )
+
+        with self.config_path.open("r", encoding="utf-8") as handle:
+            self.config = yaml.safe_load(handle)
+        self.resample_rate = int(self.config.get("dataset_args", {}).get("resample_rate", 16_000))
+        fbank_args = self.config.get("dataset_args", {}).get("fbank_args", {})
+        self.num_mel_bins = int(fbank_args.get("num_mel_bins", 80))
+        self.frame_length = int(fbank_args.get("frame_length", 25))
+        self.frame_shift = int(fbank_args.get("frame_shift", 10))
+        self.session = ort.InferenceSession(
+            str(self.onnx_path),
+            providers=["CPUExecutionProvider"],
+        )
+
+    def embed(self, waveform: list[float]) -> list[float]:
+        if not waveform:
+            return [0.0] * 256
+
+        tensor = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
+        if self.resample_rate != 16_000:
+            tensor = torchaudio.transforms.Resample(orig_freq=16_000, new_freq=self.resample_rate)(tensor)
+
+        feats = kaldi.fbank(
+            tensor,
+            num_mel_bins=self.num_mel_bins,
+            frame_length=self.frame_length,
+            frame_shift=self.frame_shift,
+            sample_frequency=self.resample_rate,
+            window_type="hamming",
+        )
+        feats = feats - torch.mean(feats, dim=0)
+        inputs = feats.unsqueeze(0).cpu().numpy()
+        embedding = self.session.run(None, {"feats": inputs})[0][0]
+        return RedimNetSpeakerEncoder._normalize_embedding(embedding.tolist())
+
+    @staticmethod
+    def cosine_similarity(a: list[float], b: list[float]) -> float:
+        return RedimNetSpeakerEncoder.cosine_similarity(a, b)
 
 
 class PlaceholderSpeakerEncoder:

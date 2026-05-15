@@ -33,12 +33,21 @@ export type VerificationResult = {
   deepfakeScore: number;
   centroidSimilarity: number;
   sampleSimilarities: number[];
+  speakerModelScores: SpeakerModelScore[];
   message: string;
   sessionId: string;
   stageBreakdown: StageBreakdown;
   analysisDetails: AnalysisDetails | null;
   modelProvenance: ModelProvenance | null;
   createdAt: string;
+};
+
+export type SpeakerModelScore = {
+  modelKey: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  similarityScore: number;
+  centroidSimilarity: number;
+  sampleSimilarities: number[];
+  drivesDecision: boolean;
 };
 
 export type Speaker = {
@@ -84,6 +93,7 @@ export type IdentificationMatch = {
 
 export type IdentificationResult = {
   matches: IdentificationMatch[];
+  speakerModelMatches: SpeakerModelMatches[];
   deepfakeScore: number;
   analysisDetails: AnalysisDetails | null;
   wouldAcceptTop1: boolean;
@@ -93,8 +103,14 @@ export type IdentificationResult = {
   modelProvenance: ModelProvenance | null;
 };
 
+export type SpeakerModelMatches = {
+  modelKey: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  matches: IdentificationMatch[];
+  drivesDecision: boolean;
+};
+
 export type ModelProvenance = {
-  encoder: "redimnet_b5" | "heuristic_placeholder";
+  encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
   detector: "aasist" | "heuristic";
   acousticProbe: "heuristic" | "trained_heads";
   isDegraded: boolean;

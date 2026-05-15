@@ -37,3 +37,5 @@ backend/data/
 *.zip
 *.tar.gz
 *yarn.lock
+backend/models/ecapa_voxceleb/
+backend/models/wespeaker_resnet293_lm/
