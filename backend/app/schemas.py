@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 DecisionReason = Literal["accepted", "mismatch", "synthetic", "not_enrolled"]
 
 EncoderProvenance = Literal[
@@ -17,6 +16,27 @@ EncoderProvenance = Literal[
 DetectorProvenance = Literal["aasist", "heuristic"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
+
+ExplainModelKey = Literal["aasist", "redimnet_b5", "ecapa_voxceleb"]
+
+
+class CamSegment(BaseModel):
+    start_ms: float = Field(ge=0.0)
+    end_ms: float = Field(ge=0.0)
+    peak: float = Field(ge=0.0, le=1.0)
+
+
+class ModelCAM(BaseModel):
+    model_key: ExplainModelKey
+    frame_times_ms: list[float]
+    freq_hz: list[float]
+    heatmap: list[list[float]]
+    threshold: float = Field(ge=0.0, le=1.0)
+    salient_segments: list[CamSegment] = Field(default_factory=list)
+
+
+class ExplainResponse(BaseModel):
+    cams: list[ModelCAM]
 
 
 class ModelProvenance(BaseModel):
@@ -162,6 +182,7 @@ class AvailabilityResponse(BaseModel):
 
 class IdentificationMatch(BaseModel):
     """One row in the ranked top-N from POST /identify."""
+
     user_id: str
     similarity_score: float = Field(ge=0.0, le=1.0)
     centroid_similarity: float = Field(ge=0.0, le=1.0)

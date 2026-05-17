@@ -441,6 +441,51 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
   };
 }
 
+// -- Explain (Grad-CAM) -------------------------------------------------------
+
+export type ExplainModelKey = "aasist" | "redimnet_b5" | "ecapa_voxceleb";
+
+export type CamSegment = { startMs: number; endMs: number; peak: number };
+
+export type ModelCAM = {
+  modelKey: ExplainModelKey;
+  frameTimesMs: number[];
+  freqHz: number[];
+  heatmap: number[][];
+  threshold: number;
+  salientSegments: CamSegment[];
+};
+
+type CamSegmentResponse = { start_ms: number; end_ms: number; peak: number };
+type ModelCAMResponse = {
+  model_key: ExplainModelKey;
+  frame_times_ms: number[];
+  freq_hz: number[];
+  heatmap: number[][];
+  threshold: number;
+  salient_segments: CamSegmentResponse[];
+};
+type ExplainResponse = { cams: ModelCAMResponse[] };
+
+export async function explainAudio(file: File, userId?: string): Promise<ModelCAM[]> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  if (userId) formData.append("user_id", userId);
+  const response = await postForm<ExplainResponse>("/explain", formData);
+  return response.cams.map((c) => ({
+    modelKey: c.model_key,
+    frameTimesMs: c.frame_times_ms,
+    freqHz: c.freq_hz,
+    heatmap: c.heatmap,
+    threshold: c.threshold,
+    salientSegments: c.salient_segments.map((s) => ({
+      startMs: s.start_ms,
+      endMs: s.end_ms,
+      peak: s.peak,
+    })),
+  }));
+}
+
 // -- Open-set identification --------------------------------------------------
 
 export async function identifySpeaker(file: File, topN: number = 3): Promise<IdentificationResult> {

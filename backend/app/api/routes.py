@@ -10,7 +10,16 @@ from datetime import datetime, timezone
 from io import BytesIO
 from wave import Error as WaveError
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
@@ -22,6 +31,7 @@ from app.core.metrics import metrics
 from app.schemas import (
     EmbedResponse,
     EnrollmentResponse,
+    ExplainResponse,
     HealthResponse,
     IdentificationResponse,
     SpeakerResponse,
@@ -33,9 +43,9 @@ from app.schemas import (
     VerificationResponse,
 )
 from app.services.audio import NoSpeechDetectedError
+from app.services.explain import build_adapters, explain_model
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
-
 
 router = APIRouter()
 
@@ -96,7 +106,9 @@ def ready(request: Request) -> dict:
     checks["aasist_weights"] = {"ok": s.aasist_weights_path.exists()}
     checks["redimnet_weights"] = {"ok": s.redimnet_weights_path.exists()}
     if not checks["aasist_weights"]["ok"] or not checks["redimnet_weights"]["ok"]:
-        checks["models_note"] = "Weights missing — falling back to heuristic detector + encoder"
+        checks["models_note"] = (
+            "Weights missing — falling back to heuristic detector + encoder"
+        )
 
     if not overall_ok:
         raise HTTPException(status_code=503, detail={"ready": False, "checks": checks})
@@ -109,7 +121,9 @@ def ready(request: Request) -> dict:
 
 
 @router.get("/users", response_model=list[SpeakerResponse])
-def list_users(service: VerificationService = Depends(get_verification_service)) -> list[SpeakerResponse]:
+def list_users(
+    service: VerificationService = Depends(get_verification_service),
+) -> list[SpeakerResponse]:
     return service.list_users()
 
 
@@ -138,7 +152,9 @@ async def enroll(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
-        return service.enroll(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+        return service.enroll(
+            user_id=user_id, audio_bytes=payload, filename=audio.filename
+        )
     # NoSpeechDetectedError + SampleQualityRejectedError are ValueError
     # subclasses; both map to 400 with the operator-friendly message.
     except (ValueError, WaveError) as exc:
@@ -177,7 +193,9 @@ async def verify(
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
         with metrics.histogram("biovoice_verify_seconds").time():
-            result = service.verify(user_id=user_id, audio_bytes=payload, filename=audio.filename)
+            result = service.verify(
+                user_id=user_id, audio_bytes=payload, filename=audio.filename
+            )
         metrics.counter("biovoice_verifications_total").inc(
             labels={"decision": result.decision}
         )
@@ -243,8 +261,57 @@ async def identify(
 
 
 @router.get("/results", response_model=list[VerificationResponse])
-def list_results(service: VerificationService = Depends(get_verification_service)) -> list[VerificationResponse]:
+def list_results(
+    service: VerificationService = Depends(get_verification_service),
+) -> list[VerificationResponse]:
     return service.list_results()
+
+
+# -----------------------------------------------------------------------------
+# Explain — per-model Grad-CAM on an arbitrary WAV
+# -----------------------------------------------------------------------------
+
+
+@router.post("/explain", response_model=ExplainResponse)
+async def explain(
+    audio: UploadFile = File(...),
+    user_id: str = Form(default=""),
+    service: VerificationService = Depends(get_verification_service),
+) -> ExplainResponse:
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    try:
+        decoded = service.audio.decode_wav(payload)
+        trimmed, _ = service.audio.trim_to_voice(decoded)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    service.detector.load()
+    detector_model = service.detector.model
+    redimnet_model = getattr(service.encoder, "model", None)
+    ecapa_encoder = service.comparison_encoders.get("ecapa_voxceleb")
+    ecapa_model = getattr(ecapa_encoder, "model", None) if ecapa_encoder else None
+
+    redimnet_centroid = None
+    ecapa_centroid = None
+    if user_id:
+        speaker = service.store.get_speaker(user_id)
+        if speaker is not None:
+            redimnet_centroid = speaker.embedding
+            ecapa_centroid = speaker.comparison_embeddings.get("ecapa_voxceleb")
+
+    adapters = build_adapters(
+        detector_model,
+        redimnet_model,
+        ecapa_model,
+        redimnet_centroid=redimnet_centroid,
+        ecapa_centroid=ecapa_centroid,
+    )
+    cams = [explain_model(key, ctx, trimmed.waveform) for key, ctx in adapters.items()]
+    return ExplainResponse(cams=cams)
 
 
 # -----------------------------------------------------------------------------
@@ -271,7 +338,10 @@ def list_spoof_engines(
                 description=e.description,
                 requires_network=e.requires_network,
                 available=e.available,
-                voices=[SpoofVoice(id=v.id, label=v.label, language=v.language) for v in e.voices],
+                voices=[
+                    SpoofVoice(id=v.id, label=v.label, language=v.language)
+                    for v in e.voices
+                ],
                 default_voice=e.default_voice,
             )
             for e in engines

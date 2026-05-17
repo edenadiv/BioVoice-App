@@ -8,6 +8,7 @@ import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker 
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
+import { ExplainTab } from "./components/ExplainTab.tsx";
 import {
   decodeAudioFileToWav,
   listAudioInputs,
@@ -768,7 +769,7 @@ function IdentifyScreen({ profiles }) {
             </div>
           </div>
 
-          {result && <IdentifyResults result={result} profiles={profiles}/>}
+          {result && <IdentifyResults result={result} profiles={profiles} wavFile={sample?.wavFile ?? null}/>}
           {!result && (
             <div className="panel" style={{
               padding: '32px 24px', textAlign: 'center',
@@ -783,9 +784,11 @@ function IdentifyScreen({ profiles }) {
   );
 }
 
-function IdentifyResults({ result, profiles }) {
+function IdentifyResults({ result, profiles, wavFile }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      <ExplainTab wavFile={wavFile ?? null} open={!!wavFile} matchUserId={result.matches[0]?.userId ?? null}/>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
       <DegradedBanner provenance={result.modelProvenance} variant="full"/>
       {result.matches.map((m, i) => {
         const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
@@ -952,6 +955,7 @@ function IdentifyResults({ result, profiles }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
