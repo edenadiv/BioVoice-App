@@ -13,7 +13,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 DEFAULT_CORS_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 
 
@@ -55,15 +54,36 @@ class Settings:
     deepfake_threshold: float = 0.50
 
     min_enrollment_samples: int = 3
+
+    cam_thr_aasist: float = float(os.environ.get("CAM_THR_AASIST", "0.55"))
+    cam_thr_redimnet: float = float(os.environ.get("CAM_THR_REDIMNET", "0.50"))
+    cam_thr_ecapa: float = float(os.environ.get("CAM_THR_ECAPA", "0.50"))
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
-    aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
-    redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
-    ecapa_savedir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
-    wespeaker_resnet293_dir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "wespeaker_resnet293_lm"
-    database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
-    reference_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
-    generated_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"
+    aasist_weights_path: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
+    )
+    redimnet_weights_path: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
+    )
+    ecapa_savedir: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
+    )
+    wespeaker_resnet293_dir: Path = (
+        Path(__file__).resolve().parents[3]
+        / "backend"
+        / "models"
+        / "wespeaker_resnet293_lm"
+    )
+    database_path: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
+    )
+    reference_samples_path: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
+    )
+    generated_samples_path: Path = (
+        Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"
+    )
     xtts_model_path: Path = Path(__file__).resolve().parents[3] / "XTTS-v2"
     xtts_default_language: str = "en"
     xtts_output_sample_rate: int = 24000
