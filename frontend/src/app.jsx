@@ -76,20 +76,32 @@ function AppShell() {
   );
 }
 
-// Phone-breakpoint listener — toggles body.biovoice-mobile so
-// responsive.css can linearise the kiosk on small viewports.
-function useMobileViewportClass() {
+// Viewport listeners — toggle explicit desktop/tablet/mobile classes so
+// screen layouts don't have to infer state from one generic "compact"
+// flag.
+function useViewportClasses() {
   useEffect(() => {
-    const mql = window.matchMedia("(max-width: 767px)");
-    const apply = () => document.body.classList.toggle("biovoice-mobile", mql.matches);
+    const tabletMql = window.matchMedia("(max-width: 1099px)");
+    const mobileMql = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      const isMobile = mobileMql.matches;
+      const isTablet = !isMobile && tabletMql.matches;
+      document.body.classList.toggle("biovoice-mobile", isMobile);
+      document.body.classList.toggle("biovoice-tablet", isTablet);
+      document.body.classList.toggle("biovoice-desktop", !isMobile && !isTablet);
+    };
     apply();
-    mql.addEventListener("change", apply);
-    return () => mql.removeEventListener("change", apply);
+    tabletMql.addEventListener("change", apply);
+    mobileMql.addEventListener("change", apply);
+    return () => {
+      tabletMql.removeEventListener("change", apply);
+      mobileMql.removeEventListener("change", apply);
+    };
   }, []);
 }
 
 function AppRoot() {
-  useMobileViewportClass();
+  useViewportClasses();
   return <AppShell />;
 }
 

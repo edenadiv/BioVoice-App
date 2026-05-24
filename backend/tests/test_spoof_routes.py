@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api import dependencies, routes
-from app.services.spoof import SpoofGenerationResult, SpoofGenerationService
+from app.services.spoof import ImportedVoiceModel, SpoofGenerationResult, SpoofGenerationService
 from app.services.verification import VerificationService
 from app.storage.memory_store import MemoryStore
 
@@ -34,6 +34,7 @@ class _StubSpoofService:
 
     def __init__(self) -> None:
         self.mode: str = "xtts_unavailable"  # or "value_error" or "ok"
+        self.models: list[ImportedVoiceModel] = []
 
     def generate(self, **kwargs):  # noqa: D401 — stub signature
         if self.mode == "xtts_unavailable":
@@ -47,6 +48,38 @@ class _StubSpoofService:
             engine_id="stub",
             voice_id=None,
         )
+
+    def list_voice_models(self) -> list[ImportedVoiceModel]:
+        return list(self.models)
+
+    def import_voice_model(
+        self,
+        *,
+        engine: str,
+        label: str,
+        language: str | None,
+        model_bytes: bytes,
+        model_filename: str,
+        index_bytes: bytes | None = None,
+        index_filename: str | None = None,
+    ) -> ImportedVoiceModel:
+        if engine not in {"rvc", "applio"}:
+            raise ValueError("Only `rvc` and `applio` support imported voice models.")
+        if engine == "applio" and index_bytes is None:
+            raise ValueError("Applio imports require both a `.pth` model and a `.index` file.")
+        imported = ImportedVoiceModel(
+            engine=engine,
+            model_id=f"{engine}-{len(self.models) + 1}",
+            label=label,
+            language=language,
+            model_path=None,
+            model_filename=model_filename,
+            index_path=None,
+            index_filename=index_filename,
+            ready=engine == "rvc" or index_filename is not None,
+        )
+        self.models.append(imported)
+        return imported
 
 
 def _silence_wav(duration_s: float) -> bytes:
@@ -205,3 +238,63 @@ def test_spoof_200_returns_wav_with_source_header():
     assert resp.headers["x-spoof-source"] == "stub"
     assert "clone.wav" in resp.headers["content-disposition"]
     assert len(resp.content) > 0
+
+
+def test_list_spoof_voice_models_returns_imported_models():
+    client, _, _, _, spoof = _build_app()
+    spoof.models.append(
+        ImportedVoiceModel(
+            engine="rvc",
+            model_id="rvc-demo",
+            label="Demo Voice",
+            language="en",
+            model_path=None,
+            model_filename="demo.pth",
+            index_path=None,
+            index_filename=None,
+            ready=True,
+        )
+    )
+
+    resp = client.get("/spoof/voice-models")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {
+        "models": [
+            {
+                "engine": "rvc",
+                "model_id": "rvc-demo",
+                "label": "Demo Voice",
+                "language": "en",
+                "ready": True,
+                "model_filename": "demo.pth",
+                "index_filename": None,
+            }
+        ]
+    }
+
+
+def test_import_spoof_voice_model_accepts_rvc_model():
+    client, _, _, _, spoof = _build_app()
+    resp = client.post(
+        "/spoof/voice-models/import",
+        data={"engine": "rvc", "label": "Operator A", "language": "en"},
+        files={"model_file": ("operator-a.pth", b"weights", "application/octet-stream")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["engine"] == "rvc"
+    assert body["label"] == "Operator A"
+    assert body["model_filename"] == "operator-a.pth"
+    assert spoof.models[-1].model_id == body["model_id"]
+
+
+def test_import_spoof_voice_model_rejects_missing_applio_index():
+    client, _, _, _, spoof = _build_app()
+    resp = client.post(
+        "/spoof/voice-models/import",
+        data={"engine": "applio", "label": "Operator B"},
+        files={"model_file": ("operator-b.pth", b"weights", "application/octet-stream")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "Applio" in resp.json()["detail"]

@@ -415,7 +415,12 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
               No samples yet. Press <strong>START RECORDING</strong> or <strong>UPLOAD AUDIO</strong> to add some.
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}
+              tabIndex={0}
+              role="region"
+              aria-label="Captured samples"
+            >
               {samples.map((s, i) => (
                 <SampleRow key={s.id} index={i + 1} sample={s} />
               ))}

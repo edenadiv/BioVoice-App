@@ -15,6 +15,29 @@ from pathlib import Path
 
 
 DEFAULT_CORS_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_ENV_FILES = (
+    _REPO_ROOT / "backend" / ".env",
+    _REPO_ROOT / "backend" / ".env.local",
+)
+
+
+def _load_local_env_files() -> None:
+    for env_path in _ENV_FILES:
+        if not env_path.exists():
+            continue
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            os.environ.setdefault(key, value)
+
+
+_load_local_env_files()
+os.environ.setdefault("NUMBA_CACHE_DIR", str(_REPO_ROOT / "backend" / "data" / "numba_cache"))
 
 
 def _cors_origins_from_env() -> list[str]:
@@ -34,6 +57,30 @@ def _log_level_from_env() -> str:
     return os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
+def _float_from_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return float(raw)
+
+
+def _path_from_env(name: str, default: Path) -> Path:
+    raw = os.environ.get(name, "").strip()
+    return Path(raw) if raw else default
+
+
+def _optional_str_from_env(name: str) -> str | None:
+    raw = os.environ.get(name, "").strip()
+    return raw or None
+
+
+def _bool_from_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(slots=True)
 class Settings:
     sample_rate: int = 16000
@@ -48,25 +95,56 @@ class Settings:
     # similarity_threshold: cosine sim cutoff for "ACCEPT" decisions.
     # Lower → more false accepts (security risk); higher → more false
     # rejects (operator unusability). 0.75 is the SDD default.
-    similarity_threshold: float = 0.75
+    similarity_threshold: float = field(default_factory=lambda: _float_from_env("SIMILARITY_THRESHOLD", 0.75))
     # deepfake_threshold: AASIST score cutoff for "GENUINE" decisions.
     # Lower → more synthetic audio passes through; higher → more real
     # voices flagged as DEEPFAKE. 0.50 is the SDD default.
-    deepfake_threshold: float = 0.50
+    deepfake_threshold: float = field(default_factory=lambda: _float_from_env("DEEPFAKE_THRESHOLD", 0.50))
 
     min_enrollment_samples: int = 3
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
+<<<<<<< Updated upstream
     ecapa_savedir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "wespeaker_resnet293_lm"
+=======
+<<<<<<< Updated upstream
+=======
+    ecapa_savedir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
+    wespeaker_resnet293_dir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "wespeaker_resnet293_lm"
+    enable_ecapa_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_ECAPA_COMPARISON", False))
+    enable_wespeaker_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_WESPEAKER_COMPARISON", False))
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
     reference_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
     generated_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"
-    xtts_model_path: Path = Path(__file__).resolve().parents[3] / "XTTS-v2"
+    xtts_model_path: Path = field(
+        default_factory=lambda: _path_from_env(
+            "XTTS_MODEL_PATH",
+            Path(__file__).resolve().parents[3] / "XTTS-v2",
+        )
+    )
     xtts_default_language: str = "en"
     xtts_output_sample_rate: int = 24000
+    openvoice_local_fallback: bool = field(default_factory=lambda: _bool_from_env("OPENVOICE_LOCAL_FALLBACK", False))
+    openvoice_base_url: str | None = field(default_factory=lambda: _optional_str_from_env("OPENVOICE_BASE_URL"))
+    rvc_base_url: str | None = field(default_factory=lambda: _optional_str_from_env("RVC_BASE_URL"))
+    applio_base_url: str | None = field(default_factory=lambda: _optional_str_from_env("APPLIO_BASE_URL"))
+    rvc_models_path: Path = field(
+        default_factory=lambda: _path_from_env(
+            "RVC_MODELS_PATH",
+            Path(__file__).resolve().parents[3] / "backend" / "data" / "voice_models" / "rvc",
+        )
+    )
+    applio_models_path: Path = field(
+        default_factory=lambda: _path_from_env(
+            "APPLIO_MODELS_PATH",
+            Path(__file__).resolve().parents[3] / "backend" / "data" / "voice_models" / "applio",
+        )
+    )
 
 
 settings = Settings()

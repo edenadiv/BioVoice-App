@@ -37,6 +37,34 @@ function useCounter(target, ms = 1200, deps = []) {
   return v;
 }
 
+function useElementSize() {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    const update = () => {
+      const next = { width: node.clientWidth, height: node.clientHeight };
+      setSize((prev) => (
+        prev.width === next.width && prev.height === next.height ? prev : next
+      ));
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return [ref, size];
+}
+
 // ============================================================================
 // ParticleFlow — particles flowing across a horizontal line
 // ============================================================================
@@ -325,21 +353,33 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     sampleRate: audio.sampleRateRef?.current ?? 16000,
     basis: projection.basis,
   });
+  const [orbPanelRef, orbPanelSize] = useElementSize();
+  const [spectrogramRef, spectrogramSize] = useElementSize();
+  const [constellationRef, constellationSize] = useElementSize();
+  const orbSize = Math.max(180, Math.min(320, Math.min(orbPanelSize.width || 260, orbPanelSize.height || 260) - 70));
+  const orbWaveformWidth = Math.max(180, (orbPanelSize.width || 376) - 24);
+  const spectrogramWidth = Math.max(280, (spectrogramSize.width || 860) - 52);
+  const spectrogramHeight = Math.max(220, Math.min(360, (spectrogramSize.height || 360) - 56));
+  const constellationWidth = Math.max(240, Math.min(460, (constellationSize.width || 420) - 8));
+  const constellationHeight = Math.max(220, Math.min(340, constellationWidth * 0.72));
 
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Operator console" screenName="CONSOLE"/>
       <AmbientField count={70}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(0, 400px) minmax(0, 1fr) minmax(0, 460px)', gap: 24, zIndex: 2 }}>
+      <div
+        className="biovoice-three-column biovoice-console-grid biovoice-screen-scroll biovoice-stage-panel"
+        style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(0, 400px) minmax(0, 1fr) minmax(0, 460px)', gap: 24, zIndex: 2 }}
+      >
 
         {/* ============ LEFT: Identity check ============ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
           <PanelTitle eyebrow="01 · IDENTITY" title="Verify a speaker"/>
 
           {/* Mic visualizer */}
-          <div className="panel outline-glow" style={{ position: 'relative', overflow: 'hidden', minHeight: 280, display: 'grid', placeItems: 'center', padding: 24 }}>
-            <VoiceOrb size={260} samples={audio.samples} level={audio.level} hue="cyan" intensity={1.1}/>
+          <div ref={orbPanelRef} className="panel outline-glow" style={{ position: 'relative', overflow: 'hidden', minHeight: 280, display: 'grid', placeItems: 'center', padding: 24 }}>
+            <VoiceOrb size={orbSize} samples={audio.samples} level={audio.level} hue="cyan" intensity={1.1}/>
             <div style={{ position: 'absolute', top: 16, left: 16, right: 16, display: 'flex', justifyContent: 'space-between' }}>
               <span className={`pill ${micState === 'live' ? 'good' : 'warn'}`}>
                 <span className="dot"></span>
@@ -348,7 +388,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>16 KHZ</span>
             </div>
             <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12 }}>
-              <Waveform samples={audio.samples} width={352} height={48} bars={80} mirror={true}/>
+              <Waveform samples={audio.samples} width={orbWaveformWidth} height={48} bars={80} mirror={true}/>
             </div>
           </div>
 
@@ -416,7 +456,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <PanelTitle eyebrow="02 · LIVE SIGNAL" title="Room audio · real time"/>
 
           {/* Big spectrogram */}
-          <div className="panel outline-glow" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, padding: 22, overflow: 'hidden' }}>
+          <div ref={spectrogramRef} className="panel outline-glow" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, padding: 22, overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
               <div>
                 <div className="label-mono" style={{ fontSize: 10 }}>MEL-SPECTROGRAM · STREAMING</div>
@@ -428,7 +468,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               </div>
             </div>
             <div style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280 }}>
-              <MelSpectrogram freqs={audio.freqs} width={820} height={300} mels={80}/>
+              <MelSpectrogram freqs={audio.freqs} width={spectrogramWidth} height={spectrogramHeight} mels={80}/>
               <div style={{
                 position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
@@ -490,7 +530,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           {/* Health bar — real backend telemetry from /metrics/summary. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+          <div className="biovoice-console-metrics" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
             <Metric label="Verify p50" value={formatLatency(metrics?.p50VerifyMs ?? null)} sub="rolling" trend="flat"/>
             <Metric label="Throughput" value={formatThroughput(metrics?.throughputPerSec ?? 0)} sub="lifetime avg" trend="up"/>
             <Metric label="Profiles" value={profilesCount.toFixed(0)} sub="enrolled" trend="up"/>
@@ -516,10 +556,10 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
               )}
             </div>
-            <div style={{ display: 'grid', placeItems: 'center' }}>
+            <div ref={constellationRef} style={{ display: 'grid', placeItems: 'center', minHeight: 220 }}>
               <EmbeddingConstellation
-                width={420}
-                height={300}
+                width={constellationWidth}
+                height={constellationHeight}
                 projectedProfiles={projection.profiles}
                 livePoint={live.liveProjected}
                 matchId={selectedProfile}
@@ -561,7 +601,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           {/* Compact counters */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="panel" style={{ padding: '14px 18px' }}>
               <div className="label-mono" style={{ fontSize: 9 }}>VERIFIED TODAY</div>
               <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--teal-2)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>

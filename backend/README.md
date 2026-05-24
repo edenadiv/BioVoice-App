@@ -20,6 +20,7 @@ Installation:
 
 - Base backend plus local model stack: `python -m pip install -e .[model] --no-build-isolation`
 - Add spoof-generation support (XTTS): `python -m pip install -e .[model,spoof] --no-build-isolation`
+- Add OpenVoice / RVC / Applio adapter deps: `python -m pip install -r ../deploy/voice_runtimes/requirements.txt`
 
 Notes:
 
@@ -45,6 +46,16 @@ deploy time (see "Secrets management" below).
 | `BIOVOICE_LOG_FORMAT` | F7.2 — `json` (default) emits one JSON line per record; `plain` for local dev. | `BIOVOICE_LOG_FORMAT=plain` |
 | `BIOVOICE_COOKIE_INSECURE` | F2.5 — set to `1` to drop the `Secure` flag on the session cookie so HTTP local dev (no TLS) works. Production must leave this **unset** so the cookie is HTTPS-only. | `BIOVOICE_COOKIE_INSECURE=1` |
 | `DATABASE_URL` | F7.1 (planned) — Postgres connection string. Unset = SQLite at `backend/data/biovoice.sqlite3`. | `DATABASE_URL=postgres://…` |
+| `ENABLE_ECAPA_COMPARISON` | Optional comparison encoder for verify/identify. Default `0`. Keep disabled unless you intentionally want SpeechBrain ECAPA loaded in the main backend. | `ENABLE_ECAPA_COMPARISON=1` |
+| `ENABLE_WESPEAKER_COMPARISON` | Optional comparison encoder for verify/identify. Default `0`. | `ENABLE_WESPEAKER_COMPARISON=1` |
+
+| `XTTS_MODEL_PATH` | Local XTTS-v2 checkpoint directory. Unset = `../XTTS-v2`. | `XTTS_MODEL_PATH=/abs/path/to/XTTS-v2` |
+| `OPENVOICE_LOCAL_FALLBACK` | Optional escape hatch. Default `0` keeps OpenVoice out of the main backend env and requires the sidecar. Set to `1` only if you intentionally want in-process OpenVoice loading. | `OPENVOICE_LOCAL_FALLBACK=1` |
+| `OPENVOICE_BASE_URL` | External OpenVoice adapter base URL. | `OPENVOICE_BASE_URL=http://127.0.0.1:8013` |
+| `RVC_BASE_URL` | External RVC adapter base URL. | `RVC_BASE_URL=http://127.0.0.1:8014` |
+| `APPLIO_BASE_URL` | External Applio adapter base URL. | `APPLIO_BASE_URL=http://127.0.0.1:8015` |
+| `RVC_MODELS_PATH` | Imported RVC voice-model root. Unset = `backend/data/voice_models/rvc`. | `RVC_MODELS_PATH=/abs/path/to/backend/data/voice_models/rvc` |
+| `APPLIO_MODELS_PATH` | Imported Applio voice-model root. Unset = `backend/data/voice_models/applio`. | `APPLIO_MODELS_PATH=/abs/path/to/backend/data/voice_models/applio` |
 
 ## LAN-IP demos
 
@@ -110,3 +121,18 @@ If `TTS` won't install on your Python version (3.13+ is currently unsupported by
 python3.12 -m venv .venv-xtts
 .venv-xtts/bin/pip install -e '.[model,spoof]' --no-build-isolation
 ```
+
+## OpenVoice / RVC / Applio sidecars
+
+These three are intentionally external runtimes. The backend already knows how
+to call them, but they run as separate adapter services. By default,
+`OpenVoice` is sidecar-only too; set `OPENVOICE_LOCAL_FALLBACK=1` only if you
+explicitly want to load it inside the main backend process.
+
+- `OpenVoice`: text + reference WAV(s) -> cloned WAV
+- `RVC`: source WAV + trained target model id -> converted WAV
+- `Applio`: source WAV + exported target model id -> converted WAV
+
+`RVC` and `Applio` are model-based conversion engines here, not zero-shot
+reference-WAV cloners. Startup instructions, model layout, and adapter URLs
+live in [`deploy/voice_runtimes/README.md`](../deploy/voice_runtimes/README.md).

@@ -184,6 +184,10 @@ class SpoofVoice(BaseModel):
     language: str | None = None
 
 
+SpoofEngineKind = Literal["tts", "voice_clone", "voice_conversion"]
+SpoofModelEngine = Literal["rvc", "applio"]
+
+
 class SpoofEngineInfo(BaseModel):
     """T3 — engine descriptor returned by `GET /spoof/engines`.
 
@@ -196,6 +200,11 @@ class SpoofEngineInfo(BaseModel):
     description: str
     requires_network: bool
     available: bool
+    kind: SpoofEngineKind = "tts"
+    text_required: bool = True
+    source_audio_required: bool = False
+    reference_audio_required: bool = False
+    supports_reference_sample: bool = False
     voices: list[SpoofVoice] = Field(default_factory=list)
     default_voice: str | None = None
 
@@ -206,6 +215,20 @@ class SpoofEnginesResponse(BaseModel):
 
     engines: list[SpoofEngineInfo]
     default_engine: str | None
+
+
+class SpoofVoiceModelInfo(BaseModel):
+    engine: SpoofModelEngine
+    model_id: str
+    label: str
+    language: str | None = None
+    ready: bool = True
+    model_filename: str
+    index_filename: str | None = None
+
+
+class SpoofVoiceModelsResponse(BaseModel):
+    models: list[SpoofVoiceModelInfo] = Field(default_factory=list)
 
 
 class UserEmbedding(BaseModel):

@@ -6,15 +6,16 @@
  * shrink below the 44 × 44 px WCAG minimum and reading the text becomes
  * impractical. This stylesheet intercepts at three breakpoints:
  *
- *   ≥ 1440 px : desktop kiosk, original 1920×1080 stage scaled to fit.
- *   768–1439  : tablet, stage capped at viewport dimensions, components
+ *   ≥ 1100 px : desktop kiosk, original 1920×1080 stage scaled to fit.
+ *   768–1099  : tablet / narrow laptop, stage capped at viewport dimensions, components
  *               re-flow into a single column where they were two-up.
  *   < 768 px  : phone, fully linear layout, hamburger nav.
  *
- * The strategy: rather than rewrite every screen for mobile, we apply a
- * `body.biovoice-mobile` class (set by app.jsx via a media-query
- * listener) that adds linearising rules. The desktop stage stays as-is
- * for ≥ 1440 px so the demo experience is unchanged.
+ * The strategy: app.jsx sets one explicit body class:
+ * `biovoice-desktop`, `biovoice-tablet`, or `biovoice-mobile`.
+ * Each screen exposes layout hooks (`biovoice-console-grid`,
+ * `biovoice-two-column`, etc.) so tablet/mobile rules stay local to
+ * the actual screen instead of guessing from one generic compact flag.
  */
 
 /* Touch-friendly defaults — apply on every viewport so a touchscreen
@@ -33,10 +34,39 @@ html {
   touch-action: manipulation;
 }
 
-@media (max-width: 1439px) {
-  /* Tablet — collapse two-column grids into one. */
-  .biovoice-two-column {
-    grid-template-columns: 1fr;
+@media (max-width: 1099px) {
+  /* Tablet / narrow laptop. Keep the visual language, but switch each
+   * screen to its own explicit tablet layout. */
+  body.biovoice-tablet .biovoice-stage {
+    width: 100vw !important;
+    height: 100vh !important;
+    transform: none !important;
+  }
+
+  body.biovoice-tablet .biovoice-screen-scroll {
+    overflow: auto !important;
+  }
+
+  body.biovoice-tablet .biovoice-console-grid,
+  body.biovoice-tablet .biovoice-two-column,
+  body.biovoice-tablet .biovoice-profiles-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  body.biovoice-tablet .biovoice-console-metrics {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  body.biovoice-tablet .biovoice-console-counters {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  body.biovoice-tablet .biovoice-features-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  body.biovoice-tablet .biovoice-stage-panel {
+    padding: 138px 40px 90px 112px !important;
   }
 }
 
@@ -60,8 +90,17 @@ html {
   }
 
   body.biovoice-mobile .biovoice-three-column,
-  body.biovoice-mobile .biovoice-two-column {
+  body.biovoice-mobile .biovoice-two-column,
+  body.biovoice-mobile .biovoice-profiles-grid,
+  body.biovoice-mobile .biovoice-console-metrics,
+  body.biovoice-mobile .biovoice-console-counters,
+  body.biovoice-mobile .biovoice-features-grid {
     grid-template-columns: 1fr !important;
+  }
+
+  body.biovoice-mobile .biovoice-stage-panel {
+    padding: 124px 20px 88px 20px !important;
+    overflow: auto !important;
   }
 
   body.biovoice-mobile .biovoice-sidebar {

@@ -372,7 +372,7 @@ function LiveFeatures({ getRecentFloat, sampleRate, vadThreshold = 0.018 }) {
   );
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+    <div className="biovoice-features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
       <Cell label="Pitch · F0" value={feat.pitch ? feat.pitch.toFixed(0) : '—'} unit="Hz" hint={feat.pitch > 165 ? 'female range' : feat.pitch > 0 ? 'male range' : 'silence'}/>
       <Cell label="Formant F1" value={feat.f1 ? feat.f1.toFixed(0) : '—'} unit="Hz" hint={feat.f2 ? `F2 ${feat.f2.toFixed(0)} · F3 ${feat.f3.toFixed(0)}` : 'LPC'}/>
       <Cell label="Jitter"     value={feat.jitter ? feat.jitter.toFixed(2) : '—'} unit="%" hint="cycle-to-cycle"/>

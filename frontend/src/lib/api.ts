@@ -14,6 +14,7 @@ import type {
   SpoofEngines,
   SpoofGenerationResult,
   SpoofTestResult,
+  SpoofVoiceModel,
   UserEmbedding,
   VerificationResult,
 } from "../types";
@@ -360,7 +361,8 @@ export async function generateSpoof(payload: {
   engine?: string;
   voice?: string;
   referenceSampleId?: string;
-  file?: File | null;
+  referenceAudioFile?: File | null;
+  sourceAudioFile?: File | null;
 }): Promise<SpoofGenerationResult> {
   const formData = new FormData();
   formData.append("target_user_id", payload.targetUserId);
@@ -371,8 +373,11 @@ export async function generateSpoof(payload: {
   if (payload.referenceSampleId) {
     formData.append("reference_sample_id", payload.referenceSampleId);
   }
-  if (payload.file) {
-    formData.append("audio", payload.file);
+  if (payload.referenceAudioFile) {
+    formData.append("reference_audio", payload.referenceAudioFile);
+  }
+  if (payload.sourceAudioFile) {
+    formData.append("source_audio", payload.sourceAudioFile);
   }
 
   const response = await fetch(`${API_BASE}/spoof`, {
@@ -405,12 +410,29 @@ type SpoofEngineInfoResponse = {
   description: string;
   requires_network: boolean;
   available: boolean;
+  kind: "tts" | "voice_clone" | "voice_conversion";
+  text_required: boolean;
+  source_audio_required: boolean;
+  reference_audio_required: boolean;
+  supports_reference_sample: boolean;
   voices: SpoofVoiceResponse[];
   default_voice: string | null;
 };
 type SpoofEnginesResponse = {
   engines: SpoofEngineInfoResponse[];
   default_engine: string | null;
+};
+type SpoofVoiceModelResponse = {
+  engine: "rvc" | "applio";
+  model_id: string;
+  label: string;
+  language: string | null;
+  ready: boolean;
+  model_filename: string;
+  index_filename: string | null;
+};
+type SpoofVoiceModelsResponse = {
+  models: SpoofVoiceModelResponse[];
 };
 
 export async function getSpoofEngines(): Promise<SpoofEngines> {
@@ -423,9 +445,52 @@ export async function getSpoofEngines(): Promise<SpoofEngines> {
       description: e.description,
       requiresNetwork: e.requires_network,
       available: e.available,
+      kind: e.kind,
+      textRequired: e.text_required,
+      sourceAudioRequired: e.source_audio_required,
+      referenceAudioRequired: e.reference_audio_required,
+      supportsReferenceSample: e.supports_reference_sample,
       voices: e.voices,
       defaultVoice: e.default_voice,
     })),
+  };
+}
+
+export async function getSpoofVoiceModels(): Promise<SpoofVoiceModel[]> {
+  const response = await request<SpoofVoiceModelsResponse>("/spoof/voice-models");
+  return response.models.map((model) => ({
+    engine: model.engine,
+    modelId: model.model_id,
+    label: model.label,
+    language: model.language,
+    ready: model.ready,
+    modelFilename: model.model_filename,
+    indexFilename: model.index_filename,
+  }));
+}
+
+export async function importSpoofVoiceModel(payload: {
+  engine: "rvc" | "applio";
+  label: string;
+  language?: string;
+  modelFile: File;
+  indexFile?: File | null;
+}): Promise<SpoofVoiceModel> {
+  const formData = new FormData();
+  formData.append("engine", payload.engine);
+  formData.append("label", payload.label);
+  if (payload.language?.trim()) formData.append("language", payload.language.trim());
+  formData.append("model_file", payload.modelFile);
+  if (payload.indexFile) formData.append("index_file", payload.indexFile);
+  const response = await postForm<SpoofVoiceModelResponse>("/spoof/voice-models/import", formData);
+  return {
+    engine: response.engine,
+    modelId: response.model_id,
+    label: response.label,
+    language: response.language,
+    ready: response.ready,
+    modelFilename: response.model_filename,
+    indexFilename: response.index_filename,
   };
 }
 

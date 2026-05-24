@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from app.api import dependencies, routes
 from app.models import SpeakerRecord
-from app.services.verification import VerificationService
+from app.services.verification import NoEnrolledSpeakersError, VerificationService
 
 from .conftest import make_wav
 
@@ -99,7 +99,7 @@ def test_identify_includes_thresholds_and_would_accept(verification_service: Ver
 
 
 def test_identify_raises_when_no_users_enrolled(verification_service: VerificationService):
-    with pytest.raises(RuntimeError, match="No users enrolled"):
+    with pytest.raises(NoEnrolledSpeakersError, match="No users enrolled"):
         verification_service.identify(audio_bytes=make_wav(2.0))
 
 

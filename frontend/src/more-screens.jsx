@@ -4,7 +4,13 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
+import {
+  generateSpoof,
+  getSpoofEngines,
+  spoofTest,
+  deleteUser,
+  identifySpeaker,
+} from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
@@ -82,16 +88,22 @@ function Sidebar({ page, setPage }) {
 // ============================================================================
 function DeepfakeLab({ audio, profiles }) {
   const [target, setTarget] = useState(profiles[0]?.id ?? null);
+  const [attackMode, setAttackMode] = useState('scripted');
   const [text, setText] = useState("Authorize transfer of two million dollars.");
   // T4 — engine + voice pickers. Loaded once from /spoof/engines on
   // mount; the voice list refreshes when the engine selection changes.
   const [enginesPayload, setEnginesPayload] = useState(null); // { engines, defaultEngine } | null
   const [engineId, setEngineId] = useState('');
   const [voiceId, setVoiceId] = useState('');
+  const [sourceAudioFile, setSourceAudioFile] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [deviceId, setDeviceId] = useState("");
+  const recorder = useVoiceRecorder({ minMs: 800, maxMs: null, deviceId: deviceId || undefined });
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [stage, setStage] = useState(0); // 0 idle, 1 cloning, 2 detecting, 3 done
+  const [attemptId, setAttemptId] = useState(0);
 
   // Keep the target picker in sync as profiles arrive from the polling.
   useEffect(() => {
@@ -121,28 +133,121 @@ function DeepfakeLab({ audio, profiles }) {
     return () => { cancelled = true; };
   }, []);
 
+  const reloadDevices = useCallback(async () => {
+    const list = await listAudioInputs();
+    setDevices(list);
+    if (deviceId && !list.some((d) => d.deviceId === deviceId)) setDeviceId("");
+  }, [deviceId]);
+
+  useEffect(() => {
+    void reloadDevices();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    const handler = () => void reloadDevices();
+    navigator.mediaDevices.addEventListener("devicechange", handler);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", handler);
+  }, [reloadDevices]);
+
   // When the engine changes, reset the voice to that engine's default.
   const selectedEngine = useMemo(
     () => enginesPayload?.engines.find((e) => e.id === engineId) ?? null,
     [enginesPayload, engineId],
   );
+  const pickPreferredVoice = useCallback((engine) => {
+    if (!engine) return '';
+    if (engine.id === 'edge' || engine.id === 'gtts') {
+      const hebrewVoice =
+        engine.voices.find((voice) => (voice.language ?? '').toLowerCase().startsWith('he'))
+        ?? engine.voices.find((voice) => (voice.id ?? '').toLowerCase().startsWith('he'));
+      if (hebrewVoice) return hebrewVoice.id;
+    }
+    return engine.defaultVoice ?? engine.voices[0]?.id ?? '';
+  }, []);
+  const modeEngines = useMemo(() => {
+    if (!enginesPayload) return [];
+    return enginesPayload.engines.filter((engine) =>
+      attackMode === 'live' ? engine.sourceAudioRequired : !engine.sourceAudioRequired
+    );
+  }, [attackMode, enginesPayload]);
+  const availableModeEngines = useMemo(
+    () => modeEngines.filter((engine) => engine.available),
+    [modeEngines],
+  );
   const handleEngineChange = useCallback((newEngineId) => {
     setEngineId(newEngineId);
     const eng = enginesPayload?.engines.find((e) => e.id === newEngineId);
-    if (eng) setVoiceId(eng.defaultVoice ?? eng.voices[0]?.id ?? '');
-  }, [enginesPayload]);
+    if (eng) setVoiceId(pickPreferredVoice(eng));
+  }, [enginesPayload, pickPreferredVoice]);
 
   const targetProfile = profiles.find(p => p.id === target) || profiles[0];
+  const engineNeedsText = attackMode === 'scripted' && (selectedEngine?.textRequired ?? true);
+  const engineNeedsSourceAudio = attackMode === 'live';
+  const canUseEnrolledTargetVoice = Boolean(selectedEngine?.supportsReferenceSample && target);
+  const noModeEngineMessage = attackMode === 'live'
+    ? 'No live speech-to-speech engine is ready on this backend for the selected workflow.'
+    : 'No text-to-voice engine is ready on this backend right now.';
+
+  useEffect(() => {
+    if (!enginesPayload) return;
+    const currentStillFits = availableModeEngines.some((engine) => engine.id === engineId);
+    if (currentStillFits) return;
+    const next = availableModeEngines[0] ?? null;
+    setEngineId(next?.id ?? '');
+    setVoiceId(next ? pickPreferredVoice(next) : '');
+  }, [availableModeEngines, engineId, enginesPayload, pickPreferredVoice]);
+
+  useEffect(() => {
+    if (attackMode !== 'scripted') return;
+    setSourceAudioFile(null);
+    if (recorder.state === 'recording') recorder.cancel();
+  }, [attackMode, recorder]);
+
+  const handleEnableMicLabels = useCallback(async () => {
+    const ok = await requestMicPermission();
+    if (!ok) {
+      setError("Microphone access denied. Allow it in your browser settings.");
+      return;
+    }
+    await reloadDevices();
+  }, [reloadDevices]);
+
+  const handleStartSourceRec = useCallback(async () => {
+    setError(null);
+    await recorder.start();
+  }, [recorder]);
+
+  const handleStopSourceRec = useCallback(async () => {
+    const rec = await recorder.stop();
+    if (!rec) {
+      setError(recorder.state === "denied" ? "Microphone access denied." : "Recording too short.");
+      return;
+    }
+    setSourceAudioFile(rec.wavFile);
+    setError(null);
+  }, [recorder]);
 
   const generate = useCallback(async () => {
     if (!target) {
       setError("Enrol at least one profile in the Profiles page first.");
       return;
     }
+    if (!selectedEngine) {
+      setError(noModeEngineMessage);
+      return;
+    }
+    if (engineNeedsText && !text.trim()) {
+      setError("This engine requires a text prompt.");
+      return;
+    }
+    if (engineNeedsSourceAudio && !sourceAudioFile) {
+      setError("Record a live source clip first.");
+      return;
+    }
     setError(null);
+    if (result?.audioUrl) URL.revokeObjectURL(result.audioUrl);
     setResult(null);
     setGenerating(true);
     setStage(1);
+    setAttemptId((value) => value + 1);
     const startedAt = performance.now();
 
     try {
@@ -151,10 +256,11 @@ function DeepfakeLab({ audio, profiles }) {
       // spoof-test round-trip.
       const generation = await generateSpoof({
         targetUserId: target,
-        text,
-        language: 'en',
+        text: attackMode === 'scripted' ? text : 'Live voice conversion',
+        language: (engineId === 'edge' || engineId === 'gtts') ? 'he' : 'en',
         engine: engineId || undefined,
         voice: voiceId || undefined,
+        sourceAudioFile,
       });
       setStage(2);
 
@@ -180,8 +286,8 @@ function DeepfakeLab({ audio, profiles }) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       let friendly = msg;
-      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
-        friendly = 'Spoof generation requires XTTS-v2. Install it on the backend (see backend/README.md §XTTS spoof generation).';
+      if (msg.includes('503') || msg.toLowerCase().includes('engine')) {
+        friendly = noModeEngineMessage;
       } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol') || msg.includes('404')) {
         friendly = `No reference sample for "${target}" — enrol them first via the Profiles page.`;
       }
@@ -190,11 +296,27 @@ function DeepfakeLab({ audio, profiles }) {
     } finally {
       setGenerating(false);
     }
-  }, [target, text, engineId, voiceId]);
+  }, [
+    target,
+    selectedEngine,
+    noModeEngineMessage,
+    attackMode,
+    text,
+    engineId,
+    voiceId,
+    engineNeedsSourceAudio,
+    engineNeedsText,
+    sourceAudioFile,
+  ]);
 
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
-    { label: 'Cloning voice timbre', sub: 'XTTS-v2 → 24 kHz waveform' },
+    {
+      label: selectedEngine?.kind === 'voice_conversion' ? 'Converting source speech' : 'Generating spoofed speech',
+      sub: selectedEngine?.kind === 'voice_conversion'
+        ? `${selectedEngine?.label ?? 'Voice conversion'} → uploaded speech-to-speech`
+        : `${selectedEngine?.label ?? 'Cloner'} → synthesized waveform`,
+    },
     { label: 'Running BioVoice detector', sub: 'AASIST + F4 sub-classifier' },
   ];
 
@@ -203,10 +325,33 @@ function DeepfakeLab({ audio, profiles }) {
       <Chrome status="DEEPFAKE LABORATORY · ETHICAL USE ONLY" statusKind="warn" subtitle="Adversarial testing" screenName="DF LAB"/>
       <AmbientField count={50}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+      <div
+        className="biovoice-two-column biovoice-screen-scroll biovoice-stage-panel"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          padding: '150px 56px 90px 124px',
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 28,
+          zIndex: 2,
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
 
         {/* LEFT: Forge */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 18,
+            minWidth: 0,
+            minHeight: 0,
+            overflowY: 'auto',
+            paddingRight: 8,
+          }}
+        >
           <div>
             <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>RED-TEAM · FORGE</div>
             <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>Create a deepfake</div>
@@ -242,49 +387,73 @@ function DeepfakeLab({ audio, profiles }) {
               </div>
             </Field>
 
-            <Field label="UTTERANCE TO SYNTHESIZE">
-              <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
-                style={{
-                  width: '100%', resize: 'none',
-                  background: 'rgba(125,200,255,0.04)',
-                  border: '1px solid var(--line-2)',
-                  borderRadius: 10, color: 'var(--ink)',
-                  padding: '12px 14px',
-                  fontFamily: 'Sora, sans-serif', fontSize: 14,
-                  outline: 'none',
-                }}/>
+            <Field label="ATTACK MODE">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  { id: 'scripted', label: 'Text To Voice', sub: 'Type a phrase and speak as the selected user' },
+                  { id: 'live', label: 'Live To Voice', sub: 'Record live speech and convert it into the selected user' },
+                ].map((mode) => {
+                  const selected = attackMode === mode.id;
+                  return (
+                    <button key={mode.id} type="button" onClick={() => setAttackMode(mode.id)} className="lift"
+                      style={{
+                        padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+                        background: selected ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
+                        border: selected ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
+                        color: selected ? 'var(--ink)' : 'var(--ink-mute)', textAlign: 'left',
+                      }}>
+                      <div style={{ fontSize: 12, fontWeight: 500 }}>{mode.label}</div>
+                      <div className="label-mono" style={{ fontSize: 8, marginTop: 6, color: 'var(--ink-soft)' }}>{mode.sub}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </Field>
+
+            {engineNeedsText && (
+              <Field label="UTTERANCE TO SYNTHESIZE">
+                <textarea value={text} onChange={e => setText(e.target.value)} rows={2}
+                  style={{
+                    width: '100%', resize: 'none',
+                    background: 'rgba(125,200,255,0.04)',
+                    border: '1px solid var(--line-2)',
+                    borderRadius: 10, color: 'var(--ink)',
+                    padding: '12px 14px',
+                    fontFamily: 'Sora, sans-serif', fontSize: 14,
+                    outline: 'none',
+                  }}/>
+              </Field>
+            )}
 
             <Field label="TTS ENGINE  ·  PICK ONE">
               {enginesPayload === null ? (
                 <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>
                   LOADING ENGINES…
                 </div>
-              ) : enginesPayload.engines.filter((e) => e.available).length === 0 ? (
+              ) : availableModeEngines.length === 0 ? (
                 <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>
-                  No TTS engines available on the backend. Install macOS `say` / espeak-ng, or expose internet for edge-tts / gTTS.
+                  {noModeEngineMessage}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                  {enginesPayload.engines.map((e) => {
-                    const disabled = !e.available;
+                  {availableModeEngines.map((e) => {
+                    const disabled = false;
                     const selected = engineId === e.id;
                     const isCloud = e.requiresNetwork;
                     return (
                       <button
                         key={e.id}
-                        onClick={() => !disabled && handleEngineChange(e.id)}
-                        disabled={disabled}
-                        title={disabled ? `${e.label} isn't available on this backend.` : e.description}
+                        onClick={() => handleEngineChange(e.id)}
+                        title={e.description}
                         className="lift"
                         style={{
                           padding: '12px 14px', borderRadius: 10,
-                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          cursor: 'pointer',
                           background: selected ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
                           border: selected ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
-                          color: disabled ? 'var(--ink-mute)' : 'var(--ink)',
+                          color: 'var(--ink)',
                           textAlign: 'left', transition: 'all 200ms',
-                          position: 'relative', opacity: disabled ? 0.5 : 1,
+                          position: 'relative',
                           minHeight: 70,
                         }}
                       >
@@ -306,7 +475,7 @@ function DeepfakeLab({ audio, profiles }) {
                         <div className="label-mono" style={{ fontSize: 8, marginTop: 6, color: 'var(--ink-soft)' }}>
                           {disabled
                             ? 'UNAVAILABLE ON THIS BACKEND'
-                            : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}${e.id === 'xtts' ? ' · USES REFERENCE WAV' : ''}`}
+                            : `${e.kind === 'voice_conversion' ? 'AUDIO→AUDIO' : e.kind === 'voice_clone' ? 'CLONING' : 'TEXT→AUDIO'}${e.referenceAudioRequired ? ' · REFERENCE WAV' : ''}${e.sourceAudioRequired ? ' · SOURCE WAV' : ''}`}
                         </div>
                       </button>
                     );
@@ -314,6 +483,287 @@ function DeepfakeLab({ audio, profiles }) {
                 </div>
               )}
             </Field>
+
+            {canUseEnrolledTargetVoice && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  background: 'rgba(106,255,200,0.06)',
+                  border: '1px solid rgba(106,255,200,0.24)',
+                  color: 'var(--ink)',
+                }}
+              >
+                <div className="label-mono" style={{ fontSize: 9, color: '#6affc8' }}>
+                  TARGET VOICE SOURCE
+                </div>
+                <div style={{ fontSize: 13, marginTop: 6 }}>
+                  {selectedEngine?.label ?? 'This engine'} will use the enrolled samples for <strong>{targetProfile?.name ?? target}</strong>.
+                </div>
+                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+                  No separate reference WAV upload is required for this target user.
+                </div>
+              </div>
+            )}
+
+            {false && (
+            <Field label="VOICE MODEL LIBRARY  ֲ·  RVC / APPLIO">
+              <div
+                style={{
+                  border: '1px solid var(--line)',
+                  borderRadius: 14,
+                  background: 'linear-gradient(180deg, rgba(125,200,255,0.05), rgba(125,200,255,0.02))',
+                  padding: 14,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {['rvc', 'applio'].map((candidate) => {
+                    const selected = voiceModelEngine === candidate;
+                    return (
+                      <button
+                        key={candidate}
+                        type="button"
+                        onClick={() => setVoiceModelEngine(candidate)}
+                        className="lift"
+                        style={{
+                          flex: 1,
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          border: selected ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
+                          background: selected ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
+                          color: selected ? 'var(--ink)' : 'var(--ink-mute)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{candidate.toUpperCase()}</div>
+                        <div className="label-mono" style={{ fontSize: 8, marginTop: 4 }}>
+                          {candidate === 'rvc' ? 'MODEL + OPTIONAL INDEX' : 'MODEL + REQUIRED INDEX'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 10 }}>
+                  <input
+                    value={modelLabel}
+                    onChange={(e) => setModelLabel(e.target.value)}
+                    placeholder="Target voice label"
+                    style={labInputStyle}
+                  />
+                  <input
+                    value={modelLanguage}
+                    onChange={(e) => setModelLanguage(e.target.value)}
+                    placeholder="Language (optional)"
+                    style={labInputStyle}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <UploadChip
+                    label={modelFile ? modelFile.name : 'Upload trained `.pth` voice model'}
+                    sublabel="Required"
+                    accept=".pth"
+                    onChange={(event) => setModelFile(event.target.files?.[0] ?? null)}
+                  />
+                  <UploadChip
+                    label={indexFile ? indexFile.name : 'Upload `.index` search file'}
+                    sublabel={voiceModelEngine === 'applio' ? 'Required for Applio' : 'Optional for RVC'}
+                    accept=".index"
+                    onChange={(event) => setIndexFile(event.target.files?.[0] ?? null)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleModelImport}
+                    disabled={importingModel}
+                    className="btn btn-primary"
+                    style={{
+                      padding: '10px 16px',
+                      opacity: importingModel ? 0.7 : 1,
+                      cursor: importingModel ? 'wait' : 'pointer',
+                    }}
+                  >
+                    {importingModel ? 'Importing model…' : `Import ${voiceModelEngine.toUpperCase()} model`}
+                  </button>
+                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                    Imported models make the matching conversion engine selectable on this backend.
+                  </div>
+                </div>
+
+                {importMessage && (
+                  <div
+                    className="label-mono"
+                    style={{
+                      fontSize: 9,
+                      color: importMessage.tone === 'good' ? '#6affc8' : 'var(--warn)',
+                    }}
+                  >
+                    {importMessage.text}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                    {visibleVoiceModels.length > 0
+                      ? `${visibleVoiceModels.length} ${voiceModelEngine.toUpperCase()} models imported`
+                      : `No ${voiceModelEngine.toUpperCase()} models imported yet`}
+                  </div>
+                  {visibleVoiceModels.map((model) => (
+                    <div
+                      key={`${model.engine}-${model.modelId}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        gap: 10,
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid var(--line)',
+                        background: 'rgba(125,200,255,0.03)',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 12, color: 'var(--ink)' }}>{model.label}</div>
+                        <div className="label-mono" style={{ fontSize: 8, marginTop: 4, color: 'var(--ink-soft)' }}>
+                          {model.modelId}
+                          {model.language ? `  ·  ${model.language}` : ''}
+                          {model.indexFilename ? `  ·  ${model.indexFilename}` : ''}
+                        </div>
+                      </div>
+                      <span
+                        className="label-mono"
+                        style={{
+                          fontSize: 8,
+                          padding: '3px 8px',
+                          borderRadius: 999,
+                          border: `1px solid ${model.ready ? 'rgba(106,255,200,0.45)' : 'rgba(255,178,74,0.45)'}`,
+                          color: model.ready ? '#6affc8' : 'var(--warn)',
+                          background: model.ready ? 'rgba(106,255,200,0.06)' : 'rgba(255,178,74,0.06)',
+                        }}
+                      >
+                        {model.ready ? 'READY' : 'INCOMPLETE'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Field>
+            )}
+
+            {false && engineNeedsReferenceUpload && (
+              <Field label="REFERENCE AUDIO">
+                <label
+                  style={{
+                    display: 'block',
+                    padding: '12px 14px',
+                    background: 'rgba(125,200,255,0.04)',
+                    border: '1px solid var(--line-2)',
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input type="file" accept="audio/*" onChange={handleReferenceUpload} style={{ display: 'none' }} />
+                  <div style={{ fontSize: 13, color: 'var(--ink)' }}>
+                    {referenceAudioFile ? referenceAudioFile.name : 'Upload reference speech (wav/mp3/m4a/ogg/flac)'}
+                  </div>
+                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+                    {selectedEngine?.supportsReferenceSample
+                      ? 'If omitted, backend can still fall back to enrolled samples when supported.'
+                      : 'This engine uses uploaded reference timbre only.'}
+                  </div>
+                </label>
+              </Field>
+            )}
+
+            {engineNeedsSourceAudio && (
+              <Field label="SOURCE AUDIO TO CONVERT">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      background: 'rgba(125,200,255,0.04)',
+                      border: '1px solid var(--line-2)',
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: 'var(--ink)' }}>
+                      Record yourself live, then convert it into <strong>{targetProfile?.name ?? target}</strong>.
+                    </div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+                      The source clip provides the spoken words. The selected target user provides the voice identity.
+                    </div>
+                  </div>
+
+                  <Field label="MICROPHONE">
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select
+                        value={deviceId}
+                        onChange={(e) => setDeviceId(e.target.value)}
+                        disabled={recorder.state === "recording"}
+                        style={{
+                          flex: 1, padding: '10px 12px', borderRadius: 10,
+                          background: 'rgba(0,0,0,0.35)', color: 'var(--ink)',
+                          border: '1px solid rgba(125,200,255,0.18)',
+                          fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
+                        }}
+                      >
+                        <option value="">Browser default</option>
+                        {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+                      </select>
+                      {devices.every((d) => !d.label || d.label === "Microphone") && (
+                        <button onClick={handleEnableMicLabels} style={{
+                          padding: '8px 12px', fontSize: 11,
+                          background: 'transparent', color: 'var(--teal-2)',
+                          border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer',
+                        }}>Enable labels</button>
+                      )}
+                    </div>
+                  </Field>
+
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {recorder.state !== 'recording' ? (
+                      <button onClick={handleStartSourceRec} disabled={generating} style={{
+                        flex: 1, padding: '14px 20px', borderRadius: 10,
+                        background: 'linear-gradient(180deg, #ff5577, #c8194a)',
+                        color: '#fff',
+                        border: 'none', cursor: generating ? 'wait' : 'pointer',
+                        fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                      }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff' }}/>
+                        RECORD SOURCE
+                      </button>
+                    ) : (
+                      <button onClick={handleStopSourceRec} style={{
+                        flex: 1, padding: '14px 20px', borderRadius: 10,
+                        background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))',
+                        color: '#fff', border: '1px solid rgba(126,240,255,0.5)', cursor: 'pointer',
+                        fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                      }}>STOP ֲ· {(recorder.durationMs / 1000).toFixed(1)}s</button>
+                    )}
+                  </div>
+
+                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                    {sourceAudioFile ? `READY ֲ· ${sourceAudioFile.name}` : 'No source audio captured yet'}
+                  </div>
+
+                  {recorder.lastError && (
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 8,
+                      background: 'rgba(255,128,128,0.08)',
+                      border: '1px solid rgba(255,128,128,0.35)',
+                      color: '#ffadad', fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
+                    }}>{recorder.lastError}</div>
+                  )}
+                </div>
+              </Field>
+            )}
 
             {selectedEngine && selectedEngine.voices.length > 0 && (
               <Field label={`VOICE  ·  ${selectedEngine.voices.length} AVAILABLE  ·  ${selectedEngine.requiresNetwork ? 'CLOUD' : 'LOCAL'}`}>
@@ -374,7 +824,7 @@ function DeepfakeLab({ audio, profiles }) {
         </div>
 
         {/* RIGHT: Outcome */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
           <div>
             <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>BLUE-TEAM · DETECTOR</div>
             <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
@@ -418,7 +868,7 @@ function DeepfakeLab({ audio, profiles }) {
           </div>
 
           {/* Verdict */}
-          <div className="panel outline-glow" style={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
+          <div key={attemptId} className="panel outline-glow" style={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
             {!result && !generating && !error && (
               <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                 <div>
@@ -637,7 +1087,10 @@ function IdentifyScreen({ profiles }) {
       <Chrome status="OPEN-SET IDENTIFICATION" statusKind="info" subtitle="Most similar across all enrolled profiles" screenName="IDENTIFY"/>
       <AmbientField count={40}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+      <div
+        className="biovoice-two-column biovoice-screen-scroll biovoice-stage-panel"
+        style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}
+      >
 
         {/* LEFT — capture */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
@@ -755,7 +1208,7 @@ function IdentifyScreen({ profiles }) {
         </div>
 
         {/* RIGHT — results */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
           <div>
             <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>RANKED MATCHES</div>
             <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>
@@ -785,7 +1238,7 @@ function IdentifyScreen({ profiles }) {
 
 function IdentifyResults({ result, profiles }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
       <DegradedBanner provenance={result.modelProvenance} variant="full"/>
       {result.matches.map((m, i) => {
         const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
@@ -863,6 +1316,7 @@ function IdentifyResults({ result, profiles }) {
           </div>
         </div>
       </div>
+<<<<<<< Updated upstream
 
       {result.speakerModelMatches?.length > 0 && (
         <div className="panel" style={{ padding: '16px 20px', display: 'grid', gap: 12 }}>
@@ -870,6 +1324,22 @@ function IdentifyResults({ result, profiles }) {
             PER-MODEL RANKINGS
           </div>
           <div style={{ display: 'grid', gap: 10 }}>
+=======
+<<<<<<< Updated upstream
+=======
+
+      {result.speakerModelMatches?.length > 0 && (
+        <div className="panel" style={{ padding: '16px 20px', display: 'grid', gap: 12, minHeight: 0, maxHeight: 420 }}>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
+            PER-MODEL RANKINGS
+          </div>
+          <div
+            style={{ display: 'grid', gap: 10, overflowY: 'auto', paddingRight: 6 }}
+            tabIndex={0}
+            role="region"
+            aria-label="Per-model rankings"
+          >
+>>>>>>> Stashed changes
             {result.speakerModelMatches.map((group) => {
               const modelLabel =
                 group.modelKey === 'redimnet_b5' ? 'ReDimNet B5' :
@@ -952,6 +1422,10 @@ function IdentifyResults({ result, profiles }) {
           </div>
         </div>
       )}
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     </div>
   );
 }
@@ -1007,6 +1481,39 @@ function Field({ label, children }) {
   );
 }
 
+const labInputStyle = {
+  width: '100%',
+  background: 'rgba(125,200,255,0.04)',
+  border: '1px solid var(--line-2)',
+  borderRadius: 10,
+  color: 'var(--ink)',
+  padding: '12px 14px',
+  fontFamily: 'Sora, sans-serif',
+  fontSize: 13,
+  outline: 'none',
+};
+
+function UploadChip({ label, sublabel, accept, onChange }) {
+  return (
+    <label
+      style={{
+        display: 'block',
+        padding: '12px 14px',
+        background: 'rgba(125,200,255,0.04)',
+        border: '1px solid var(--line-2)',
+        borderRadius: 10,
+        cursor: 'pointer',
+      }}
+    >
+      <input type="file" accept={accept} onChange={onChange} style={{ display: 'none' }} />
+      <div style={{ fontSize: 13, color: 'var(--ink)' }}>{label}</div>
+      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+        {sublabel}
+      </div>
+    </label>
+  );
+}
+
 // ============================================================================
 // UserSettingsPage — comprehensive in-app settings (not the demo-mode panel).
 // ============================================================================
@@ -1017,7 +1524,13 @@ function UserSettingsPage({ settings, setSettings }) {
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Application preferences" screenName="SETTINGS"/>
       <AmbientField count={40}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
+      <div
+        style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}
+        className="biovoice-stage-panel"
+        tabIndex={0}
+        role="region"
+        aria-label="Settings page"
+      >
         <div style={{ maxWidth: 1180, margin: '0 auto', paddingBottom: 40 }}>
           <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>OPERATOR · OP-104</div>
           <div style={{ fontSize: 40, fontWeight: 200, marginTop: 6, marginBottom: 4 }}>Settings</div>
@@ -1214,7 +1727,13 @@ function ProfilesPage({ profiles, audio }) {
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle={`${profiles.length} enrolled profiles`} screenName="PROFILES"/>
       <AmbientField count={40}/>
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
+      <div
+        style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}
+        className="biovoice-stage-panel"
+        tabIndex={0}
+        role="region"
+        aria-label="Profiles page"
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
           <div>
             <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
@@ -1236,7 +1755,7 @@ function ProfilesPage({ profiles, audio }) {
             </button>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+          <div className="biovoice-profiles-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
             {profiles.map((p, i) => (
               <div key={p.id} className="panel lift"
                 onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)}

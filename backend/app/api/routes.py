@@ -27,6 +27,8 @@ from app.schemas import (
     SpeakerResponse,
     SpoofEngineInfo,
     SpoofEnginesResponse,
+    SpoofVoiceModelInfo,
+    SpoofVoiceModelsResponse,
     SpoofTestResponse,
     SpoofVoice,
     UserEmbedding,
@@ -34,7 +36,12 @@ from app.schemas import (
 )
 from app.services.audio import NoSpeechDetectedError
 from app.services.spoof import SpoofGenerationService
-from app.services.verification import VerificationService
+from app.services.verification import (
+    EnrollmentIncompleteError,
+    NoEnrolledSpeakersError,
+    SpeakerNotEnrolledError,
+    VerificationService,
+)
 
 
 router = APIRouter()
@@ -184,8 +191,10 @@ async def verify(
         return result
     except NoSpeechDetectedError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ValueError as exc:
+    except SpeakerNotEnrolledError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EnrollmentIncompleteError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (WaveError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -232,11 +241,9 @@ async def identify(
         return service.identify(audio_bytes=payload, top_n=top_n)
     except NoSpeechDetectedError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NoEnrolledSpeakersError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
-        # "No users enrolled" — surface as 404 so the caller can show
-        # the empty-state message instead of a generic 500.
-        if "No users enrolled" in str(exc):
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -271,12 +278,73 @@ def list_spoof_engines(
                 description=e.description,
                 requires_network=e.requires_network,
                 available=e.available,
+                kind=e.kind,
+                text_required=e.text_required,
+                source_audio_required=e.source_audio_required,
+                reference_audio_required=e.reference_audio_required,
+                supports_reference_sample=e.supports_reference_sample,
                 voices=[SpoofVoice(id=v.id, label=v.label, language=v.language) for v in e.voices],
                 default_voice=e.default_voice,
             )
             for e in engines
         ],
         default_engine=service.default_engine_id(),
+    )
+
+
+@router.get("/spoof/voice-models", response_model=SpoofVoiceModelsResponse)
+def list_spoof_voice_models(
+    service: SpoofGenerationService = Depends(get_spoof_generation_service),
+) -> SpoofVoiceModelsResponse:
+    return SpoofVoiceModelsResponse(
+        models=[
+            SpoofVoiceModelInfo(
+                engine=model.engine,
+                model_id=model.model_id,
+                label=model.label,
+                language=model.language,
+                ready=model.ready,
+                model_filename=model.model_filename,
+                index_filename=model.index_filename,
+            )
+            for model in service.list_voice_models()
+        ]
+    )
+
+
+@router.post("/spoof/voice-models/import", response_model=SpoofVoiceModelInfo)
+async def import_spoof_voice_model(
+    engine: str = Form(...),
+    label: str = Form(...),
+    language: str | None = Form(default=None),
+    model_file: UploadFile = File(...),
+    index_file: UploadFile | None = File(default=None),
+    service: SpoofGenerationService = Depends(get_spoof_generation_service),
+) -> SpoofVoiceModelInfo:
+    model_payload = await model_file.read()
+    index_payload = await index_file.read() if index_file is not None else None
+    if not model_payload or (index_file is not None and not index_payload):
+        raise HTTPException(status_code=400, detail="Imported model files cannot be empty.")
+    try:
+        imported = service.import_voice_model(
+            engine=engine,
+            label=label,
+            language=language,
+            model_bytes=model_payload,
+            model_filename=model_file.filename or "voice.pth",
+            index_bytes=index_payload,
+            index_filename=index_file.filename if index_file is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SpoofVoiceModelInfo(
+        engine=imported.engine,
+        model_id=imported.model_id,
+        label=imported.label,
+        language=imported.language,
+        ready=imported.ready,
+        model_filename=imported.model_filename,
+        index_filename=imported.index_filename,
     )
 
 
@@ -288,6 +356,8 @@ async def generate_spoof_sample(
     engine: str | None = Form(default=None),
     voice: str | None = Form(default=None),
     reference_sample_id: str | None = Form(default=None),
+    reference_audio: UploadFile | None = File(default=None),
+    source_audio: UploadFile | None = File(default=None),
     audio: UploadFile | None = File(default=None),
     service: SpoofGenerationService = Depends(get_spoof_generation_service),
 ) -> StreamingResponse:
@@ -297,9 +367,17 @@ async def generate_spoof_sample(
 
     `engine` + `voice` pick the TTS engine + voice. When omitted the
     backend uses its default (first available in priority order)."""
-    payload = await audio.read() if audio is not None else None
-    if payload == b"":
+    legacy_payload = await audio.read() if audio is not None else None
+    reference_payload = await reference_audio.read() if reference_audio is not None else None
+    source_payload = await source_audio.read() if source_audio is not None else None
+    if legacy_payload == b"" or reference_payload == b"" or source_payload == b"":
         raise HTTPException(status_code=400, detail="Audio file is empty")
+
+    # Backward compatibility: existing clients send `audio` for XTTS
+    # reference WAVs. Newer clients use `reference_audio` and
+    # `source_audio` explicitly.
+    if reference_payload is None and source_payload is None and legacy_payload is not None:
+        reference_payload = legacy_payload
 
     try:
         result = service.generate(
@@ -309,8 +387,14 @@ async def generate_spoof_sample(
             engine=engine,
             voice=voice,
             reference_sample_id=reference_sample_id,
-            reference_audio_bytes=payload,
-            reference_filename=audio.filename if audio is not None else None,
+            reference_audio_bytes=reference_payload,
+            reference_filename=(
+                reference_audio.filename
+                if reference_audio is not None
+                else (audio.filename if audio is not None and reference_payload is not None else None)
+            ),
+            source_audio_bytes=source_payload,
+            source_filename=source_audio.filename if source_audio is not None else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

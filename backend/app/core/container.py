@@ -35,6 +35,7 @@ def build_container(settings: Settings) -> AppContainer:
     # `verified-models` stages ECAPA + WeSpeaker loaders, but ReDimNet
     # remains the only production encoder until those paths are vetted.
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
+<<<<<<< Updated upstream
     comparison_encoders = {}
     try:
         comparison_encoders["ecapa_voxceleb"] = EcapaSpeakerEncoder(savedir=settings.ecapa_savedir)
@@ -46,6 +47,24 @@ def build_container(settings: Settings) -> AppContainer:
         )
     except Exception:
         pass
+=======
+<<<<<<< Updated upstream
+=======
+    comparison_encoders = {}
+    if settings.enable_ecapa_comparison:
+        try:
+            comparison_encoders["ecapa_voxceleb"] = EcapaSpeakerEncoder(savedir=settings.ecapa_savedir)
+        except Exception:
+            pass
+    if settings.enable_wespeaker_comparison:
+        try:
+            comparison_encoders["wespeaker_resnet293_lm"] = WeSpeakerResNet293SpeakerEncoder(
+                model_dir=settings.wespeaker_resnet293_dir
+            )
+        except Exception:
+            pass
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     acoustic_probe = AcousticProbe()
     verification_service = VerificationService(
         store=store,
@@ -64,6 +83,12 @@ def build_container(settings: Settings) -> AppContainer:
         output_directory=settings.generated_samples_path,
         default_language=settings.xtts_default_language,
         output_sample_rate=settings.xtts_output_sample_rate,
+        openvoice_local_fallback=settings.openvoice_local_fallback,
+        openvoice_base_url=settings.openvoice_base_url,
+        rvc_base_url=settings.rvc_base_url,
+        applio_base_url=settings.applio_base_url,
+        rvc_models_path=settings.rvc_models_path,
+        applio_models_path=settings.applio_models_path,
     )
     return AppContainer(
         settings=settings,

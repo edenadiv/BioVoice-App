@@ -11,8 +11,21 @@ import re
 
 import pytest
 
+<<<<<<< Updated upstream
 from app.services.verification import VerificationService
 
+=======
+<<<<<<< Updated upstream
+=======
+from app.services.verification import (
+    EnrollmentIncompleteError,
+    NoEnrolledSpeakersError,
+    SpeakerNotEnrolledError,
+    VerificationService,
+)
+
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 from .conftest import make_wav
 
 
@@ -217,15 +230,20 @@ def test_get_result_404_for_other_user(verification_service, enrolled_user, dete
 
 
 def test_verify_unenrolled_user_raises(verification_service):
-    with pytest.raises(ValueError):
+    with pytest.raises(SpeakerNotEnrolledError):
         verification_service.verify(user_id="ghost", audio_bytes=make_wav(1.0))
 
 
 def test_verify_under_enrolled_user_raises(verification_service, detector):
     detector.score = 0.9
     verification_service.enroll(user_id="bob", audio_bytes=make_wav(1.0), filename="x.wav")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(EnrollmentIncompleteError):
         verification_service.verify(user_id="bob", audio_bytes=make_wav(1.0))
+
+
+def test_identify_without_users_raises_specific_error(verification_service):
+    with pytest.raises(NoEnrolledSpeakersError):
+        verification_service.identify(audio_bytes=make_wav(2.0))
 
 
 def test_id_availability(verification_service, detector):

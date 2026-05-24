@@ -144,6 +144,11 @@ export type SpoofEngineInfo = {
   description: string;
   requiresNetwork: boolean;
   available: boolean;
+  kind: "tts" | "voice_clone" | "voice_conversion";
+  textRequired: boolean;
+  sourceAudioRequired: boolean;
+  referenceAudioRequired: boolean;
+  supportsReferenceSample: boolean;
   voices: SpoofVoice[];
   defaultVoice: string | null;
 };
@@ -151,4 +156,14 @@ export type SpoofEngineInfo = {
 export type SpoofEngines = {
   engines: SpoofEngineInfo[];
   defaultEngine: string | null;
+};
+
+export type SpoofVoiceModel = {
+  engine: "rvc" | "applio";
+  modelId: string;
+  label: string;
+  language: string | null;
+  ready: boolean;
+  modelFilename: string;
+  indexFilename: string | null;
 };

@@ -178,7 +178,7 @@ function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80 }) {
     ctx.scale(dpr, dpr);
     ctx.imageSmoothingEnabled = false;
 
-    if (!bufRef.current) {
+    if (!bufRef.current || bufRef.current.length !== width * mels) {
       bufRef.current = new Uint8Array(width * mels);
     }
 

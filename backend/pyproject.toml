@@ -43,6 +43,7 @@ speaker_models = [
 ]
 spoof = [
   "TTS>=0.22,<0.23",
+  "transformers>=4.33,<4.50",
 ]
 # Test runner deps. CI installs `[model,test]` so `pytest` is on PATH +
 # httpx is available for fastapi.testclient. Locally, the dev venv

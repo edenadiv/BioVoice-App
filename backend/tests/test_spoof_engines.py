@@ -17,9 +17,12 @@ from fastapi.testclient import TestClient
 
 from app.api import dependencies, routes
 from app.services.spoof import (
+    ApplioEngine,
     EdgeTtsEngine,
     EspeakEngine,
     GttsEngine,
+    OpenVoiceEngine,
+    RvcEngine,
     SayEngine,
     SpoofGenerationService,
     XttsEngine,
@@ -51,14 +54,14 @@ def client(spoof_service: SpoofGenerationService) -> TestClient:
 # ---------------------------------------------------------------------
 
 
-def test_engines_route_returns_all_five_known_engines(client: TestClient):
+def test_engines_route_returns_all_known_engines(client: TestClient):
     response = client.get("/spoof/engines")
     assert response.status_code == 200
     body = response.json()
     ids = [e["id"] for e in body["engines"]]
-    # v1.1.1 ships these five engines in this priority order. Anything
+    # The spoof catalogue order is part of the public UI contract.
     # else in the catalogue is a regression that needs explicit attention.
-    assert ids == ["say", "edge", "gtts", "espeak", "xtts"]
+    assert ids == ["openvoice", "xtts", "edge", "gtts", "say", "espeak", "rvc", "applio"]
 
 
 def test_engines_route_default_is_an_available_engine(client: TestClient):
@@ -78,7 +81,9 @@ def test_engine_descriptor_shape_is_stable(client: TestClient):
     for engine in body["engines"]:
         assert set(engine.keys()) == {
             "id", "label", "description", "requires_network",
-            "available", "voices", "default_voice",
+            "available", "kind", "text_required", "source_audio_required",
+            "reference_audio_required", "supports_reference_sample",
+            "voices", "default_voice",
         }
         assert isinstance(engine["available"], bool)
         assert isinstance(engine["requires_network"], bool)
@@ -145,6 +150,64 @@ def test_xtts_engine_unavailable_when_checkpoint_missing(tmp_path):
     assert engine.list_voices() == []
 
 
+def test_openvoice_engine_unavailable_without_base_url():
+    engine = OpenVoiceEngine(None)
+    if engine.is_available():
+        assert engine.default_voice() == "clone"
+        assert engine.list_voices()
+    else:
+        assert engine.list_voices() == []
+
+
+def test_rvc_engine_unavailable_without_base_url():
+    engine = RvcEngine(None)
+    assert not engine.is_available()
+    assert engine.list_voices() == []
+
+
+def test_applio_engine_unavailable_without_base_url():
+    engine = ApplioEngine(None)
+    assert not engine.is_available()
+    assert engine.list_voices() == []
+
+
+def test_rvc_engine_lists_models_from_service(monkeypatch: pytest.MonkeyPatch):
+    engine = RvcEngine("http://vc.local")
+    engine._health_cache = True
+    monkeypatch.setattr(
+        engine,
+        "_get_json",
+        lambda endpoint: {
+            "models": [
+                {"id": "ceo", "label": "CEO Voice", "language": "en"},
+                {"id": "narrator", "label": "Narrator", "language": None},
+            ]
+        },
+    )
+    voices = engine.list_voices()
+    assert [voice.id for voice in voices] == ["ceo", "narrator"]
+    assert engine.default_voice() == "ceo"
+
+
+def test_applio_engine_lists_models_from_service(monkeypatch: pytest.MonkeyPatch):
+    engine = ApplioEngine("http://vc.local")
+    engine._health_cache = True
+    monkeypatch.setattr(
+        engine,
+        "_get_json",
+        lambda endpoint: {
+            "models": [
+                {"id": "singer", "label": "Singer", "language": "es"},
+            ]
+        },
+    )
+    voices = engine.list_voices()
+    assert len(voices) == 1
+    assert voices[0].id == "singer"
+    assert voices[0].language == "es"
+    assert engine.default_voice() == "singer"
+
+
 # ---------------------------------------------------------------------
 # POST /spoof routes through the chosen engine
 # ---------------------------------------------------------------------
@@ -161,7 +224,7 @@ def test_spoof_404s_when_engine_id_is_unknown(client: TestClient):
     )
     # Unknown engine is a 400 (ValueError → "Unknown TTS engine").
     assert response.status_code == 400
-    assert "Unknown TTS engine" in response.json()["detail"]
+    assert "Unknown spoof engine" in response.json()["detail"]
 
 
 def test_spoof_503s_when_engine_is_known_but_unavailable(client: TestClient):

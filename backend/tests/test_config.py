@@ -12,8 +12,12 @@ def reset_config(monkeypatch):
     """Re-import config after env mutation so the module-level Settings()
     picks up the new env vars. Restores the import cache on teardown."""
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    monkeypatch.delenv("SIMILARITY_THRESHOLD", raising=False)
+    monkeypatch.delenv("DEEPFAKE_THRESHOLD", raising=False)
     yield monkeypatch
     monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    monkeypatch.delenv("SIMILARITY_THRESHOLD", raising=False)
+    monkeypatch.delenv("DEEPFAKE_THRESHOLD", raising=False)
 
 
 def _fresh_settings():
@@ -81,3 +85,21 @@ def test_cors_origins_flow_into_fastapi_middleware(reset_config):
     assert cors_layer is not None
     assert "http://10.0.0.10:5173" in cors_layer.kwargs["allow_origins"]
     assert "http://localhost:5173" in cors_layer.kwargs["allow_origins"]
+
+
+def test_similarity_threshold_default_when_env_unset(reset_config):
+    settings = _fresh_settings()
+    assert settings.similarity_threshold == 0.75
+
+
+def test_deepfake_threshold_default_when_env_unset(reset_config):
+    settings = _fresh_settings()
+    assert settings.deepfake_threshold == 0.50
+
+
+def test_thresholds_read_from_env(reset_config):
+    reset_config.setenv("SIMILARITY_THRESHOLD", "0.81")
+    reset_config.setenv("DEEPFAKE_THRESHOLD", "0.63")
+    settings = _fresh_settings()
+    assert settings.similarity_threshold == pytest.approx(0.81)
+    assert settings.deepfake_threshold == pytest.approx(0.63)

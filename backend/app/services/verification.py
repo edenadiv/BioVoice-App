@@ -46,6 +46,18 @@ _MISMATCH_MESSAGE = "Speaker did not match the enrolled profile."
 _SYNTHETIC_MESSAGE = "Audio flagged as synthetic. Access denied."
 
 
+class SpeakerNotEnrolledError(LookupError):
+    """Raised when a requested speaker id doesn't exist."""
+
+
+class EnrollmentIncompleteError(RuntimeError):
+    """Raised when a speaker exists but has too few enrollment samples."""
+
+
+class NoEnrolledSpeakersError(LookupError):
+    """Raised when an identify request arrives before any users are enrolled."""
+
+
 def _clamp_unit(value: float) -> float:
     """Clamp a [0, 1]-domain score to the boundary, defending the
     Pydantic Field(ge=0.0, le=1.0) constraint against float-precision
@@ -284,9 +296,9 @@ class VerificationService:
     def verify(self, user_id: str, audio_bytes: bytes, filename: str | None = None) -> VerificationResponse:
         speaker = self.store.get_speaker(user_id)
         if speaker is None:
-            raise ValueError(f"User '{user_id}' is not enrolled")
+            raise SpeakerNotEnrolledError(f"User '{user_id}' is not enrolled")
         if speaker.sample_count < self.min_enrollment_samples:
-            raise RuntimeError(
+            raise EnrollmentIncompleteError(
                 f"User '{user_id}' needs {self.min_enrollment_samples} enrollment samples before verification. "
                 f"Current count: {speaker.sample_count}."
             )
@@ -416,7 +428,7 @@ class VerificationService:
         """
         speakers = self.store.list_users()
         if not speakers:
-            raise RuntimeError("No users enrolled. Enrol at least one profile first.")
+            raise NoEnrolledSpeakersError("No users enrolled. Enrol at least one profile first.")
 
         payload, _ = self.audio.decode_wav_with_timings(audio_bytes)
         trimmed, _ = self.audio.trim_to_voice(payload)
