@@ -36,6 +36,8 @@ class SQLiteStore:
                     user_id TEXT PRIMARY KEY,
                     embedding_json TEXT NOT NULL,
                     sample_embeddings_json TEXT NOT NULL DEFAULT '[]',
+                    comparison_embeddings_json TEXT NOT NULL DEFAULT '{}',
+                    comparison_sample_embeddings_json TEXT NOT NULL DEFAULT '{}',
                     enrolled_at TEXT NOT NULL,
                     sample_count INTEGER NOT NULL
                 );
@@ -92,6 +94,16 @@ class SQLiteStore:
                 self._connection.execute(
                     "ALTER TABLE users ADD COLUMN sample_embeddings_json TEXT NOT NULL DEFAULT '[]'"
                 )
+        if "comparison_embeddings_json" not in columns:
+            with self._connection:
+                self._connection.execute(
+                    "ALTER TABLE users ADD COLUMN comparison_embeddings_json TEXT NOT NULL DEFAULT '{}'"
+                )
+        if "comparison_sample_embeddings_json" not in columns:
+            with self._connection:
+                self._connection.execute(
+                    "ALTER TABLE users ADD COLUMN comparison_sample_embeddings_json TEXT NOT NULL DEFAULT '{}'"
+                )
 
     def _backfill_sample_embeddings(self) -> None:
         rows = self._connection.execute(
@@ -127,13 +139,17 @@ class SQLiteStore:
                     user_id,
                     embedding_json,
                     sample_embeddings_json,
+                    comparison_embeddings_json,
+                    comparison_sample_embeddings_json,
                     enrolled_at,
                     sample_count
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     embedding_json = excluded.embedding_json,
                     sample_embeddings_json = excluded.sample_embeddings_json,
+                    comparison_embeddings_json = excluded.comparison_embeddings_json,
+                    comparison_sample_embeddings_json = excluded.comparison_sample_embeddings_json,
                     enrolled_at = excluded.enrolled_at,
                     sample_count = excluded.sample_count
                 """,
@@ -141,6 +157,8 @@ class SQLiteStore:
                     record.user_id,
                     json.dumps(record.embedding),
                     json.dumps(record.sample_embeddings),
+                    json.dumps(record.comparison_embeddings),
+                    json.dumps(record.comparison_sample_embeddings),
                     record.enrolled_at.isoformat(),
                     record.sample_count,
                 ),
@@ -149,7 +167,9 @@ class SQLiteStore:
     def get_speaker(self, user_id: str) -> SpeakerRecord | None:
         cursor = self._connection.execute(
             """
-            SELECT user_id, embedding_json, sample_embeddings_json, enrolled_at, sample_count
+            SELECT user_id, embedding_json, sample_embeddings_json,
+                   comparison_embeddings_json, comparison_sample_embeddings_json,
+                   enrolled_at, sample_count
             FROM users
             WHERE user_id = ?
             """,
@@ -162,6 +182,8 @@ class SQLiteStore:
             user_id=row["user_id"],
             embedding=json.loads(row["embedding_json"]),
             sample_embeddings=json.loads(row["sample_embeddings_json"]),
+            comparison_embeddings=json.loads(row["comparison_embeddings_json"] or "{}"),
+            comparison_sample_embeddings=json.loads(row["comparison_sample_embeddings_json"] or "{}"),
             enrolled_at=datetime.fromisoformat(row["enrolled_at"]),
             sample_count=int(row["sample_count"]),
         )
@@ -169,7 +191,9 @@ class SQLiteStore:
     def list_users(self) -> list[SpeakerRecord]:
         cursor = self._connection.execute(
             """
-            SELECT user_id, embedding_json, sample_embeddings_json, enrolled_at, sample_count
+            SELECT user_id, embedding_json, sample_embeddings_json,
+                   comparison_embeddings_json, comparison_sample_embeddings_json,
+                   enrolled_at, sample_count
             FROM users
             ORDER BY lower(user_id) ASC
             """
@@ -179,6 +203,8 @@ class SQLiteStore:
                 user_id=row["user_id"],
                 embedding=json.loads(row["embedding_json"]),
                 sample_embeddings=json.loads(row["sample_embeddings_json"]),
+                comparison_embeddings=json.loads(row["comparison_embeddings_json"] or "{}"),
+                comparison_sample_embeddings=json.loads(row["comparison_sample_embeddings_json"] or "{}"),
                 enrolled_at=datetime.fromisoformat(row["enrolled_at"]),
                 sample_count=int(row["sample_count"]),
             )

@@ -11,6 +11,8 @@ import re
 
 import pytest
 
+from app.services.verification import VerificationService
+
 from .conftest import make_wav
 
 
@@ -100,6 +102,92 @@ def test_analysis_details_populated(verification_service, enrolled_user, detecto
     assert result.analysis_details is not None
     assert 0.0 <= result.analysis_details.voice_naturalness <= 1.0
     assert 0.0 <= result.analysis_details.artifact_detection <= 1.0
+
+
+def test_verify_returns_speaker_model_scores(verification_service, enrolled_user, detector):
+    user_id, wav = enrolled_user
+    detector.score = 0.9
+
+    result = verification_service.verify(user_id=user_id, audio_bytes=wav)
+
+    assert len(result.speaker_model_scores) == 1
+    score = result.speaker_model_scores[0]
+    assert score.model_key == "redimnet_b5"
+    assert score.drives_decision is True
+    assert score.similarity_score == pytest.approx(result.similarity_score)
+    assert score.centroid_similarity == pytest.approx(result.centroid_similarity)
+
+
+def test_verify_reports_comparison_model_scores(store, detector):
+    class ComparisonEncoder:
+        provenance = "ecapa_voxceleb"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            scale = sum(abs(sample) for sample in waveform) or 1.0
+            return [scale, scale / 2]
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    service = VerificationService(
+        store=store,
+        detector=detector,
+        speaker_encoder=ComparisonEncoder(),
+        sample_rate=16000,
+        similarity_threshold=0.75,
+        deepfake_threshold=0.5,
+        min_enrollment_samples=3,
+        comparison_encoders={"ecapa_voxceleb": ComparisonEncoder()},
+    )
+    wav = make_wav(2.0, frequency=220.0)
+    for _ in range(3):
+        service.enroll(user_id="alice", audio_bytes=wav, filename="alice.wav")
+
+    result = service.verify(user_id="alice", audio_bytes=wav)
+
+    keys = {score.model_key for score in result.speaker_model_scores}
+    assert keys == {"redimnet_b5", "ecapa_voxceleb"}
+
+
+def test_identify_reports_per_model_matches(store, detector):
+    class ComparisonEncoder:
+        provenance = "redimnet_b5"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            scale = sum(abs(sample) for sample in waveform) or 1.0
+            return [scale, scale / 2]
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    service = VerificationService(
+        store=store,
+        detector=detector,
+        speaker_encoder=ComparisonEncoder(),
+        sample_rate=16000,
+        similarity_threshold=0.75,
+        deepfake_threshold=0.5,
+        min_enrollment_samples=3,
+        comparison_encoders={"ecapa_voxceleb": ComparisonEncoder()},
+    )
+    wav = make_wav(2.0, frequency=220.0)
+    for _ in range(3):
+        service.enroll(user_id="alice", audio_bytes=wav, filename="alice.wav")
+
+    result = service.identify(audio_bytes=wav, top_n=3)
+
+    assert result.speaker_model_matches
+    assert result.speaker_model_matches[0].model_key == "redimnet_b5"
+    assert result.speaker_model_matches[0].drives_decision is True
+    assert result.speaker_model_matches[1].model_key == "ecapa_voxceleb"
 
 
 def test_get_result_round_trip(verification_service, enrolled_user, detector):

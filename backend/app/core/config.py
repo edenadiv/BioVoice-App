@@ -34,6 +34,13 @@ def _log_level_from_env() -> str:
     return os.environ.get("LOG_LEVEL", "INFO").upper()
 
 
+def _bool_from_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(slots=True)
 class Settings:
     sample_rate: int = 16000
@@ -59,6 +66,10 @@ class Settings:
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "aasist.pt"
     redimnet_weights_path: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "redimnet_b5.pt"
+    ecapa_savedir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "ecapa_voxceleb"
+    wespeaker_resnet293_dir: Path = Path(__file__).resolve().parents[3] / "backend" / "models" / "wespeaker_resnet293_lm"
+    enable_ecapa_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_ECAPA_COMPARISON", False))
+    enable_wespeaker_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_WESPEAKER_COMPARISON", False))
     database_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "biovoice.sqlite3"
     reference_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "reference_samples"
     generated_samples_path: Path = Path(__file__).resolve().parents[3] / "backend" / "data" / "generated_samples"

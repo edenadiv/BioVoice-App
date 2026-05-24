@@ -12,6 +12,7 @@ class ReferenceSampleRecord:
     file_path: str
     original_filename: str
     source: str
+    audio_bytes: bytes | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -20,6 +21,8 @@ class SpeakerRecord:
     user_id: str
     embedding: list[float]
     sample_embeddings: list[list[float]] = field(default_factory=list)
+    comparison_embeddings: dict[str, list[float]] = field(default_factory=dict)
+    comparison_sample_embeddings: dict[str, list[list[float]]] = field(default_factory=dict)
     enrolled_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sample_count: int = 1
 

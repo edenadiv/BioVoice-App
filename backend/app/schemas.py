@@ -8,9 +8,15 @@ from pydantic import BaseModel, Field
 
 DecisionReason = Literal["accepted", "mismatch", "synthetic", "not_enrolled"]
 
-EncoderProvenance = Literal["redimnet_b5", "heuristic_placeholder"]
+EncoderProvenance = Literal[
+    "redimnet_b5",
+    "ecapa_voxceleb",
+    "wespeaker_resnet293_lm",
+    "heuristic_placeholder",
+]
 DetectorProvenance = Literal["aasist", "heuristic"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
+SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
 
 
 class ModelProvenance(BaseModel):
@@ -85,6 +91,14 @@ class StageBreakdown(BaseModel):
     total_ms: float = 0.0
 
 
+class SpeakerModelScore(BaseModel):
+    model_key: SpeakerModelKey
+    similarity_score: float = Field(ge=0.0, le=1.0)
+    centroid_similarity: float = Field(ge=0.0, le=1.0)
+    sample_similarities: list[float] = Field(default_factory=list)
+    drives_decision: bool = False
+
+
 class AnalysisDetails(BaseModel):
     """Sub-scores rendered on the Deepfake Result screen (Fig. 17).
 
@@ -136,6 +150,7 @@ class VerificationResponse(BaseModel):
     message: str
     session_id: str
     stage_breakdown: StageBreakdown = Field(default_factory=StageBreakdown)
+    speaker_model_scores: list[SpeakerModelScore] = Field(default_factory=list)
     analysis_details: AnalysisDetails | None = None
     model_provenance: ModelProvenance | None = None
     created_at: datetime
@@ -152,6 +167,12 @@ class IdentificationMatch(BaseModel):
     centroid_similarity: float = Field(ge=0.0, le=1.0)
     sample_count: int = Field(ge=0)
     enrolled_at: datetime
+
+
+class SpeakerModelMatches(BaseModel):
+    model_key: SpeakerModelKey
+    matches: list[IdentificationMatch] = Field(default_factory=list)
+    drives_decision: bool = False
 
 
 class SpoofVoice(BaseModel):
@@ -225,6 +246,7 @@ class IdentificationResponse(BaseModel):
     ≥ deepfake_threshold."""
 
     matches: list[IdentificationMatch]
+    speaker_model_matches: list[SpeakerModelMatches] = Field(default_factory=list)
     deepfake_score: float = Field(ge=0.0, le=1.0)
     analysis_details: AnalysisDetails | None = None
     would_accept_top1: bool = False

@@ -92,6 +92,22 @@ describe("api request wrapper — credentials + method contract", () => {
         { user_id: "bob",   similarity_score: 0.71, centroid_similarity: 0.69, sample_count: 5, enrolled_at: "2026-05-08T00:00:00Z" },
         { user_id: "carol", similarity_score: 0.42, centroid_similarity: 0.40, sample_count: 4, enrolled_at: "2026-05-07T00:00:00Z" },
       ],
+      speaker_model_matches: [
+        {
+          model_key: "redimnet_b5",
+          drives_decision: true,
+          matches: [
+            { user_id: "alice", similarity_score: 0.94, centroid_similarity: 0.92, sample_count: 3, enrolled_at: "2026-05-09T00:00:00Z" },
+          ],
+        },
+        {
+          model_key: "ecapa_voxceleb",
+          drives_decision: false,
+          matches: [
+            { user_id: "bob", similarity_score: 0.88, centroid_similarity: 0.85, sample_count: 5, enrolled_at: "2026-05-08T00:00:00Z" },
+          ],
+        },
+      ],
       deepfake_score: 0.97,
       analysis_details: { voice_naturalness: 0.5, spectral_consistency: 0.6, temporal_patterns: 0.7, artifact_detection: 0.8 },
       would_accept_top1: true,
@@ -108,6 +124,9 @@ describe("api request wrapper — credentials + method contract", () => {
     expect(result.matches).toHaveLength(3);
     expect(result.matches[0].userId).toBe("alice");
     expect(result.matches[0].similarityScore).toBeCloseTo(0.94);
+    expect(result.speakerModelMatches).toHaveLength(2);
+    expect(result.speakerModelMatches[0].modelKey).toBe("redimnet_b5");
+    expect(result.speakerModelMatches[1].matches[0].userId).toBe("bob");
     expect(result.wouldAcceptTop1).toBe(true);
     expect(result.nEnrolledTotal).toBe(3);
     expect(result.analysisDetails?.voiceNaturalness).toBeCloseTo(0.5);
@@ -126,6 +145,7 @@ describe("api request wrapper — credentials + method contract", () => {
     const file = new File([new Uint8Array([0])], "query.wav", { type: "audio/wav" });
     const result = await identifySpeaker(file);
     expect(result.matches).toEqual([]);
+    expect(result.speakerModelMatches).toEqual([]);
     expect(result.analysisDetails).toBeNull();
   });
 });
@@ -141,6 +161,15 @@ describe("model_provenance snake→camel transform", () => {
       deepfake_score: 0.9,
       centroid_similarity: 0.9,
       sample_similarities: [],
+      speaker_model_scores: [
+        {
+          model_key: "redimnet_b5",
+          similarity_score: 0.9,
+          centroid_similarity: 0.9,
+          sample_similarities: [],
+          drives_decision: true,
+        },
+      ],
       message: "ok",
       session_id: "VRF-20260510-00001",
       created_at: "2026-05-10T00:00:00Z",
@@ -157,6 +186,8 @@ describe("model_provenance snake→camel transform", () => {
     expect(r.modelProvenance!.detector).toBe("heuristic");
     expect(r.modelProvenance!.acousticProbe).toBe("heuristic");  // snake → camel
     expect(r.modelProvenance!.isDegraded).toBe(true);
+    expect(r.speakerModelScores[0].modelKey).toBe("redimnet_b5");
+    expect(r.speakerModelScores[0].drivesDecision).toBe(true);
   });
 
   it("verifySpeaker handles missing model_provenance (legacy backend)", async () => {
