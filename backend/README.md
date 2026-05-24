@@ -18,13 +18,42 @@ The backend currently uses in-memory storage and a feature-based speaker embeddi
 
 Installation:
 
-- Base backend plus local model stack: `python -m pip install -e .[model] --no-build-isolation`
+- Base backend plus local model stack, including ECAPA + WeSpeaker ResNet293 deps: `python -m pip install -e .[model] --no-build-isolation`
+- The dedicated speaker-model extra still works too: `python -m pip install -e .[model,speaker_models] --no-build-isolation`
 - Add spoof-generation support (XTTS): `python -m pip install -e .[model,spoof] --no-build-isolation`
 
 Notes:
 
 - The `spoof` extra depends on `TTS`, which is currently expected to work on Python 3.11 or 3.12.
 - On Python 3.13, install the backend without `spoof` unless `TTS` publishes compatible builds.
+
+## Local run (Windows)
+
+From the repo root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .\backend[model,test] --no-build-isolation
+Copy-Item .\backend\.env.example .\backend\.env
+```
+
+If you want ECAPA and WeSpeaker ResNet293 enabled, add these lines to `backend/.env`:
+
+```env
+ENABLE_ECAPA_COMPARISON=1
+ENABLE_WESPEAKER_COMPARISON=1
+```
+
+Then run the backend:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+The API docs will be at `http://127.0.0.1:8000/docs`.
 
 ## Environment variables
 
