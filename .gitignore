@@ -9,6 +9,8 @@ backend/data/
 .data/
 .toml
 .env
+.env.local
+*.env.local
 *.log
 *.sqlite3
 *.db
@@ -37,5 +39,30 @@ backend/data/
 *.zip
 *.tar.gz
 *yarn.lock
+<<<<<<< Updated upstream
 backend/models/ecapa_voxceleb/
 backend/models/wespeaker_resnet293_lm/
+=======
+<<<<<<< Updated upstream
+=======
+backend/models/ecapa_voxceleb/
+backend/models/wespeaker_resnet293_lm/
+XTTS-v2/
+deploy/voice_runtimes/.venv*/
+deploy/voice_runtimes/__pycache__/
+backend/xtts-test.*
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
+deploy/__init__.py
+deploy/voice_runtimes/__init__.py
+deploy/voice_runtimes/applio_service.py
+deploy/voice_runtimes/docker-compose.voice-runtimes.yml
+deploy/voice_runtimes/openvoice_service.py
+deploy/voice_runtimes/README.md
+deploy/voice_runtimes/requirements.txt
+deploy/voice_runtimes/rvc_service.py
+deploy/voice_runtimes/shared.py
+deploy/voice_runtimes/start-all.ps1
+deploy/voice_runtimes/start-applio.ps1
+deploy/voice_runtimes/start-openvoice.ps1
+deploy/voice_runtimes/start-rvc.ps1
