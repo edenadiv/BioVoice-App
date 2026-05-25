@@ -26,7 +26,7 @@ function Chrome({ status = "SYSTEM ONLINE", statusKind = "good", subtitle, scree
             </div>
           </div>
         </div>
-        <div className="right" style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'nowrap' }}>
+        <div className="right biovoice-chrome-top-right" style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'nowrap' }}>
           <ThreatLevel level="amber"/>
           <LiveClock sessionStart={sessionStart}/>
           <div className="partner">
@@ -38,11 +38,11 @@ function Chrome({ status = "SYSTEM ONLINE", statusKind = "good", subtitle, scree
         </div>
       </div>
       <div className="chrome-bottom">
-        <div className="left" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div className="left biovoice-chrome-bottom-left" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           <span className={`pill ${statusKind}`}><span className="dot"></span>{status}</span>
           {subtitle && <span className="label-mono" style={{ fontSize: 10 }}>{subtitle}</span>}
         </div>
-        <div className="right" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+        <div className="right biovoice-chrome-bottom-right" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
           {screenName && <span className="label-mono" style={{ fontSize: 10 }}>SCREEN · {screenName}</span>}
           <span className="label-mono" style={{ fontSize: 10 }}>NODE · TLV-01</span>
           <span className="num-mono" style={{ fontSize: 12, color: 'var(--ink)', letterSpacing: '0.18em' }}>

@@ -20,12 +20,14 @@ from app.schemas import (
     IdentificationResponse,
     ModelProvenance,
     SampleQuality,
+    SpeakerFusionDecision,
     SpeakerModelMatches,
     SpeakerModelScore,
     SpeakerResponse,
     StageBreakdown,
     UserEmbedding,
     VerificationResponse,
+    SpeakerModelKey,
 )
 from app.services.audio import AudioService, SampleQualityRejectedError
 from app.services.detector import DeepfakeDetectorService
@@ -70,11 +72,16 @@ class VerificationService:
         min_enrollment_samples: int,
         acoustic_probe: AcousticProbe | None = None,
         comparison_encoders: dict[str, SpeakerEncoder] | None = None,
+        model_similarity_thresholds: dict[str, float] | None = None,
     ):
         self.store = store
         self.detector = detector
         self.sample_rate = sample_rate
         self.similarity_threshold = similarity_threshold
+        self.model_similarity_thresholds = {
+            "redimnet_b5": similarity_threshold,
+            **(model_similarity_thresholds or {}),
+        }
         self.deepfake_threshold = deepfake_threshold
         self.min_enrollment_samples = min_enrollment_samples
         self.audio = AudioService(target_sample_rate=sample_rate)
@@ -110,25 +117,32 @@ class VerificationService:
     def is_user_id_available(self, user_id: str) -> bool:
         return self.store.get_speaker(user_id) is None
 
-    def list_user_embeddings(self) -> list[UserEmbedding]:
-        return [
-            UserEmbedding(
-                user_id=record.user_id,
-                centroid=record.embedding,
-                samples=record.sample_embeddings,
-                sample_count=record.sample_count,
-                enrolled_at=record.enrolled_at,
+    def list_user_embeddings(self, model_key: SpeakerModelKey = "redimnet_b5") -> list[UserEmbedding]:
+        rows: list[UserEmbedding] = []
+        for record in self.store.list_users():
+            hydrated = self._ensure_comparison_embeddings(record)
+            centroid, samples = self._embeddings_for_model(hydrated, model_key)
+            rows.append(
+                UserEmbedding(
+                    user_id=hydrated.user_id,
+                    model_key=model_key,
+                    centroid=centroid,
+                    samples=samples,
+                    sample_count=hydrated.sample_count,
+                    enrolled_at=hydrated.enrolled_at,
+                )
             )
-            for record in self.store.list_users()
-        ]
+        return rows
 
-    def embed_only(self, audio_bytes: bytes) -> EmbedResponse:
+    def embed_only(self, audio_bytes: bytes, model_key: SpeakerModelKey = "redimnet_b5") -> EmbedResponse:
         decoded = self.audio.decode_wav(audio_bytes)
         quality = self.audio.score_quality(decoded)
         trimmed, _ = self.audio.trim_to_voice(decoded)
-        embedding = self.encoder.embed(trimmed.waveform)
+        encoder = self._encoder_for_model(model_key)
+        embedding = encoder.embed(trimmed.waveform)
         duration_ms = len(trimmed.waveform) / max(1, trimmed.sample_rate) * 1000.0
         return EmbedResponse(
+            model_key=model_key,
             embedding=embedding,
             duration_ms=duration_ms,
             snr_db=quality.snr_db,
@@ -258,9 +272,11 @@ class VerificationService:
             primary_centroid_similarity=centroid_similarity,
             primary_similarity_score=similarity_score,
         )
+        speaker_fusion = self._build_speaker_fusion(speaker_model_scores)
+        similarity_score = speaker_fusion.combined_similarity_score
         deepfake_score = _clamp_unit(deepfake_score)
 
-        decision, reason, message = self._decide(similarity_score, deepfake_score)
+        decision, reason, message = self._decide(speaker_fusion, deepfake_score)
         analysis_details = self.acoustic_probe.score(trimmed.waveform, sample_rate=trimmed.sample_rate)
 
         total_ms = (perf_counter() - total_t0) * 1000.0
@@ -296,6 +312,7 @@ class VerificationService:
                 "session_id": session_id,
                 "stage_breakdown": stage_breakdown.model_dump(),
                 "speaker_model_scores": [score.model_dump() for score in speaker_model_scores],
+                "speaker_fusion": speaker_fusion.model_dump(),
                 "analysis_details": analysis_details.model_dump() if analysis_details else None,
             },
         )
@@ -314,6 +331,7 @@ class VerificationService:
             session_id=session_id,
             stage_breakdown=stage_breakdown,
             speaker_model_scores=speaker_model_scores,
+            speaker_fusion=speaker_fusion,
             analysis_details=analysis_details,
             model_provenance=self._collect_provenance(),
             created_at=created_at,
@@ -331,7 +349,8 @@ class VerificationService:
         analysis_details = self.acoustic_probe.score(trimmed.waveform, sample_rate=trimmed.sample_rate)
         speakers = [self._ensure_comparison_embeddings(speaker) for speaker in speakers]
 
-        scored: list[IdentificationMatch] = []
+        scored: list[tuple[IdentificationMatch, SpeakerFusionDecision]] = []
+        primary_scored: list[IdentificationMatch] = []
         for speaker in speakers:
             sample_sims = [
                 _clamp_unit(self.encoder.cosine_similarity(s, query_embedding))
@@ -341,31 +360,61 @@ class VerificationService:
                 self.encoder.cosine_similarity(speaker.embedding, query_embedding)
             )
             similarity = _clamp_unit(self._aggregate_similarity(sample_sims, centroid_sim))
+            primary_match = IdentificationMatch(
+                user_id=speaker.user_id,
+                similarity_score=similarity,
+                centroid_similarity=centroid_sim,
+                sample_count=speaker.sample_count,
+                enrolled_at=speaker.enrolled_at,
+            )
+            primary_scored.append(primary_match)
+            speaker_model_scores = self._build_speaker_model_scores(
+                speaker=speaker,
+                query_waveform=trimmed.waveform,
+                primary_sample_similarities=sample_sims,
+                primary_centroid_similarity=centroid_sim,
+                primary_similarity_score=similarity,
+            )
+            fusion = self._build_speaker_fusion(speaker_model_scores)
             scored.append(
-                IdentificationMatch(
-                    user_id=speaker.user_id,
-                    similarity_score=similarity,
-                    centroid_similarity=centroid_sim,
-                    sample_count=speaker.sample_count,
-                    enrolled_at=speaker.enrolled_at,
+                (
+                    IdentificationMatch(
+                        user_id=speaker.user_id,
+                        similarity_score=fusion.combined_similarity_score,
+                        centroid_similarity=centroid_sim,
+                        sample_count=speaker.sample_count,
+                        enrolled_at=speaker.enrolled_at,
+                    ),
+                    fusion,
                 )
             )
 
-        scored.sort(key=lambda m: m.similarity_score, reverse=True)
-        top = scored[: max(1, top_n)]
+        scored.sort(
+            key=lambda item: (
+                item[1].matched_models,
+                item[1].combined_similarity_score,
+                item[0].centroid_similarity,
+            ),
+            reverse=True,
+        )
+        top_scored = scored[: max(1, top_n)]
+        top = [match for match, _ in top_scored]
+        primary_scored.sort(key=lambda match: match.similarity_score, reverse=True)
         speaker_model_matches = self._build_identification_model_matches(
             speakers=speakers,
             query_waveform=trimmed.waveform,
-            primary_matches=top,
+            primary_matches=primary_scored[: max(1, top_n)],
             top_n=max(1, top_n),
         )
+        top_fusion = top_scored[0][1] if top_scored else None
         would_accept = (
-            top[0].similarity_score >= self.similarity_threshold
+            bool(top_fusion and top_fusion.combined_match)
             and deepfake_score >= self.deepfake_threshold
         )
         return IdentificationResponse(
             matches=top,
             speaker_model_matches=speaker_model_matches,
+            speaker_fusion=top_fusion,
             deepfake_score=deepfake_score,
             analysis_details=analysis_details,
             would_accept_top1=would_accept,
@@ -384,10 +433,10 @@ class VerificationService:
     def list_results(self) -> list[VerificationResponse]:
         return [self._record_to_response(record) for record in self.store.list_results()]
 
-    def _decide(self, similarity_score: float, deepfake_score: float) -> tuple[str, DecisionReason, str]:
+    def _decide(self, speaker_fusion: SpeakerFusionDecision, deepfake_score: float) -> tuple[str, DecisionReason, str]:
         if deepfake_score < self.deepfake_threshold:
             return "DEEPFAKE", "synthetic", _SYNTHETIC_MESSAGE
-        if similarity_score >= self.similarity_threshold:
+        if speaker_fusion.combined_match:
             return "ACCEPT", "accepted", _ACCEPT_MESSAGE
         return "REJECT", "mismatch", _MISMATCH_MESSAGE
 
@@ -401,6 +450,12 @@ class VerificationService:
             SpeakerModelScore.model_validate(item)
             for item in meta.get("speaker_model_scores", [])
         ]
+        speaker_fusion_dict = meta.get("speaker_fusion")
+        speaker_fusion = (
+            SpeakerFusionDecision.model_validate(speaker_fusion_dict)
+            if speaker_fusion_dict
+            else None
+        )
         reason = meta.get("decision_reason") or self._reason_from_decision(record.decision)
         session_id = meta.get("session_id") or self._legacy_session_id(record.result_id, record.created_at)
 
@@ -417,6 +472,7 @@ class VerificationService:
             session_id=session_id,
             stage_breakdown=stage_breakdown,
             speaker_model_scores=speaker_model_scores,
+            speaker_fusion=speaker_fusion,
             analysis_details=analysis_details,
             model_provenance=self._collect_provenance(),
             created_at=record.created_at,
@@ -450,6 +506,8 @@ class VerificationService:
                 similarity_score=primary_similarity_score,
                 centroid_similarity=primary_centroid_similarity,
                 sample_similarities=primary_sample_similarities,
+                threshold=self._threshold_for_model("redimnet_b5"),
+                passed_threshold=primary_similarity_score >= self._threshold_for_model("redimnet_b5"),
                 drives_decision=True,
             )
         ]
@@ -473,10 +531,33 @@ class VerificationService:
                     similarity_score=similarity_score,
                     centroid_similarity=centroid_similarity,
                     sample_similarities=sample_similarities,
-                    drives_decision=False,
+                    threshold=self._threshold_for_model(model_key),
+                    passed_threshold=similarity_score >= self._threshold_for_model(model_key),
+                    drives_decision=True,
                 )
             )
         return scores
+
+    def _build_speaker_fusion(self, scores: list[SpeakerModelScore]) -> SpeakerFusionDecision:
+        total_models = len(scores)
+        majority_required = (total_models // 2) + 1 if total_models else 0
+        decisive_model_keys = [score.model_key for score in scores if score.passed_threshold]
+        matched_models = len(decisive_model_keys)
+        combined_similarity_score = _clamp_unit(
+            fmean(score.similarity_score for score in scores) if scores else 0.0
+        )
+        return SpeakerFusionDecision(
+            strategy="majority_vote",
+            combined_match=matched_models >= majority_required,
+            combined_similarity_score=combined_similarity_score,
+            matched_models=matched_models,
+            total_models=total_models,
+            majority_required=majority_required,
+            decisive_model_keys=decisive_model_keys,
+        )
+
+    def _threshold_for_model(self, model_key: str) -> float:
+        return _clamp_unit(self.model_similarity_thresholds.get(model_key, self.similarity_threshold))
 
     def _ensure_comparison_embeddings(self, speaker: SpeakerRecord) -> SpeakerRecord:
         if not self.comparison_encoders:
@@ -569,10 +650,31 @@ class VerificationService:
                 SpeakerModelMatches(
                     model_key=model_key,
                     matches=matches[:top_n],
-                    drives_decision=False,
+                    drives_decision=True,
                 )
             )
         return grouped
+
+    def _encoder_for_model(self, model_key: SpeakerModelKey) -> SpeakerEncoder:
+        if model_key == "redimnet_b5":
+            return self.encoder
+        encoder = self.comparison_encoders.get(model_key)
+        if encoder is None:
+            raise ValueError(f"Speaker model '{model_key}' is not available")
+        return encoder
+
+    def _embeddings_for_model(
+        self,
+        speaker: SpeakerRecord,
+        model_key: SpeakerModelKey,
+    ) -> tuple[list[float], list[list[float]]]:
+        if model_key == "redimnet_b5":
+            return speaker.embedding, speaker.sample_embeddings
+        centroid = speaker.comparison_embeddings.get(model_key, [])
+        samples = speaker.comparison_sample_embeddings.get(model_key, [])
+        if not centroid and not samples:
+            raise ValueError(f"Speaker model '{model_key}' has no stored embeddings")
+        return centroid, samples
 
     @staticmethod
     def _read_reference_sample_bytes(reference_sample) -> bytes | None:

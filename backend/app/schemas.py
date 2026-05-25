@@ -96,7 +96,19 @@ class SpeakerModelScore(BaseModel):
     similarity_score: float = Field(ge=0.0, le=1.0)
     centroid_similarity: float = Field(ge=0.0, le=1.0)
     sample_similarities: list[float] = Field(default_factory=list)
+    threshold: float = Field(ge=0.0, le=1.0, default=0.0)
+    passed_threshold: bool = False
     drives_decision: bool = False
+
+
+class SpeakerFusionDecision(BaseModel):
+    strategy: Literal["majority_vote"] = "majority_vote"
+    combined_match: bool
+    combined_similarity_score: float = Field(ge=0.0, le=1.0)
+    matched_models: int = Field(ge=0)
+    total_models: int = Field(ge=0)
+    majority_required: int = Field(ge=0)
+    decisive_model_keys: list[SpeakerModelKey] = Field(default_factory=list)
 
 
 class AnalysisDetails(BaseModel):
@@ -151,6 +163,7 @@ class VerificationResponse(BaseModel):
     session_id: str
     stage_breakdown: StageBreakdown = Field(default_factory=StageBreakdown)
     speaker_model_scores: list[SpeakerModelScore] = Field(default_factory=list)
+    speaker_fusion: SpeakerFusionDecision | None = None
     analysis_details: AnalysisDetails | None = None
     model_provenance: ModelProvenance | None = None
     created_at: datetime
@@ -215,6 +228,7 @@ class UserEmbedding(BaseModel):
     PCA(3) projected client-side."""
 
     user_id: str
+    model_key: SpeakerModelKey
     centroid: list[float]
     samples: list[list[float]]
     sample_count: int = Field(ge=0)
@@ -229,6 +243,7 @@ class EmbedResponse(BaseModel):
     audio QC numbers the frontend needs to decide whether to render
     the live point at full opacity."""
 
+    model_key: SpeakerModelKey
     embedding: list[float]
     duration_ms: float
     snr_db: float
@@ -247,6 +262,7 @@ class IdentificationResponse(BaseModel):
 
     matches: list[IdentificationMatch]
     speaker_model_matches: list[SpeakerModelMatches] = Field(default_factory=list)
+    speaker_fusion: SpeakerFusionDecision | None = None
     deepfake_score: float = Field(ge=0.0, le=1.0)
     analysis_details: AnalysisDetails | None = None
     would_accept_top1: bool = False

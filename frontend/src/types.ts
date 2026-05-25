@@ -24,6 +24,8 @@ export type AnalysisDetails = {
   mode: "heuristic" | "trained_heads";
 };
 
+export type SpeakerModelKey = "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+
 export type VerificationResult = {
   resultId: string;
   userId: string;
@@ -34,6 +36,7 @@ export type VerificationResult = {
   centroidSimilarity: number;
   sampleSimilarities: number[];
   speakerModelScores: SpeakerModelScore[];
+  speakerFusion: SpeakerFusionDecision | null;
   message: string;
   sessionId: string;
   stageBreakdown: StageBreakdown;
@@ -43,11 +46,23 @@ export type VerificationResult = {
 };
 
 export type SpeakerModelScore = {
-  modelKey: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  modelKey: SpeakerModelKey;
   similarityScore: number;
   centroidSimilarity: number;
   sampleSimilarities: number[];
+  threshold: number;
+  passedThreshold: boolean;
   drivesDecision: boolean;
+};
+
+export type SpeakerFusionDecision = {
+  strategy: "majority_vote";
+  combinedMatch: boolean;
+  combinedSimilarityScore: number;
+  matchedModels: number;
+  totalModels: number;
+  majorityRequired: number;
+  decisiveModelKeys: SpeakerModelKey[];
 };
 
 export type Speaker = {
@@ -94,6 +109,7 @@ export type IdentificationMatch = {
 export type IdentificationResult = {
   matches: IdentificationMatch[];
   speakerModelMatches: SpeakerModelMatches[];
+  speakerFusion: SpeakerFusionDecision | null;
   deepfakeScore: number;
   analysisDetails: AnalysisDetails | null;
   wouldAcceptTop1: boolean;
@@ -104,7 +120,7 @@ export type IdentificationResult = {
 };
 
 export type SpeakerModelMatches = {
-  modelKey: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+  modelKey: SpeakerModelKey;
   matches: IdentificationMatch[];
   drivesDecision: boolean;
 };
@@ -118,6 +134,7 @@ export type ModelProvenance = {
 
 export type UserEmbedding = {
   userId: string;
+  modelKey: SpeakerModelKey;
   centroid: number[];
   samples: number[][];
   sampleCount: number;
@@ -125,6 +142,7 @@ export type UserEmbedding = {
 };
 
 export type EmbedResult = {
+  modelKey: SpeakerModelKey;
   embedding: number[];
   durationMs: number;
   snrDb: number;

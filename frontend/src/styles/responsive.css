@@ -1,25 +1,10 @@
-/* F5.5 + F5.6 — responsive layout + touch interactions.
+/* Responsive cleanup for the operator UI.
  *
- * The kiosk's primary stage is a fixed 1920×1080 box that is
- * proportionally scaled to fit the viewport (CSS transform). On phones
- * + tablets that scaling becomes the wrong choice — the touch targets
- * shrink below the 44 × 44 px WCAG minimum and reading the text becomes
- * impractical. This stylesheet intercepts at three breakpoints:
- *
- *   ≥ 1440 px : desktop kiosk, original 1920×1080 stage scaled to fit.
- *   768–1439  : tablet, stage capped at viewport dimensions, components
- *               re-flow into a single column where they were two-up.
- *   < 768 px  : phone, fully linear layout, hamburger nav.
- *
- * The strategy: rather than rewrite every screen for mobile, we apply a
- * `body.biovoice-mobile` class (set by app.jsx via a media-query
- * listener) that adds linearising rules. The desktop stage stays as-is
- * for ≥ 1440 px so the demo experience is unchanged.
+ * Desktop keeps the original visual language. Below 1440px we stop
+ * assuming a rigid kiosk canvas and let the main shells wrap, stack,
+ * and scroll with less clipping.
  */
 
-/* Touch-friendly defaults — apply on every viewport so a touchscreen
- * laptop also benefits. WCAG 2.5.5 requires interactive targets ≥
- * 24 × 24 px (level AA) or ≥ 44 × 44 px (level AAA). We aim for AAA. */
 button,
 [role="button"],
 a.biovoice-link {
@@ -27,75 +12,360 @@ a.biovoice-link {
   min-width: 44px;
 }
 
-/* iOS double-tap-to-zoom is annoying on a kiosk — disable but keep
- * pinch-zoom (accessibility). */
 html {
   touch-action: manipulation;
 }
 
+body {
+  overflow-x: hidden;
+}
+
+.biovoice-page-content,
+.biovoice-console-grid,
+.biovoice-split-grid,
+.biovoice-profiles-grid,
+.biovoice-target-grid,
+.biovoice-engine-grid,
+.biovoice-console-metrics,
+.biovoice-console-counters,
+.biovoice-live-features-grid,
+.biovoice-result-stats,
+.biovoice-identify-summary {
+  min-width: 0;
+}
+
+.biovoice-overlay-shell,
+.biovoice-overlay-capture,
+.biovoice-overlay-progress,
+.biovoice-overlay-result-card {
+  width: min(100%, var(--biovoice-max, 100%)) !important;
+}
+
+.biovoice-overlay-shell {
+  --biovoice-max: 1100px;
+}
+
+.biovoice-overlay-capture,
+.biovoice-overlay-result-card {
+  --biovoice-max: 720px;
+}
+
+.biovoice-overlay-progress {
+  --biovoice-max: 480px;
+}
+
+.biovoice-cosine-viz {
+  width: min(100%, 640px);
+}
+
+@media (max-height: 900px) {
+  .biovoice-overlay-inner {
+    align-items: start !important;
+    overflow-y: auto;
+    padding: 72px 32px 28px !important;
+  }
+
+  .biovoice-overlay-shell {
+    padding-top: 12px;
+  }
+
+  .biovoice-overlay-visual {
+    margin-top: 36px !important;
+    height: auto !important;
+    min-height: 220px;
+  }
+}
+
+@media (max-height: 760px) {
+  .biovoice-overlay-inner {
+    padding-top: 56px !important;
+  }
+
+  .biovoice-overlay-steps {
+    flex-wrap: wrap;
+    gap: 12px !important;
+  }
+}
+
 @media (max-width: 1439px) {
-  /* Tablet — collapse two-column grids into one. */
-  .biovoice-two-column {
-    grid-template-columns: 1fr;
+  .biovoice-page-content {
+    padding: 132px 32px 88px 112px !important;
+  }
+
+  .biovoice-console-grid {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(280px, 360px) !important;
+    gap: 18px !important;
+  }
+
+  .biovoice-console-metrics,
+  .biovoice-live-features-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-profiles-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-target-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-sidebar {
+    top: 104px !important;
+    left: 16px !important;
+    width: 68px !important;
+  }
+
+  .biovoice-sidebar-item {
+    width: 52px !important;
+    height: 52px !important;
+  }
+
+  .biovoice-sidebar-item span:last-child {
+    font-size: 7px !important;
+    letter-spacing: 0.12em !important;
+  }
+
+  .biovoice-overlay-inner {
+    padding: 96px 32px 40px !important;
+    overflow-y: auto;
+  }
+
+  .biovoice-overlay-shell {
+    padding-top: 36px;
+  }
+
+  .biovoice-overlay-visual {
+    margin-top: 36px !important;
+    height: auto !important;
+    min-height: 260px;
+  }
+
+  .biovoice-result-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-result-stats > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .biovoice-model-score-row {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(96px, auto)) !important;
+  }
+
+  .biovoice-model-score-row > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .biovoice-panel-header,
+  .biovoice-constellation-footer,
+  .biovoice-page-header,
+  .biovoice-result-header,
+  .biovoice-identify-match-header {
+    flex-wrap: wrap;
+  }
+
+  .biovoice-constellation-actions,
+  .biovoice-constellation-legend {
+    flex-wrap: wrap;
+  }
+
+  .biovoice-console-hint {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1023px) {
+  .biovoice-page-content {
+    padding: 148px 24px 112px !important;
+  }
+
+  .biovoice-console-grid,
+  .biovoice-split-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .biovoice-console-counters,
+  .biovoice-identify-summary,
+  .biovoice-lab-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-engine-grid,
+  .biovoice-result-stats {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .biovoice-overlay-steps {
+    flex-wrap: wrap;
+    gap: 12px !important;
+  }
+
+  .biovoice-overlay-device-row,
+  .biovoice-overlay-actions,
+  .biovoice-overlay-submit,
+  .biovoice-input-row,
+  .biovoice-identify-actions,
+  .biovoice-identify-submit {
+    flex-wrap: wrap;
+  }
+
+  .biovoice-overlay-device-row > *,
+  .biovoice-overlay-actions > *,
+  .biovoice-overlay-submit > *,
+  .biovoice-input-row > *,
+  .biovoice-identify-actions > *,
+  .biovoice-identify-submit > * {
+    flex: 1 1 220px;
+  }
+
+  .biovoice-overlay-actions > button:last-of-type,
+  .biovoice-identify-actions > button:last-of-type,
+  .biovoice-identify-submit > button:last-of-type {
+    flex-basis: 180px;
+  }
+
+  .biovoice-sidebar {
+    position: fixed !important;
+    inset: auto 16px 16px 16px !important;
+    bottom: 16px !important;
+    top: auto !important;
+    width: auto !important;
+    height: auto !important;
+    flex-direction: row !important;
+    justify-content: space-between;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 10px !important;
+    border-radius: 20px !important;
+  }
+
+  .biovoice-sidebar > div:last-child {
+    display: none !important;
+  }
+
+  .biovoice-sidebar-item {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 58px !important;
+  }
+
+  .biovoice-sidebar-item span:last-child {
+    font-size: 7px !important;
+  }
+
+  .biovoice-sidebar-item > span:first-child {
+    display: none !important;
+  }
+
+  .biovoice-chrome-top-right,
+  .biovoice-chrome-bottom-left,
+  .biovoice-chrome-bottom-right {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+
+  .biovoice-spectrogram-wrap,
+  .biovoice-constellation-wrap {
+    overflow: hidden;
+  }
+
+  .biovoice-spectrogram-wrap canvas,
+  .biovoice-constellation-wrap canvas {
+    max-width: 100%;
+    height: auto !important;
+  }
+
+  .biovoice-pipeline-row {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .biovoice-identify-model-row {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+  }
+
+  .biovoice-identify-model-row > :last-child {
+    grid-column: 2 / 4;
+  }
+
+  .biovoice-page-header {
+    align-items: flex-start !important;
+  }
+
+  .biovoice-page-header > * {
+    width: 100%;
+  }
+
+  .biovoice-page-header button {
+    width: 100%;
+    justify-content: center;
   }
 }
 
 @media (max-width: 767px) {
-  /* Phone — linearise the kiosk stage. */
-  body.biovoice-mobile .biovoice-stage {
-    /* Stop forcing a 1920px width; let it follow the viewport. */
-    width: 100% !important;
-    height: auto !important;
-    transform: none !important;
-    /* The original stage uses absolute-positioned children. Switch the
-     * container to flow layout so they stack naturally. */
-    position: relative !important;
-  }
-
-  body.biovoice-mobile .biovoice-stage > * {
-    position: relative !important;
-    inset: auto !important;
-    width: 100% !important;
-    margin-block-end: 12px;
-  }
-
-  body.biovoice-mobile .biovoice-three-column,
-  body.biovoice-mobile .biovoice-two-column {
-    grid-template-columns: 1fr !important;
-  }
-
-  body.biovoice-mobile .biovoice-sidebar {
-    /* Replace fixed sidebar with a top-row hamburger panel. */
-    position: relative !important;
-    width: 100% !important;
-    height: auto !important;
-    flex-direction: row !important;
-    overflow-x: auto;
-  }
-
-  body.biovoice-mobile .biovoice-hide-on-mobile {
-    display: none !important;
-  }
-
-  /* Bigger tap targets for phone. */
   body.biovoice-mobile button,
   body.biovoice-mobile [role="button"] {
     min-height: 48px;
     padding-inline: 16px;
   }
 
-  /* Recording overlay — let it take the full screen on phone. */
-  body.biovoice-mobile .biovoice-overlay {
-    position: fixed !important;
-    inset: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
+  .biovoice-page-content {
+    padding: 176px 16px 104px !important;
+  }
+
+  .biovoice-console-metrics,
+  .biovoice-live-features-grid,
+  .biovoice-console-counters,
+  .biovoice-profiles-grid,
+  .biovoice-target-grid,
+  .biovoice-identify-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .biovoice-profile-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .biovoice-overlay-inner {
+    padding: 84px 16px 24px !important;
+  }
+
+  .biovoice-overlay-close {
+    top: 16px !important;
+    right: 16px !important;
+  }
+
+  .biovoice-result-header,
+  .biovoice-result-identity {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+
+  .biovoice-result-header > :last-child {
+    width: 100%;
+    text-align: center;
+  }
+
+  .biovoice-model-score-row,
+  .biovoice-identify-model-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .biovoice-model-score-row > *,
+  .biovoice-identify-model-row > * {
+    grid-column: auto !important;
+  }
+
+  .biovoice-cosine-viz .num-mono {
+    font-size: 28px !important;
+  }
+
+  .biovoice-cosine-viz .label-mono {
+    text-align: center;
   }
 }
 
-/* When the OS reports `prefers-reduced-motion`, suppress the kiosk's
- * waveform animations + pulsing dots. WCAG 2.3.3 + accessibility
- * baseline. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

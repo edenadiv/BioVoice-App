@@ -108,6 +108,15 @@ describe("api request wrapper — credentials + method contract", () => {
           ],
         },
       ],
+      speaker_fusion: {
+        strategy: "majority_vote",
+        combined_match: true,
+        combined_similarity_score: 0.91,
+        matched_models: 2,
+        total_models: 2,
+        majority_required: 2,
+        decisive_model_keys: ["redimnet_b5", "ecapa_voxceleb"],
+      },
       deepfake_score: 0.97,
       analysis_details: { voice_naturalness: 0.5, spectral_consistency: 0.6, temporal_patterns: 0.7, artifact_detection: 0.8 },
       would_accept_top1: true,
@@ -127,6 +136,8 @@ describe("api request wrapper — credentials + method contract", () => {
     expect(result.speakerModelMatches).toHaveLength(2);
     expect(result.speakerModelMatches[0].modelKey).toBe("redimnet_b5");
     expect(result.speakerModelMatches[1].matches[0].userId).toBe("bob");
+    expect(result.speakerFusion?.combinedMatch).toBe(true);
+    expect(result.speakerFusion?.matchedModels).toBe(2);
     expect(result.wouldAcceptTop1).toBe(true);
     expect(result.nEnrolledTotal).toBe(3);
     expect(result.analysisDetails?.voiceNaturalness).toBeCloseTo(0.5);
@@ -167,9 +178,20 @@ describe("model_provenance snake→camel transform", () => {
           similarity_score: 0.9,
           centroid_similarity: 0.9,
           sample_similarities: [],
+          threshold: 0.75,
+          passed_threshold: true,
           drives_decision: true,
         },
       ],
+      speaker_fusion: {
+        strategy: "majority_vote",
+        combined_match: true,
+        combined_similarity_score: 0.9,
+        matched_models: 1,
+        total_models: 1,
+        majority_required: 1,
+        decisive_model_keys: ["redimnet_b5"],
+      },
       message: "ok",
       session_id: "VRF-20260510-00001",
       created_at: "2026-05-10T00:00:00Z",
@@ -187,7 +209,9 @@ describe("model_provenance snake→camel transform", () => {
     expect(r.modelProvenance!.acousticProbe).toBe("heuristic");  // snake → camel
     expect(r.modelProvenance!.isDegraded).toBe(true);
     expect(r.speakerModelScores[0].modelKey).toBe("redimnet_b5");
+    expect(r.speakerModelScores[0].passedThreshold).toBe(true);
     expect(r.speakerModelScores[0].drivesDecision).toBe(true);
+    expect(r.speakerFusion?.combinedSimilarityScore).toBe(0.9);
   });
 
   it("verifySpeaker handles missing model_provenance (legacy backend)", async () => {

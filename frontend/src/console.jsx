@@ -16,6 +16,12 @@ import {
 import { useEmbeddingProjection } from "./hooks/useEmbeddingProjection";
 import { useLiveEmbedding } from "./hooks/useLiveEmbedding";
 
+const SPEAKER_MODEL_LABELS = {
+  redimnet_b5: "ReDimNet B5",
+  ecapa_voxceleb: "ECAPA VoxCeleb",
+  wespeaker_resnet293_lm: "WeSpeaker ResNet293",
+};
+
 // ============================================================================
 // useCounter — animated count-up
 // ============================================================================
@@ -35,6 +41,32 @@ function useCounter(target, ms = 1200, deps = []) {
     return () => cancelAnimationFrame(raf);
   }, deps);
   return v;
+}
+
+function useElementSize() {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => {
+      setSize({
+        width: node.clientWidth || 0,
+        height: node.clientHeight || 0,
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return [ref, size];
 }
 
 // ============================================================================
@@ -288,6 +320,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const [selectedProfile, setSelectedProfile] = useState(profiles[0]?.id);
   const [hoverProfile, setHoverProfile] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [embeddingModelKey, setEmbeddingModelKey] = useState("redimnet_b5");
+  const [spectrogramRef, spectrogramSize] = useElementSize();
+  const [constellationRef, constellationSize] = useElementSize();
 
   // Tick clock for "elapsed" rendering on activity rows.
   useEffect(() => {
@@ -318,20 +353,30 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const metrics = useMetricsSummary();
 
   // V3 — real ReDimNet embeddings projected to 3-d for the constellation.
-  const projection = useEmbeddingProjection(profiles.length);
+  const projection = useEmbeddingProjection(embeddingModelKey, profiles.length);
   // V3 — live mic embedding via /embed; toggleable from the Settings panel.
   const live = useLiveEmbedding({
     getRecentFloat: micState === 'live' ? audio.getRecentFloat ?? null : null,
     sampleRate: audio.sampleRateRef?.current ?? 16000,
     basis: projection.basis,
+    modelKey: embeddingModelKey,
   });
+  const latestFusion = results[0]?.speakerFusion ?? null;
+  const latestModelScores = results[0]?.speakerModelScores ?? [];
+  const activeModelKeys = latestModelScores.length > 0
+    ? latestModelScores.map((score) => score.modelKey)
+    : ["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"];
+  const spectrogramWidth = Math.max(300, Math.floor((spectrogramSize.width || 860) - 52));
+  const spectrogramHeight = Math.max(220, Math.min(340, Math.floor(spectrogramWidth * 0.38)));
+  const constellationWidth = Math.max(280, Math.floor(Math.min(constellationSize.width || 420, 520)));
+  const constellationHeight = Math.max(240, Math.min(340, Math.floor(constellationWidth * 0.72)));
 
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Operator console" screenName="CONSOLE"/>
       <AmbientField count={70}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(0, 400px) minmax(0, 1fr) minmax(0, 460px)', gap: 24, zIndex: 2 }}>
+      <div className="biovoice-page-content biovoice-console-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(320px, 400px) minmax(0, 1fr) minmax(320px, 460px)', gap: 24, zIndex: 2 }}>
 
         {/* ============ LEFT: Identity check ============ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
@@ -417,7 +462,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
           {/* Big spectrogram */}
           <div className="panel outline-glow" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, padding: 22, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+            <div className="biovoice-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
               <div>
                 <div className="label-mono" style={{ fontSize: 10 }}>MEL-SPECTROGRAM · STREAMING</div>
                 <div style={{ fontSize: 19, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
@@ -427,8 +472,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 <LivePulse size={8}/>
               </div>
             </div>
-            <div style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280 }}>
-              <MelSpectrogram freqs={audio.freqs} width={820} height={300} mels={80}/>
+            <div
+              ref={spectrogramRef}
+              className="biovoice-spectrogram-wrap"
+              style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280, width: '100%' }}
+            >
+              <MelSpectrogram freqs={audio.freqs} width={spectrogramWidth} height={spectrogramHeight} mels={80}/>
               <div style={{
                 position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
@@ -436,6 +485,26 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               }}>
                 <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>500</span><span>20 Hz</span>
               </div>
+              {micState !== 'live' && (
+                <div style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'grid',
+                  placeItems: 'center',
+                  pointerEvents: 'none',
+                }}>
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    background: 'rgba(4,7,13,0.72)',
+                    border: '1px solid rgba(125,200,255,0.12)',
+                    color: 'var(--ink-soft)',
+                  }}>
+                    <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
+                    <div style={{ fontSize: 12, marginTop: 6 }}>Grant mic access to stream the spectrogram.</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -445,7 +514,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span className="label-mono" style={{ fontSize: 10 }}>INFERENCE PIPELINE · IDLE</span>
               <span className="num-mono" style={{ fontSize: 10, color: 'var(--good)' }}>READY</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <div className="biovoice-pipeline-row" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
               {[
                 { label: 'Capture', sub: 'PCM' },
                 { label: 'Mel-Spec', sub: '80 ch' },
@@ -490,7 +559,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           {/* Health bar — real backend telemetry from /metrics/summary. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+          <div className="biovoice-console-metrics" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
             <Metric label="Verify p50" value={formatLatency(metrics?.p50VerifyMs ?? null)} sub="rolling" trend="flat"/>
             <Metric label="Throughput" value={formatThroughput(metrics?.throughputPerSec ?? 0)} sub="lifetime avg" trend="up"/>
             <Metric label="Profiles" value={profilesCount.toFixed(0)} sub="enrolled" trend="up"/>
@@ -508,7 +577,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               <span
                 className="label-mono"
                 style={{ fontSize: 10 }}
-                title="Real ReDimNet 192-d → PCA(3). Live point updates while mic is on."
+                title="Selected speaker model embeddings projected to PCA(3). Live point updates from the current mic window."
               >
                 VOICE EMBEDDING SPACE
               </span>
@@ -516,52 +585,116 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
               )}
             </div>
-            <div style={{ display: 'grid', placeItems: 'center' }}>
+            <div
+              ref={constellationRef}
+              className="biovoice-constellation-wrap"
+              style={{ display: 'grid', placeItems: 'center', width: '100%', minHeight: 280 }}
+            >
               <EmbeddingConstellation
-                width={420}
-                height={300}
+                width={constellationWidth}
+                height={constellationHeight}
                 projectedProfiles={projection.profiles}
                 livePoint={live.liveProjected}
                 matchId={selectedProfile}
                 loading={projection.loading}
               />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div className="biovoice-constellation-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+              <div className="biovoice-constellation-legend" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.enabled ? 1 : 0.3 }}></span>
-                  <span className="label-mono" style={{ fontSize: 9 }}>{live.enabled ? (live.liveProjected ? 'LIVE VOICE' : 'WAITING FOR MIC') : 'LIVE OFF'}</span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.loading || live.liveProjected ? 1 : 0.45 }}></span>
+                  <span className="label-mono" style={{ fontSize: 9 }}>{live.liveProjected ? 'LIVE VOICE' : live.loading ? 'UPDATING LIVE POINT' : 'WAITING FOR MIC'}</span>
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3da9fc' }}></span>
                   <span className="label-mono" style={{ fontSize: 9 }}>{profiles.length} ENROLLED</span>
                 </span>
               </div>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                <button
-                  onClick={() => live.setEnabled(!live.enabled)}
-                  className="label-mono"
-                  title="Toggle the streaming /embed call that drives the live point. Disable to silence the preview encoder."
-                  style={{
-                    fontSize: 9,
-                    padding: '4px 10px',
-                    borderRadius: 999,
-                    border: `1px solid ${live.enabled ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
-                    background: live.enabled ? 'rgba(126,240,255,0.10)' : 'transparent',
-                    color: live.enabled ? 'var(--teal-2)' : 'var(--ink-soft)',
-                    cursor: 'pointer',
-                    transition: 'all 180ms',
-                  }}
-                >
-                  LIVE · {live.enabled ? 'ON' : 'OFF'}
-                </button>
-                <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>REDIMNET 192-D · PCA(3)</span>
+              <div className="biovoice-constellation-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {activeModelKeys.map((modelKey) => {
+                  const active = embeddingModelKey === modelKey;
+                  return (
+                    <button
+                      key={modelKey}
+                      onClick={() => setEmbeddingModelKey(modelKey)}
+                      className="label-mono"
+                      style={{
+                        fontSize: 9,
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        border: `1px solid ${active ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
+                        background: active ? 'rgba(126,240,255,0.10)' : 'transparent',
+                        color: active ? 'var(--teal-2)' : 'var(--ink-soft)',
+                        cursor: 'pointer',
+                        transition: 'all 180ms',
+                      }}
+                    >
+                      {SPEAKER_MODEL_LABELS[modelKey]}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
 
+          <div className="panel" style={{ padding: '16px 18px', display: 'grid', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+              <span className="label-mono" style={{ fontSize: 10 }}>FUSION DECISION</span>
+              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SEPARATE FROM EMBEDDING VIEW</span>
+            </div>
+            {latestFusion ? (
+              <>
+                <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                  <Metric
+                    label="Combined score"
+                    value={latestFusion.combinedSimilarityScore.toFixed(3)}
+                    sub={`${latestFusion.matchedModels}/${latestFusion.totalModels} matched`}
+                    trend={latestFusion.combinedMatch ? 'up' : 'flat'}
+                  />
+                  <Metric
+                    label="Decision rule"
+                    value={`${latestFusion.majorityRequired}/${latestFusion.totalModels}`}
+                    sub={latestFusion.combinedMatch ? 'majority reached' : 'majority not reached'}
+                    trend={latestFusion.combinedMatch ? 'up' : 'flat'}
+                  />
+                </div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {latestModelScores.map((score) => (
+                    <div key={score.modelKey} className="biovoice-model-score-row" style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+                      gap: 12,
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      background: score.passedThreshold ? 'rgba(106,255,200,0.06)' : 'rgba(255,178,74,0.06)',
+                      border: `1px solid ${score.passedThreshold ? 'rgba(106,255,200,0.20)' : 'rgba(255,178,74,0.20)'}`,
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey]}</div>
+                        <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                          {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
+                        </div>
+                      </div>
+                      <div className="num-mono" style={{ fontSize: 16, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
+                        {score.similarityScore.toFixed(3)}
+                      </div>
+                      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                        THR {score.threshold.toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
+                Run a verification to see the majority vote and the per-model agreement here.
+              </div>
+            )}
+          </div>
+
           {/* Compact counters */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div className="panel" style={{ padding: '14px 18px' }}>
               <div className="label-mono" style={{ fontSize: 9 }}>VERIFIED TODAY</div>
               <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--teal-2)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
@@ -609,7 +742,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           {/* Hint */}
-          <div style={{
+          <div className="biovoice-console-hint" style={{
             padding: '14px 18px', borderRadius: 12,
             background: 'rgba(126,240,255,0.05)',
             border: '1px solid rgba(126,240,255,0.18)',

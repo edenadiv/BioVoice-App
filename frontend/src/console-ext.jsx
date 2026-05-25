@@ -372,7 +372,7 @@ function LiveFeatures({ getRecentFloat, sampleRate, vadThreshold = 0.018 }) {
   );
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+    <div className="biovoice-live-features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
       <Cell label="Pitch · F0" value={feat.pitch ? feat.pitch.toFixed(0) : '—'} unit="Hz" hint={feat.pitch > 165 ? 'female range' : feat.pitch > 0 ? 'male range' : 'silence'}/>
       <Cell label="Formant F1" value={feat.f1 ? feat.f1.toFixed(0) : '—'} unit="Hz" hint={feat.f2 ? `F2 ${feat.f2.toFixed(0)} · F3 ${feat.f3.toFixed(0)}` : 'LPC'}/>
       <Cell label="Jitter"     value={feat.jitter ? feat.jitter.toFixed(2) : '—'} unit="%" hint="cycle-to-cycle"/>
@@ -573,7 +573,7 @@ function VerificationOverlay({ profile, onClose }) {
   const dfScore = result?.deepfakeScore ?? 0;
 
   return (
-    <div style={{
+    <div className="biovoice-overlay" style={{
       position: 'absolute', inset: 0, zIndex: 200,
       background: 'radial-gradient(ellipse at center, rgba(7,17,30,0.96) 0%, rgba(4,7,13,0.98) 70%)',
       backdropFilter: 'blur(14px)',
@@ -590,8 +590,8 @@ function VerificationOverlay({ profile, onClose }) {
         opacity: phase < 3 ? 1 : 0.3,
       }}/>
 
-      <div style={{ display: 'grid', placeItems: 'center', padding: 80 }}>
-        <div style={{ width: 1100, textAlign: 'center', position: 'relative' }}>
+      <div className="biovoice-overlay-inner" style={{ display: 'grid', placeItems: 'center', padding: 80 }}>
+        <div className="biovoice-overlay-shell" style={{ width: 1100, textAlign: 'center', position: 'relative' }}>
           <div className="label-mono" style={{ fontSize: 11, color: accent, letterSpacing: '0.32em' }}>
             VERIFYING · {profile?.id || 'UNKNOWN'}
           </div>
@@ -615,7 +615,7 @@ function VerificationOverlay({ profile, onClose }) {
           </div>
 
           {/* Phase indicator dots */}
-          <div style={{ display: 'flex', gap: 18, justifyContent: 'center', marginTop: 32 }}>
+          <div className="biovoice-overlay-steps" style={{ display: 'flex', gap: 18, justifyContent: 'center', marginTop: 32 }}>
             {['Capture', 'Embed · 192-d', 'Cosine match', 'Decision'].map((p, i) => {
               const done = i < phase;
               const active = i === phase;
@@ -635,9 +635,9 @@ function VerificationOverlay({ profile, onClose }) {
           </div>
 
           {/* Phase-specific visualization */}
-          <div style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
+          <div className="biovoice-overlay-visual" style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
             {phase === 0 && (
-              <div style={{ width: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="biovoice-overlay-capture" style={{ width: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {/* Live waveform — flat unless recording */}
                 <div style={{ position: 'relative', height: 200, background: 'rgba(0,0,0,0.3)', borderRadius: 12, border: `1px solid ${accent}33` }}>
                   <Waveform samples={recorder.samples} width={720} height={200} bars={120} mirror={true} color={accent}/>
@@ -655,7 +655,7 @@ function VerificationOverlay({ profile, onClose }) {
                 </div>
 
                 {/* Mic device picker */}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div className="biovoice-overlay-device-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)', minWidth: 44 }}>MIC</span>
                   <select
                     value={deviceId}
@@ -680,7 +680,7 @@ function VerificationOverlay({ profile, onClose }) {
                 </div>
 
                 {/* Capture controls */}
-                <div style={{ display: 'flex', gap: 12 }}>
+                <div className="biovoice-overlay-actions" style={{ display: 'flex', gap: 12 }}>
                   {recorder.state !== 'recording' ? (
                     <button onClick={handleStartRec} disabled={!!sample} style={{
                       flex: 1, padding: '14px 20px', borderRadius: 10,
@@ -735,7 +735,7 @@ function VerificationOverlay({ profile, onClose }) {
                 )}
 
                 {/* Submit */}
-                <div style={{ display: 'flex', gap: 12 }}>
+                <div className="biovoice-overlay-submit" style={{ display: 'flex', gap: 12 }}>
                   <button
                     onClick={handleSubmit}
                     disabled={!sample}
@@ -779,7 +779,7 @@ function VerificationOverlay({ profile, onClose }) {
           {/* Progress bar — calibrated timeline during embed/match (phases 1-2) only.
               Phase 0 is operator-driven (no fixed duration → no bar). */}
           {phase > 0 && phase < 3 && (
-            <div style={{ marginTop: 40, width: 480, margin: '40px auto 0', height: 2, background: 'rgba(125,200,255,0.10)', borderRadius: 1, overflow: 'hidden' }}>
+            <div className="biovoice-overlay-progress" style={{ marginTop: 40, width: 480, margin: '40px auto 0', height: 2, background: 'rgba(125,200,255,0.10)', borderRadius: 1, overflow: 'hidden' }}>
               <div style={{
                 height: '100%',
                 width: `${overlayProgress(phase, recorder.durationMs, timeline) * 100}%`,
@@ -792,7 +792,7 @@ function VerificationOverlay({ profile, onClose }) {
         </div>
       </div>
 
-      <button onClick={onClose} className="btn btn-ghost" style={{ position: 'absolute', top: 32, right: 32, padding: '10px 20px', fontSize: 11 }}>
+      <button onClick={onClose} className="btn btn-ghost biovoice-overlay-close" style={{ position: 'absolute', top: 32, right: 32, padding: '10px 20px', fontSize: 11 }}>
         ✕ &nbsp;CLOSE
       </button>
     </div>
@@ -801,8 +801,8 @@ function VerificationOverlay({ profile, onClose }) {
 
 function CosineMatchViz({ similarity }) {
   return (
-    <div style={{ display: 'grid', placeItems: 'center', gap: 22 }}>
-      <svg width="640" height="200" viewBox="0 0 640 200">
+    <div className="biovoice-cosine-viz" style={{ display: 'grid', placeItems: 'center', gap: 22 }}>
+      <svg width="640" height="200" viewBox="0 0 640 200" style={{ width: '100%', maxWidth: 640, height: 'auto' }}>
         <defs>
           <linearGradient id="vec1" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0" stopColor="#3da9fc"/>
@@ -845,6 +845,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
   const totalMs = result?.stageBreakdown?.totalMs ?? 0;
   const reason = result?.decisionReason ?? (passing ? 'accepted' : 'mismatch');
   const modelScores = result?.speakerModelScores ?? [];
+  const fusion = result?.speakerFusion ?? null;
   const reasonBlurb = {
     accepted: 'Voice matches the enrolled profile.',
     mismatch: 'Speaker did not match the enrolled profile.',
@@ -852,7 +853,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
     not_enrolled: 'No enrolled profile for this user.',
   }[reason] || result?.message || '';
   return (
-    <div style={{
+    <div className="biovoice-overlay-result-card" style={{
       width: 720, padding: '36px 48px',
       borderRadius: 18,
       border: `1px solid ${accent}55`,
@@ -860,8 +861,8 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
       display: 'grid', gap: 22,
     }}>
       <DegradedBanner provenance={result?.modelProvenance} variant="full"/>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+      <div className="biovoice-result-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="biovoice-result-identity" style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{
             width: 56, height: 56, borderRadius: '50%',
             background: `linear-gradient(135deg, ${profile?.color1 || '#7ef0ff'}, ${profile?.color2 || '#3da9fc'})`,
@@ -887,11 +888,42 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
           {reasonBlurb}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-        <Stat label="Voice match" value={similarity.toFixed(3)} sub={`vs ${SIM_THRESHOLD.toFixed(2)} · ${passing ? 'PASS' : 'FAIL'}`} accent={accent}/>
+      <div className="biovoice-result-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <Stat
+          label={fusion ? "Combined match" : "Voice match"}
+          value={similarity.toFixed(3)}
+          sub={
+            fusion
+              ? `${fusion.matchedModels}/${fusion.totalModels} models matched · need ${fusion.majorityRequired}`
+              : `vs ${SIM_THRESHOLD.toFixed(2)} · ${passing ? 'PASS' : 'FAIL'}`
+          }
+          accent={accent}
+        />
         <Stat label="Authenticity" value={dfScore.toFixed(2)} sub={`vs ${DF_THRESHOLD.toFixed(2)} · ${dfScore >= DF_THRESHOLD ? 'genuine voice' : 'synthetic flag'}`} accent={dfScore >= DF_THRESHOLD ? '#6affc8' : '#ff5577'}/>
         <Stat label="Latency" value={totalMs > 0 ? `${(totalMs / 1000).toFixed(2)}s` : '—'} sub="end-to-end" accent="#7ef0ff"/>
       </div>
+      {fusion && (
+        <div style={{
+          padding: '14px 18px',
+          borderRadius: 14,
+          background: 'rgba(125,200,255,0.03)',
+          border: '1px solid var(--line)',
+          display: 'grid',
+          gap: 8,
+        }}>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>
+            FUSION DECISION
+          </div>
+          <div className="biovoice-result-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 15, color: 'var(--ink)' }}>
+              {fusion.strategy === 'majority_vote' ? 'Majority vote across speaker models' : fusion.strategy}
+            </div>
+            <div className="label-mono" style={{ fontSize: 9, color: passing ? '#7ef0ff' : '#ffb24a' }}>
+              {fusion.matchedModels}/{fusion.totalModels} MATCHED · NEED {fusion.majorityRequired}
+            </div>
+          </div>
+        </div>
+      )}
       {modelScores.length > 0 && (
         <div style={{
           padding: '16px 18px',
@@ -915,6 +947,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
               return (
                 <div
                   key={score.modelKey}
+                  className="biovoice-model-score-row"
                   style={{
                     display: 'grid',
                     gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto',
@@ -929,7 +962,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, color: 'var(--ink)' }}>{modelLabel}</div>
                     <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
-                      {score.drivesDecision ? 'ACTIVE DECISION MODEL' : 'COMPARISON ONLY'}
+                      {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
                     </div>
                   </div>
                   <div>
@@ -942,6 +975,12 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
                     <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
                     <div className="num-mono" style={{ fontSize: 20, color: 'var(--ink)' }}>
                       {score.centroidSimilarity.toFixed(3)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>THRESHOLD</div>
+                    <div className="num-mono" style={{ fontSize: 16, color: 'var(--ink)' }}>
+                      {score.threshold.toFixed(2)}
                     </div>
                   </div>
                   <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', whiteSpace: 'nowrap' }}>
@@ -960,15 +999,15 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
 function ErrorPanel({ message, profile }) {
   const accent = '#ff5577';
   return (
-    <div style={{
+    <div className="biovoice-overlay-result-card" style={{
       width: 720, padding: '36px 48px',
       borderRadius: 18,
       border: `1px solid ${accent}55`,
       background: `linear-gradient(180deg, ${accent}10, transparent)`,
       display: 'grid', gap: 22,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+      <div className="biovoice-result-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="biovoice-result-identity" style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <div style={{
             width: 56, height: 56, borderRadius: '50%',
             background: `linear-gradient(135deg, ${profile?.color1 || '#ff5577'}, ${profile?.color2 || '#9450d8'})`,

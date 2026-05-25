@@ -92,7 +92,7 @@ def test_users_embeddings_does_not_leak_pii_columns(
     fields = set(body[0].keys())
     # Schema is intentionally narrow — no metadata leakage from
     # SpeakerRecord into the API surface.
-    assert fields == {"user_id", "centroid", "samples", "sample_count", "enrolled_at"}
+    assert fields == {"user_id", "model_key", "centroid", "samples", "sample_count", "enrolled_at"}
 
 
 # ---------------------------------------------------------------------
@@ -112,6 +112,7 @@ def test_embed_returns_unit_length_vector_and_provenance(
     assert response.status_code == 200
     body = response.json()
     assert len(body["embedding"]) == HashEncoder.DIM
+    assert body["model_key"] == "redimnet_b5"
     assert all(isinstance(v, (int, float)) for v in body["embedding"])
     assert body["frame_count"] > 0
     assert body["duration_ms"] > 0
@@ -176,3 +177,65 @@ def test_embed_matches_enrolment_embedding_for_same_audio(
     assert len(embed_vec) == len(reference_vec)
     for a, b in zip(embed_vec, reference_vec):
         assert abs(a - b) < 1e-6
+
+
+def test_users_embeddings_can_request_comparison_model(
+    client: TestClient,
+    verification_service: VerificationService,
+):
+    class ComparisonEncoder:
+        provenance = "ecapa_voxceleb"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            scale = sum(abs(sample) for sample in waveform) or 1.0
+            return [scale, scale / 2, scale / 4]
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    verification_service.comparison_encoders["ecapa_voxceleb"] = ComparisonEncoder()
+    wav = make_wav(2.0, frequency=220.0)
+    for _ in range(3):
+        verification_service.enroll("alice", wav, filename="alice.wav")
+
+    response = client.get("/users/embeddings?model_key=ecapa_voxceleb")
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["model_key"] == "ecapa_voxceleb"
+    assert len(body[0]["centroid"]) == 3
+
+
+def test_embed_can_request_comparison_model(
+    client: TestClient,
+    verification_service: VerificationService,
+):
+    class ComparisonEncoder:
+        provenance = "wespeaker_resnet293_lm"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            scale = sum(abs(sample) for sample in waveform) or 1.0
+            return [scale, scale / 2, scale / 4, scale / 8]
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    verification_service.comparison_encoders["wespeaker_resnet293_lm"] = ComparisonEncoder()
+    wav = make_wav(2.0, frequency=220.0)
+
+    response = client.post(
+        "/embed",
+        files={"audio": ("preview.wav", wav, "audio/wav")},
+        data={"model_key": "wespeaker_resnet293_lm"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_key"] == "wespeaker_resnet293_lm"
+    assert len(body["embedding"]) == 4

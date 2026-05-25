@@ -39,6 +39,7 @@ function Sidebar({ page, setPage }) {
         const active = page === it.id;
         return (
           <button key={it.id} onClick={() => setPage(it.id)} title={it.label}
+            className="biovoice-sidebar-item"
             style={{
               width: 56, height: 56, borderRadius: 14, cursor: 'pointer',
               background: active ? 'linear-gradient(135deg, rgba(126,240,255,0.18), rgba(61,169,252,0.06))' : 'transparent',
@@ -203,7 +204,7 @@ function DeepfakeLab({ audio, profiles }) {
       <Chrome status="DEEPFAKE LABORATORY · ETHICAL USE ONLY" statusKind="warn" subtitle="Adversarial testing" screenName="DF LAB"/>
       <AmbientField count={50}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+      <div className="biovoice-page-content biovoice-split-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
 
         {/* LEFT: Forge */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
@@ -217,7 +218,7 @@ function DeepfakeLab({ audio, profiles }) {
 
           <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
             <Field label="TARGET VOICE">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div className="biovoice-target-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {profiles.slice(0, 6).map(p => (
                   <button key={p.id} onClick={() => setTarget(p.id)} className="lift"
                     style={{
@@ -265,7 +266,7 @@ function DeepfakeLab({ audio, profiles }) {
                   No TTS engines available on the backend. Install macOS `say` / espeak-ng, or expose internet for edge-tts / gTTS.
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                <div className="biovoice-engine-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                   {enginesPayload.engines.map((e) => {
                     const disabled = !e.available;
                     const selected = engineId === e.id;
@@ -483,7 +484,7 @@ function DeepfakeLab({ audio, profiles }) {
                   background: 'rgba(0,0,0,0.4)',
                 }}/>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                <div className="biovoice-lab-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                   <div style={{
                     padding: 14, borderRadius: 10,
                     background: result.decision === 'FAKE' ? 'rgba(255,85,119,0.06)' : 'rgba(255,178,74,0.06)',
@@ -637,7 +638,7 @@ function IdentifyScreen({ profiles }) {
       <Chrome status="OPEN-SET IDENTIFICATION" statusKind="info" subtitle="Most similar across all enrolled profiles" screenName="IDENTIFY"/>
       <AmbientField count={40}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+      <div className="biovoice-page-content biovoice-split-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
 
         {/* LEFT — capture */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
@@ -651,7 +652,7 @@ function IdentifyScreen({ profiles }) {
 
           <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
             <Field label="MICROPHONE">
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="biovoice-input-row" style={{ display: 'flex', gap: 8 }}>
                 <select
                   value={deviceId}
                   onChange={(e) => setDeviceId(e.target.value)}
@@ -675,7 +676,7 @@ function IdentifyScreen({ profiles }) {
               </div>
             </Field>
 
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="biovoice-identify-actions" style={{ display: 'flex', gap: 12 }}>
               {recorder.state !== 'recording' ? (
                 <button onClick={handleStartRec} disabled={!!sample || busy} style={{
                   flex: 1, padding: '14px 20px', borderRadius: 10,
@@ -721,7 +722,7 @@ function IdentifyScreen({ profiles }) {
               }}>{recorder.lastError}</div>
             )}
 
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="biovoice-identify-submit" style={{ display: 'flex', gap: 12 }}>
               <button onClick={handleSubmit} disabled={!sample || busy || profiles.length === 0} style={{
                 flex: 1, padding: '16px 24px', borderRadius: 10,
                 background: sample && !busy && profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.05)',
@@ -798,7 +799,7 @@ function IdentifyResults({ result, profiles }) {
             background: i === 0 ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))' : 'rgba(125,200,255,0.02)',
             border: `1px solid ${i === 0 ? 'rgba(126,240,255,0.35)' : 'rgba(125,200,255,0.15)'}`,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
+            <div className="biovoice-identify-match-header" style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
               <span className="label-mono" style={{ fontSize: 18, color: accent, minWidth: 28 }}>#{i + 1}</span>
               {profile && (
                 <div style={{
@@ -825,12 +826,13 @@ function IdentifyResults({ result, profiles }) {
                   : 'linear-gradient(90deg, rgba(125,200,255,0.4), rgba(125,200,255,0.7))',
                 transition: 'width 600ms cubic-bezier(.2,.8,.2,1)',
               }}/>
-              {/* Threshold marker */}
-              <div title={`accept threshold ${(result.similarityThreshold * 100).toFixed(0)}%`} style={{
-                position: 'absolute', top: -3, bottom: -3,
-                left: `${result.similarityThreshold * 100}%`,
-                width: 1.5, background: 'rgba(255,178,74,0.55)',
-              }}/>
+              {!result.speakerFusion && (
+                <div title={`accept threshold ${(result.similarityThreshold * 100).toFixed(0)}%`} style={{
+                  position: 'absolute', top: -3, bottom: -3,
+                  left: `${result.similarityThreshold * 100}%`,
+                  width: 1.5, background: 'rgba(255,178,74,0.55)',
+                }}/>
+              )}
             </div>
           </div>
         );
@@ -881,6 +883,7 @@ function IdentifyResults({ result, profiles }) {
                       return (
                         <div
                           key={`${group.modelKey}-${match.userId}`}
+                          className="biovoice-identify-model-row"
                           style={{
                             display: 'grid',
                             gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
@@ -925,8 +928,26 @@ function IdentifyResults({ result, profiles }) {
         </div>
       )}
 
+      {result.speakerFusion && (
+        <div className="panel" style={{ padding: '14px 20px', display: 'grid', gap: 10 }}>
+          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
+            FUSION DECISION
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 15 }}>
+              {result.speakerFusion.strategy === 'majority_vote'
+                ? 'Majority vote across ReDimNet, ECAPA, and ResNet293'
+                : result.speakerFusion.strategy}
+            </div>
+            <div className="label-mono" style={{ fontSize: 9, color: result.speakerFusion.combinedMatch ? 'var(--good)' : 'var(--warn)' }}>
+              {result.speakerFusion.matchedModels}/{result.speakerFusion.totalModels} MATCHED · NEED {result.speakerFusion.majorityRequired}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Deepfake verdict + verdict summary */}
-      <div className="panel" style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="panel biovoice-identify-summary" style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div>
           <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>DEEPFAKE SCORE</div>
           <div className="num-mono" style={{
@@ -948,7 +969,9 @@ function IdentifyResults({ result, profiles }) {
             {result.wouldAcceptTop1 ? 'YES' : 'NO'}
           </div>
           <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>
-            top match vs sim ≥ {(result.similarityThreshold * 100).toFixed(0)}% + df ≥ {result.deepfakeThreshold.toFixed(2)}
+            {result.speakerFusion
+              ? `speaker vote ${result.speakerFusion.matchedModels}/${result.speakerFusion.totalModels} + df ≥ ${result.deepfakeThreshold.toFixed(2)}`
+              : `top match vs sim ≥ ${(result.similarityThreshold * 100).toFixed(0)}% + df ≥ ${result.deepfakeThreshold.toFixed(2)}`}
           </div>
         </div>
       </div>
@@ -1214,8 +1237,8 @@ function ProfilesPage({ profiles, audio }) {
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle={`${profiles.length} enrolled profiles`} screenName="PROFILES"/>
       <AmbientField count={40}/>
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
+      <div className="biovoice-page-content biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
+        <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
           <div>
             <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
             <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
@@ -1236,7 +1259,7 @@ function ProfilesPage({ profiles, audio }) {
             </button>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
+          <div className="biovoice-profiles-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 18 }}>
             {profiles.map((p, i) => (
               <div key={p.id} className="panel lift"
                 onMouseEnter={() => setHover(p.id)} onMouseLeave={() => setHover(null)}
@@ -1282,7 +1305,7 @@ function ProfilesPage({ profiles, audio }) {
                   </div>
                 </div>
                 <MiniWave color={p.color1} idx={i}/>
-                <div className="biovoice-numerals" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
+                <div className="biovoice-numerals biovoice-profile-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
                   <Stat2 k="VERIFIED" v={verifyCounts[p.userId] ?? 0}/>
                   <Stat2 k="ENROLLED" v={`${daysSince(p.enrolledAt)}d`}/>
                   <Stat2 k="SAMPLES"  v={`${p.sampleCount}/3`}/>
