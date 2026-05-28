@@ -37,6 +37,13 @@ class ModelCAM(BaseModel):
 
 class ExplainResponse(BaseModel):
     cams: list[ModelCAM]
+    # The input's log-mel spectrogram on the SAME [T][F] grid as each CAM
+    # heatmap, so the UI can overlay a heatmap on it with 1:1 alignment.
+    # Shared across models (the input is identical), so returned once.
+    spectrogram: list[list[float]] = Field(default_factory=list)
+    frame_times_ms: list[float] = Field(default_factory=list)
+    freq_hz: list[float] = Field(default_factory=list)
+    duration_ms: float = Field(default=0.0, ge=0.0)
 
 
 class ModelProvenance(BaseModel):

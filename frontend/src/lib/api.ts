@@ -1,13 +1,14 @@
 // HTTP client for the BioVoice kiosk. All routes are public —
 // auth/cookie/admin scaffolding was removed in the "strip the
-// scaffolding" pass. The kiosk talks to a single FastAPI backend at
-// `VITE_API_BASE_URL` (defaults to http://localhost:8000).
+// scaffolding" pass. API calls are same-origin/relative by default;
+// `VITE_API_BASE_URL` can override the base when needed (see below).
 
 import type {
   AnalysisDetails,
   CamSegment,
   EmbedResult,
   ExplainModelKey,
+  ExplainResult,
   IdentificationMatch,
   IdentificationResult,
   ModelCAM,
@@ -25,9 +26,10 @@ import { encodeWav } from "./wav";
 
 // P1 — same-origin by default. The production Docker image serves the
 // built React bundle from FastAPI on :8000, so all `fetch("/users/…")`
-// calls hit the same host. For local dev where the backend is on :8000
-// and `vite` is on :5173, set `VITE_API_BASE_URL=http://localhost:8000`
-// in `frontend/.env.local`.
+// calls hit the same host. For local dev (vite :5173) and `vite preview`,
+// `vite.config.ts` proxies the backend route prefixes to :8000, so these
+// relative paths work with no env needed. Set `VITE_API_BASE_URL` only to
+// point at a remote/cross-origin backend (CORS must allow the origin).
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 type SpeakerResponse = {
@@ -193,9 +195,15 @@ type ModelCAMResponse = {
   threshold: number;
   salient_segments: CamSegmentResponse[];
 };
-type ExplainResponse = { cams: ModelCAMResponse[] };
+type ExplainResponse = {
+  cams: ModelCAMResponse[];
+  spectrogram: number[][];
+  frame_times_ms: number[];
+  freq_hz: number[];
+  duration_ms: number;
+};
 
-export type { CamSegment, ModelCAM, ExplainModelKey };
+export type { CamSegment, ModelCAM, ExplainModelKey, ExplainResult };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -501,23 +509,29 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
 
 // -- Explain (Grad-CAM) -------------------------------------------------------
 
-export async function explainAudio(file: File, userId?: string): Promise<ModelCAM[]> {
+export async function explainAudio(file: File, userId?: string): Promise<ExplainResult> {
   const formData = new FormData();
   formData.append("audio", file);
   if (userId) formData.append("user_id", userId);
   const response = await postForm<ExplainResponse>("/explain", formData);
-  return response.cams.map((c) => ({
-    modelKey: c.model_key,
-    frameTimesMs: c.frame_times_ms,
-    freqHz: c.freq_hz,
-    heatmap: c.heatmap,
-    threshold: c.threshold,
-    salientSegments: c.salient_segments.map((s) => ({
-      startMs: s.start_ms,
-      endMs: s.end_ms,
-      peak: s.peak,
+  return {
+    cams: response.cams.map((c) => ({
+      modelKey: c.model_key,
+      frameTimesMs: c.frame_times_ms,
+      freqHz: c.freq_hz,
+      heatmap: c.heatmap,
+      threshold: c.threshold,
+      salientSegments: c.salient_segments.map((s) => ({
+        startMs: s.start_ms,
+        endMs: s.end_ms,
+        peak: s.peak,
+      })),
     })),
-  }));
+    spectrogram: response.spectrogram ?? [],
+    frameTimesMs: response.frame_times_ms ?? [],
+    freqHz: response.freq_hz ?? [],
+    durationMs: response.duration_ms ?? 0,
+  };
 }
 
 // -- Open-set identification --------------------------------------------------

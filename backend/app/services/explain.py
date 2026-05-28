@@ -7,6 +7,7 @@ from typing import Callable
 
 import torch
 import torch.nn.functional as F
+import torchaudio
 
 from app.core.config import settings
 from app.schemas import CamSegment, ExplainModelKey, ModelCAM
@@ -14,6 +15,30 @@ from app.schemas import CamSegment, ExplainModelKey, ModelCAM
 SAMPLE_RATE = 16000
 HEATMAP_T = 200
 HEATMAP_F = 64
+
+
+def input_spectrogram(waveform: list[float]) -> list[list[float]]:
+    """Log-mel spectrogram of the input on the same [T][F] grid as the CAM
+    heatmaps, normalised to 0..1 — the base layer the UI overlays a heatmap on."""
+    if not waveform:
+        return [[0.0] * HEATMAP_F for _ in range(HEATMAP_T)]
+    wav = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0)
+    mel = torchaudio.transforms.MelSpectrogram(
+        sample_rate=SAMPLE_RATE,
+        n_fft=512,
+        hop_length=160,
+        n_mels=HEATMAP_F,
+        power=2.0,
+    )(wav)
+    logmel = torch.log(mel + 1e-6)  # (1, F, frames)
+    grid = F.interpolate(
+        logmel.unsqueeze(0), size=(HEATMAP_F, HEATMAP_T), mode="bilinear", align_corners=False
+    ).squeeze(0).squeeze(0)  # (F, T)
+    grid = grid - grid.min()
+    mx = grid.max()
+    if mx > 1e-8:
+        grid = grid / mx
+    return grid.transpose(0, 1).tolist()  # [T][F]
 
 
 @dataclass(slots=True)

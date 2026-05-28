@@ -35,7 +35,13 @@ from app.schemas import (
     SpeakerModelKey,
 )
 from app.services.audio import NoSpeechDetectedError
-from app.services.explain import build_adapters, explain_model
+from app.services.explain import (
+    SAMPLE_RATE as EXPLAIN_SAMPLE_RATE,
+    _build_axes as build_explain_axes,
+    build_adapters,
+    explain_model,
+    input_spectrogram,
+)
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
 
@@ -298,7 +304,15 @@ async def explain(
         ecapa_centroid=ecapa_centroid,
     )
     cams = [explain_model(key, ctx, trimmed.waveform) for key, ctx in adapters.items()]
-    return ExplainResponse(cams=cams)
+    duration_ms = 1000.0 * len(trimmed.waveform) / EXPLAIN_SAMPLE_RATE
+    times, freqs = build_explain_axes(duration_ms)
+    return ExplainResponse(
+        cams=cams,
+        spectrogram=input_spectrogram(trimmed.waveform),
+        frame_times_ms=times,
+        freq_hz=freqs,
+        duration_ms=duration_ms,
+    )
 
 
 # -----------------------------------------------------------------------------

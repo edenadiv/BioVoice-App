@@ -22,7 +22,40 @@ export async function decodeFileToBuffer(file: Blob): Promise<AudioBuffer> {
 
 export type SalientPlayback = { stop: () => void; promise: Promise<void> };
 
-export function playSalient(buffer: AudioBuffer, segments: CamSegment[] | null): SalientPlayback {
+// `onTick` reports the current playhead position in milliseconds along the
+// FULL clip timeline (not relative to a slice), so callers can place a
+// playhead over the spectrogram regardless of which segment is playing.
+export type PlayOptions = { onTick?: (clipMs: number) => void };
+
+// Drives an rAF loop that reports the playhead position until cancelled.
+function runPlayhead(
+  ctx: AudioContext,
+  startTime: number,
+  baseMs: number,
+  onTick?: (clipMs: number) => void,
+): () => void {
+  if (!onTick) return () => {};
+  let raf = 0;
+  let cancelled = false;
+  const tick = () => {
+    if (cancelled) return;
+    onTick(baseMs + (ctx.currentTime - startTime) * 1000);
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return () => {
+    cancelled = true;
+    if (raf) cancelAnimationFrame(raf);
+  };
+}
+
+// Play the whole clip (segments === null) or play the full clip with audio
+// gated to the salient bands (gain envelope). Playhead runs across the clip.
+export function playSalient(
+  buffer: AudioBuffer,
+  segments: CamSegment[] | null,
+  opts?: PlayOptions,
+): SalientPlayback {
   const ctx = getAudioCtx();
   const src = ctx.createBufferSource();
   src.buffer = buffer;
@@ -44,14 +77,51 @@ export function playSalient(buffer: AudioBuffer, segments: CamSegment[] | null):
     }
   }
 
+  const stopPlayhead = runPlayhead(ctx, ctx.currentTime, 0, opts?.onTick);
   const promise = new Promise<void>((resolve) => {
     src.onended = () => {
+      stopPlayhead();
       void ctx.close();
       resolve();
     };
   });
 
   src.start();
+
+  return {
+    stop: () => {
+      try { src.stop(); } catch { /* already stopped */ }
+    },
+    promise,
+  };
+}
+
+// Play ONLY the [startMs, endMs] slice of the clip. The playhead reports
+// absolute clip position (startMs + elapsed) so it lands under the band.
+export function playSegment(
+  buffer: AudioBuffer,
+  startMs: number,
+  endMs: number,
+  opts?: PlayOptions,
+): SalientPlayback {
+  const ctx = getAudioCtx();
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+
+  const offset = Math.max(0, startMs / 1000);
+  const duration = Math.max(0.01, (endMs - startMs) / 1000);
+
+  const stopPlayhead = runPlayhead(ctx, ctx.currentTime, startMs, opts?.onTick);
+  const promise = new Promise<void>((resolve) => {
+    src.onended = () => {
+      stopPlayhead();
+      void ctx.close();
+      resolve();
+    };
+  });
+
+  src.start(0, offset, duration);
 
   return {
     stop: () => {

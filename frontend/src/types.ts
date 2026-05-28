@@ -42,6 +42,15 @@ export type ModelCAM = {
   salientSegments: CamSegment[];
 };
 
+export type ExplainResult = {
+  cams: ModelCAM[];
+  // Input log-mel spectrogram on the same [T][F] grid as each CAM heatmap.
+  spectrogram: number[][];
+  frameTimesMs: number[];
+  freqHz: number[];
+  durationMs: number;
+};
+
 export type VerificationResult = {
   resultId: string;
   userId: string;
