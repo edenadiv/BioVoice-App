@@ -1,6 +1,7 @@
 # Build output
 dist/
 node_modules/
+*.tsbuildinfo
 
 # G7 — Playwright + Vitest run artifacts
 playwright-report/
