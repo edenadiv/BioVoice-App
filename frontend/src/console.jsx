@@ -354,7 +354,6 @@ const PANEL_TITLES = {
   spectrogram: "MEL-SPECTROGRAM · STREAMING",
   pipeline: "INFERENCE PIPELINE",
   constellation: "VOICE EMBEDDING SPACE",
-  fusion: "FUSION DECISION",
   activity: "LIVE EVENT FEED",
 };
 
@@ -430,6 +429,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const [now, setNow] = useState(Date.now());
   const [embeddingModelKey, setEmbeddingModelKey] = useState("redimnet_b5");
   const [expanded, setExpanded] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [spectrogramRef, spectrogramSize] = useElementSize();
   const [constellationRef, constellationSize] = useElementSize();
 
@@ -441,7 +441,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
   // Derive the live event feed from real /results polling (E-16).
   const { results } = useAppState();
-  const activity = useMemo(() => results.slice(0, 8).map(resultToActivity), [results]);
+  const activity = useMemo(() => results.slice(0, 50).map(resultToActivity), [results]);
 
   // Keep the selected profile in sync with the live profiles list (E-15).
   useEffect(() => {
@@ -463,7 +463,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     basis: projection.basis,
     modelKey: embeddingModelKey,
   });
-  const latestFusion = results[0]?.speakerFusion ?? null;
   const latestModelScores = results[0]?.speakerModelScores ?? [];
   const activeModelKeys = latestModelScores.length > 0
     ? latestModelScores.map((score) => score.modelKey)
@@ -708,45 +707,39 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     </>
   );
 
-  const fusionBody = ({ onExpand } = {}) => (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <span className="label-mono" style={{ fontSize: 10 }}>FUSION DECISION</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SEPARATE FROM EMBEDDING VIEW</span>
-          {onExpand && <ExpandButton onClick={onExpand}/>}
-        </span>
-      </div>
-      {latestFusion ? (
-        <>
-          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-            <Metric
-              label="Combined score"
-              value={latestFusion.combinedSimilarityScore.toFixed(3)}
-              sub={`${latestFusion.matchedModels}/${latestFusion.totalModels} matched`}
-              trend={latestFusion.combinedMatch ? 'up' : 'flat'}
-            />
-            <Metric
-              label="Decision rule"
-              value={`${latestFusion.majorityRequired}/${latestFusion.totalModels}`}
-              sub={latestFusion.combinedMatch ? 'majority reached' : 'majority not reached'}
-              trend={latestFusion.combinedMatch ? 'up' : 'flat'}
-            />
+  // Full stat breakdown for a single event — shown in a modal when a row in
+  // the live feed is clicked.
+  const renderEventDetail = (r) => {
+    const tone = r.decision === 'ACCEPT' ? 'var(--good)' : r.decision === 'DEEPFAKE' ? 'var(--bad)' : 'var(--warn)';
+    const scores = r.speakerModelScores ?? [];
+    const fusion = r.speakerFusion;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
+          <div>
+            <div className="label-mono" style={{ fontSize: 10, color: tone }}>{r.decision}</div>
+            <div style={{ fontSize: 24, fontWeight: 300, marginTop: 2 }}>{r.userId}</div>
           </div>
+          <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{new Date(r.createdAt).toLocaleString()}</div>
+        </div>
+        {r.message && <div style={{ fontSize: 13, color: 'var(--ink-mute)', lineHeight: 1.5 }}>{r.message}</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+          <Metric label="Similarity" value={r.similarityScore.toFixed(3)} sub="cosine" trend={r.decision === 'ACCEPT' ? 'up' : 'flat'}/>
+          <Metric label="Deepfake" value={r.deepfakeScore.toFixed(3)} sub="AASIST" trend={r.decision === 'DEEPFAKE' ? 'flat' : 'up'}/>
+          <Metric label="Centroid" value={r.centroidSimilarity.toFixed(3)} sub="vs profile" trend="flat"/>
+        </div>
+        {scores.length > 0 && (
           <div style={{ display: 'grid', gap: 8 }}>
-            {latestModelScores.map((score) => (
+            <div className="label-mono" style={{ fontSize: 10 }}>PER-MODEL SCORES</div>
+            {scores.map((score) => (
               <div key={score.modelKey} className="biovoice-model-score-row" style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-                gap: 12,
-                alignItems: 'center',
-                padding: '10px 12px',
-                borderRadius: 10,
+                display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 12, alignItems: 'center',
+                padding: '10px 12px', borderRadius: 10,
                 background: score.passedThreshold ? 'rgba(106,255,200,0.06)' : 'rgba(255,178,74,0.06)',
                 border: `1px solid ${score.passedThreshold ? 'rgba(106,255,200,0.20)' : 'rgba(255,178,74,0.20)'}`,
               }}>
                 <div>
-                  <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey]}</div>
+                  <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey] ?? score.modelKey}</div>
                   <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
                     {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
                   </div>
@@ -754,20 +747,21 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 <div className="num-mono" style={{ fontSize: 16, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
                   {score.similarityScore.toFixed(3)}
                 </div>
-                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
-                  THR {score.threshold.toFixed(2)}
-                </div>
+                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>THR {score.threshold.toFixed(2)}</div>
               </div>
             ))}
           </div>
-        </>
-      ) : (
-        <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
-          Run a verification to see the majority vote and the per-model agreement here.
-        </div>
-      )}
-    </>
-  );
+        )}
+        {fusion && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <Metric label="Combined score" value={fusion.combinedSimilarityScore.toFixed(3)} sub={`${fusion.matchedModels}/${fusion.totalModels} matched`} trend={fusion.combinedMatch ? 'up' : 'flat'}/>
+            <Metric label="Decision rule" value={`${fusion.majorityRequired}/${fusion.totalModels}`} sub={fusion.combinedMatch ? 'majority reached' : 'majority not reached'} trend={fusion.combinedMatch ? 'up' : 'flat'}/>
+          </div>
+        )}
+        {r.sessionId && <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SESSION · {r.sessionId}</div>}
+      </div>
+    );
+  };
 
   const activityBody = ({ onExpand } = {}) => (
     <>
@@ -796,7 +790,13 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
         ) : (
           activity.map((a, i) => (
-            <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
+            <ActivityRow
+              key={a.id}
+              {...a}
+              fresh={i === 0}
+              now={now}
+              onSelect={() => setSelectedEvent(results.find((r) => r.resultId === a.id) ?? null)}
+            />
           ))
         )}
       </div>
@@ -825,8 +825,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         return <div>{pipelineBody()}</div>;
       case 'constellation':
         return constellationBody({ width: Math.max(300, Math.min(w - 48, 820)), height: Math.max(260, h - 150) });
-      case 'fusion':
-        return <div style={{ display: 'grid', gap: 12 }}>{fusionBody()}</div>;
       case 'activity':
         return (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -896,12 +894,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             {constellationBody({ onExpand: () => setExpanded('constellation'), width: constellationWidth, height: constellationHeight, wrapRef: constellationRef })}
           </div>
 
-          <div className="panel" style={{ padding: '16px 18px', display: 'grid', gap: 12 }}>
-            {fusionBody({ onExpand: () => setExpanded('fusion') })}
-          </div>
-
-          {/* Activity feed — compact; the constellation above is the showpiece */}
-          <div className="panel" style={{ flex: 1, minHeight: 120, display: 'flex', flexDirection: 'column', padding: 0 }}>
+          {/* Activity feed — scrollable; click a row for the full breakdown */}
+          <div className="panel" style={{ flex: 1, minHeight: 140, display: 'flex', flexDirection: 'column', padding: 0 }}>
             {activityBody({ onExpand: () => setExpanded('activity') })}
           </div>
 
@@ -926,6 +920,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       {expanded && (
         <PanelModal title={PANEL_TITLES[expanded]} onClose={() => setExpanded(null)}>
           {(size) => renderLarge(expanded, size)}
+        </PanelModal>
+      )}
+
+      {selectedEvent && (
+        <PanelModal title="VERIFICATION DETAIL" onClose={() => setSelectedEvent(null)}>
+          {() => renderEventDetail(selectedEvent)}
         </PanelModal>
       )}
     </div>
@@ -964,7 +964,7 @@ function Metric({ label, value, sub, trend }) {
   );
 }
 
-function ActivityRow({ id, kind, name, score, ago, fresh, now, ts }) {
+function ActivityRow({ id, kind, name, score, ago, fresh, now, ts, onSelect }) {
   const colors = {
     accept: { tag: 'var(--good)', bg: 'rgba(106,255,200,0.06)' },
     reject: { tag: 'var(--warn)', bg: 'rgba(255,178,74,0.06)' },
@@ -980,11 +980,18 @@ function ActivityRow({ id, kind, name, score, ago, fresh, now, ts }) {
   };
   const elapsed = Math.floor((now - ts) / 1000);
   return (
-    <div style={{
+    <div
+      onClick={onSelect}
+      onKeyDown={onSelect ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } } : undefined}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      title={onSelect ? 'View full stats' : undefined}
+      style={{
       padding: '14px 22px', display: 'flex', alignItems: 'center', gap: 14,
       borderBottom: '1px solid var(--line)',
       background: fresh ? palette.bg : 'transparent',
       animation: fresh ? 'fadeIn 600ms ease both' : 'none',
+      cursor: onSelect ? 'pointer' : 'default',
     }}>
       <div style={{
         width: 8, height: 8, borderRadius: '50%',
