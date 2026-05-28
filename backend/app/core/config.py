@@ -117,6 +117,11 @@ class Settings:
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = _BACKEND_DIR / "models" / "aasist.pt"
+    # F4 — trained sub-classifier heads for the four forensic axes. When
+    # this file is present AcousticProbe loads it and reports
+    # provenance "trained_heads"; otherwise it falls back to the
+    # heuristic axis mapping. Produced by scripts/train_sub_classifier.py.
+    aasist_heads_path: Path = _BACKEND_DIR / "models" / "aasist_heads.pt"
     redimnet_weights_path: Path = _BACKEND_DIR / "models" / "redimnet_b5.pt"
     ecapa_savedir: Path = _BACKEND_DIR / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = _BACKEND_DIR / "models" / "wespeaker_resnet293_lm"

@@ -75,7 +75,7 @@ def build_container(settings: Settings) -> AppContainer:
     if enable_wespeaker and "wespeaker_resnet293_lm" in loaded_comparison_encoders:
         comparison_encoders["wespeaker_resnet293_lm"] = loaded_comparison_encoders["wespeaker_resnet293_lm"]
 
-    acoustic_probe = AcousticProbe()
+    acoustic_probe = AcousticProbe(heads_path=settings.aasist_heads_path)
     verification_service = VerificationService(
         store=store,
         detector=detector,
