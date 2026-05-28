@@ -1,6 +1,6 @@
 # BioVoice — Future Work
 
-Tracked backlog of planned improvements. These are **not yet implemented** — this file records the intent so the work is captured and prioritisable.
+Tracked backlog of planned improvements. The **Deployment & Infrastructure** items remain open; the **Models & Detection** and **Testing & Validation** items below are implemented.
 
 ## Deployment & Infrastructure
 
@@ -12,10 +12,10 @@ Tracked backlog of planned improvements. These are **not yet implemented** — t
 
 ## Models & Detection
 
-- [ ] **Improve AASIST** — improve the AASIST anti-spoofing model (accuracy / robustness of deepfake detection).
-- [ ] **Deepfake generation against a target voice** — generate synthetic speech targeting a specific enrolled voice, then **filter out / discard candidates that don't actually match the target**. Prefer generating many candidates and keeping only the close matches.
-- [ ] **Embed Grad-CAM heat zones into the vector space** — after producing a Grad-CAM overlay, take the highlighted heat zones, embed them, and render them inside the existing vector-space visualization (the Dashboard embedding-constellation component) so we can see how close those regions sit to the speaker.
+- [x] **Improve AASIST** — improve the AASIST anti-spoofing model (accuracy / robustness of deepfake detection).
+- [x] **Deepfake generation against a target voice** — generate synthetic speech targeting a specific enrolled voice, then **filter out / discard candidates that don't actually match the target**. Prefer generating many candidates and keeping only the close matches.
+- [x] **Embed Grad-CAM heat zones into the vector space** — after producing a Grad-CAM overlay, take the highlighted heat zones, embed them, and render them inside the existing vector-space visualization (the Dashboard embedding-constellation component) so we can see how close those regions sit to the speaker.
 
 ## Testing & Validation
 
-- [ ] **Add comprehensive tests + validation reports** — expand test coverage substantially, generate validation reports, and save them in the new `/reports` directory.
+- [x] **Add comprehensive tests + validation reports** — expand test coverage substantially, generate validation reports, and save them in the new `/reports` directory.
