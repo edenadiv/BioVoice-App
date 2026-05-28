@@ -355,7 +355,6 @@ const PANEL_TITLES = {
   pipeline: "INFERENCE PIPELINE",
   constellation: "VOICE EMBEDDING SPACE",
   fusion: "FUSION DECISION",
-  counters: "SESSION COUNTERS",
   activity: "LIVE EVENT FEED",
 };
 
@@ -455,9 +454,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     }
   }, [profiles, selectedProfile]);
 
-  const acceptedCount = useCounter(verifyCount, 1400, [verifyCount]);
-  const blockedCount = useCounter(threatCount, 1400, [threatCount]);
-
   // V3 — real ReDimNet embeddings projected to 3-d for the constellation.
   const projection = useEmbeddingProjection(embeddingModelKey, profiles.length);
   // V3 — live mic embedding via /embed; toggleable from the Settings panel.
@@ -474,8 +470,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     : ["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"];
   const spectrogramWidth = Math.max(300, Math.floor((spectrogramSize.width || 860) - 52));
   const spectrogramHeight = Math.max(220, Math.min(340, Math.floor(spectrogramWidth * 0.38)));
-  const constellationWidth = Math.max(280, Math.floor(Math.min(constellationSize.width || 420, 520)));
-  const constellationHeight = Math.max(240, Math.min(340, Math.floor(constellationWidth * 0.72)));
+  const constellationWidth = Math.max(320, Math.min(Math.floor(constellationSize.width || 480), 640));
+  const constellationHeight = Math.max(300, Math.min(Math.floor(constellationSize.height || 360), 600));
 
   // --------------------------------------------------------------------------
   // Panel bodies — defined once and reused by both the inline panel and the
@@ -662,7 +658,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       <div
         ref={wrapRef}
         className="biovoice-constellation-wrap"
-        style={{ display: 'grid', placeItems: 'center', width: '100%', minHeight: 280 }}
+        style={{ flex: 1, display: 'grid', placeItems: 'center', width: '100%', minHeight: 0 }}
       >
         <EmbeddingConstellation
           width={width}
@@ -773,25 +769,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     </>
   );
 
-  const countersBody = () => (
-    <>
-      <div className="panel" style={{ padding: '14px 18px' }}>
-        <div className="label-mono" style={{ fontSize: 9 }}>VERIFIED TODAY</div>
-        <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--teal-2)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
-          {Math.floor(acceptedCount).toLocaleString()}
-        </div>
-        <div className="label-mono" style={{ fontSize: 8, color: 'var(--good)', marginTop: 2 }}>+12% VS YESTERDAY</div>
-      </div>
-      <div className="panel" style={{ padding: '14px 18px', border: '1px solid rgba(255,85,119,0.25)', boxShadow: '0 0 30px rgba(255,85,119,0.06)' }}>
-        <div className="label-mono" style={{ fontSize: 9 }}>DEEPFAKES BLOCKED</div>
-        <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--bad)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
-          {Math.floor(blockedCount).toLocaleString()}
-        </div>
-        <div className="label-mono" style={{ fontSize: 8, color: 'var(--bad)', marginTop: 2 }}>3 IN LAST HOUR</div>
-      </div>
-    </>
-  );
-
   const activityBody = ({ onExpand } = {}) => (
     <>
       <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -850,12 +827,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         return constellationBody({ width: Math.max(300, Math.min(w - 48, 820)), height: Math.max(260, h - 150) });
       case 'fusion':
         return <div style={{ display: 'grid', gap: 12 }}>{fusionBody()}</div>;
-      case 'counters':
-        return (
-          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            {countersBody()}
-          </div>
-        );
       case 'activity':
         return (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -872,7 +843,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Operator console" screenName="CONSOLE"/>
       <AmbientField count={70}/>
 
-      <div className="biovoice-page-content biovoice-console-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(320px, 400px) minmax(0, 1fr) minmax(320px, 460px)', gap: 24, zIndex: 2 }}>
+      <div className="biovoice-page-content biovoice-console-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: 'minmax(320px, 400px) minmax(0, 1fr) minmax(360px, 540px)', gap: 24, zIndex: 2 }}>
 
         {/* ============ LEFT: Identity check ============ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
@@ -920,8 +891,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0, minWidth: 0 }}>
           <PanelTitle eyebrow="03 · EMBEDDING SPACE" title="Voice fingerprints · 192-D"/>
 
-          {/* Embedding Constellation — the showpiece */}
-          <div className="panel outline-glow" style={{ padding: '18px 18px 14px', position: 'relative', overflow: 'hidden' }}>
+          {/* Embedding Constellation — the showpiece; takes the lion's share */}
+          <div className="panel outline-glow" style={{ flex: 2, minHeight: 240, display: 'flex', flexDirection: 'column', padding: '18px 18px 14px', position: 'relative', overflow: 'hidden' }}>
             {constellationBody({ onExpand: () => setExpanded('constellation'), width: constellationWidth, height: constellationHeight, wrapRef: constellationRef })}
           </div>
 
@@ -929,16 +900,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             {fusionBody({ onExpand: () => setExpanded('fusion') })}
           </div>
 
-          {/* Compact counters */}
-          <div className="biovoice-console-counters" style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {countersBody()}
-            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 3 }}>
-              <ExpandButton onClick={() => setExpanded('counters')}/>
-            </div>
-          </div>
-
-          {/* Activity feed */}
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: 0 }}>
+          {/* Activity feed — compact; the constellation above is the showpiece */}
+          <div className="panel" style={{ flex: 1, minHeight: 120, display: 'flex', flexDirection: 'column', padding: 0 }}>
             {activityBody({ onExpand: () => setExpanded('activity') })}
           </div>
 
