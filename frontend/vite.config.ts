@@ -18,7 +18,20 @@ const API_ROUTES_DENYLIST = [
   /^\/results$/,
 ];
 
+// Dev + preview serve the SPA on :5173 while the FastAPI backend runs on
+// :8000. In production FastAPI serves both from one origin, so the app
+// uses relative API paths. To make those same relative paths reach the
+// backend across the two-port dev/preview setup, proxy the backend route
+// prefixes through to :8000 (no CORS, no VITE_API_BASE_URL needed).
+const BACKEND_TARGET = process.env.VITE_DEV_BACKEND ?? "http://127.0.0.1:8000";
+const API_PROXY = Object.fromEntries(
+  ["/health", "/readyz", "/metrics", "/users", "/enroll", "/verify", "/identify", "/embed", "/explain", "/spoof", "/results"]
+    .map((path) => [path, { target: BACKEND_TARGET, changeOrigin: true }]),
+);
+
 export default defineConfig({
+  server: { proxy: API_PROXY },
+  preview: { proxy: API_PROXY },
   plugins: [
     react(),
     VitePWA({

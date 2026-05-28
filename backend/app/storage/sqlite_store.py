@@ -24,7 +24,14 @@ class SQLiteStore:
         self._lock = Lock()
         self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA foreign_keys = ON")
+        # FK enforcement is intentionally OFF. `soft_delete_speaker` removes the
+        # user row but preserves verification history, leaving history rows that
+        # reference the now-absent user — an orphan the current (post-auth-strip)
+        # schema allows by declaring no foreign keys. Legacy DBs created before
+        # the strip still carry FK clauses (reference_samples / verification_results
+        # / sessions → users); enforcing them here would make every delete of an
+        # enrolled user raise "FOREIGN KEY constraint failed". Re-enabling this
+        # requires ON DELETE handling on those tables first.
         self._connection.execute("PRAGMA journal_mode = WAL")
         self._ensure_schema()
 
