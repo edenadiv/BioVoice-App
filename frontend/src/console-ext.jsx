@@ -86,14 +86,23 @@ function EmbeddingConstellation({
   matchId = null,
   loading = false,
   recenterSignal = 0,
+  // Grad-CAM heat-zone embeddings: [{ point:[x,y,z], label, peak }], already
+  // PCA-projected in the same basis as the profiles. Rendered as magenta
+  // squares with a dashed line to `heatZoneTargetId`'s centroid.
+  heatZonePoints = null,
+  heatZoneTargetId = null,
 }) {
   const ref = useRef();
   const matchRef = useRef(matchId);
   const liveRef = useRef(livePoint);
   const queryRef = useRef(queryPoint);
+  const heatZonesRef = useRef(heatZonePoints);
+  const heatTargetRef = useRef(heatZoneTargetId);
   matchRef.current = matchId;
   liveRef.current = livePoint;
   queryRef.current = queryPoint;
+  heatZonesRef.current = heatZonePoints;
+  heatTargetRef.current = heatZoneTargetId;
 
   // Free-rotate the sphere by dragging; `auto` is the gentle idle spin.
   // yaw = turn (around the vertical axis), pitch = roll (tilt up/down).
@@ -363,6 +372,35 @@ function EmbeddingConstellation({
         ctx.fillStyle = '#ffcf7a';
         ctx.font = '600 9px "JetBrains Mono", monospace';
         ctx.fillText('QUERY', qp.x + 9, qp.y - 8);
+      }
+
+      // Grad-CAM heat zones — salient audio regions embedded + projected
+      // into this space, so you can see how close each region sits to the
+      // matched speaker. Magenta squares; dashed link to the match centroid.
+      const zones = heatZonesRef.current;
+      if (zones && zones.length) {
+        const targetId = heatTargetRef.current;
+        const target = targetId ? centers.find((c) => c.id === targetId) : null;
+        const tp = target ? project(target.x, target.y, target.z) : null;
+        zones.forEach((hz) => {
+          if (!hz || !hz.point) return;
+          const zp = project(hz.point[0] * scale, hz.point[1] * scale, hz.point[2] * scale);
+          if (tp) {
+            ctx.strokeStyle = `rgba(214,124,255,${0.22 + 0.22 * Math.sin(t * 4)})`;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 3]);
+            ctx.beginPath();
+            ctx.moveTo(zp.x, zp.y); ctx.lineTo(tp.x, tp.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          const peak = typeof hz.peak === 'number' ? hz.peak : 0.5;
+          const sz = (3 + 2 * peak) * Math.max(0.6, zp.scale);
+          ctx.shadowBlur = 8; ctx.shadowColor = '#d67cff';
+          ctx.fillStyle = `rgba(214,124,255,${0.5 + 0.4 * peak})`;
+          ctx.fillRect(zp.x - sz, zp.y - sz, sz * 2, sz * 2);
+          ctx.shadowBlur = 0;
+        });
       }
 
       // Empty / loading state.
