@@ -31,7 +31,7 @@ def test_ecapa_loader_fails_cleanly_without_optional_dependency(monkeypatch: pyt
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr("builtins.__import__", fake_import)
-    with pytest.raises(RuntimeError, match="SpeechBrain is not installed"):
+    with pytest.raises(RuntimeError, match="SpeechBrain unavailable"):
         EcapaSpeakerEncoder()
 
 
@@ -49,5 +49,8 @@ def test_wespeaker_loader_fails_cleanly_without_optional_dependency(monkeypatch:
 
 
 def test_wespeaker_loader_reports_missing_checkpoint():
+    # Reaching the checkpoint-missing branch requires onnxruntime to import
+    # first; skip when the optional dep is absent (e.g. a slim dev venv).
+    pytest.importorskip("onnxruntime")
     with pytest.raises(RuntimeError, match="ONNX checkpoint missing"):
         WeSpeakerResNet293SpeakerEncoder(model_dir=Path("backend/models/wespeaker_missing"))
