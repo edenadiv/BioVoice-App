@@ -1,7 +1,9 @@
 # Packaging design — Web + PWA + Desktop installer
 
-> **Status**: design approved 2026-05-12
-> **Releases**: v1.1.0 (W + PWA) → v1.2.0 (D bundled installer)
+> ⚠️ **DESKTOP INSTALLER CANCELLED — 2026-05-28.** BioVoice ships as a **web app + installable PWA only**. The "D — Desktop bundled installer" deliverable below (Tauri + PyInstaller, planned for v1.2.0) is **not being built**. The web (W) + PWA sections shipped at v1.1.0 and remain accurate; the desktop sections are retained for design-history reference only.
+>
+> **Status**: design approved 2026-05-12; desktop track cancelled 2026-05-28
+> **Releases**: v1.1.0 (W + PWA) ✅ shipped · ~~v1.2.0 (D bundled installer)~~ cancelled
 > **Author**: Claude pair with Eden Adiv
 
 ---
@@ -127,7 +129,9 @@ The single load-bearing refactor is **W's same-origin move**: drop `VITE_API_BAS
 - Manual: same on Android Chrome (chrome menu → Install app).
 - Service worker doesn't cache `/users/*`, `/verify`, `/embed`, etc. — confirmed via DevTools Network panel during a verify (cache miss).
 
-### D — Desktop bundled installer (v1.2.0, ~1–2 weeks)
+### D — Desktop bundled installer (v1.2.0, ~1–2 weeks) — ❌ CANCELLED 2026-05-28
+
+> This entire deliverable was cancelled. BioVoice ships as a web app + PWA only. The rest of this section is retained for design-history reference; none of it is being implemented.
 
 **Goal**: one downloadable per OS. Double-click to install. Double-click to launch. Works offline. ML inference happens locally.
 

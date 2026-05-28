@@ -67,7 +67,6 @@ Run the end-to-end smoke against a live backend:
 ## What's planned for v1.1
 
 - **XTTS-v2 voice cloning** for the Deepfake Lab. The current macOS `say` fallback works but doesn't always trigger the AASIST detector — XTTS clones do. See `Plan.md` §S2.
-- **Tauri native installer** (`.dmg` / `.msi` / `.deb`). Removes the Docker prerequisite for the kiosk operator. See `Plan.md` §S7.
 - **Postgres storage**, multi-instance HA. See `docs/postgres_migration.md`.
 - **Trained sub-classifier heads** for AASIST sub-axis scoring. Currently heuristic.
 

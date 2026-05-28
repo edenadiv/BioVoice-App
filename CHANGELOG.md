@@ -62,7 +62,7 @@ Multi-engine TTS for DeepfakeLab. The "ATTACK MODEL" picker is now a real engine
 
 Single deployable Docker image + installable PWA. The kiosk is now a one-binary deploy to any cloud (Fly / Render / Railway / VPS), and any modern browser can install it as a standalone "app" without an app-store review.
 
-Design spec: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). Covers v1.1.0 (this release) + v1.2.0 (desktop bundled installer, follow-up).
+Design spec: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). (The desktop bundled installer it once proposed as a v1.2.0 follow-up was cancelled 2026-05-28 — BioVoice ships as a web app + PWA only.)
 
 ### Added
 
@@ -253,7 +253,6 @@ First shipping release. Single-kiosk operator-driven voice-biometric authenticat
 ### What's planned for v1.1
 
 - **S2** — XTTS-v2 voice cloning (real attack against AASIST).
-- **S7** — Tauri native installer (`.dmg` / `.msi` / `.deb`); no Docker prerequisite for the operator.
 - Trained sub-classifier heads.
 - Postgres storage for multi-instance HA.
 - Cross-browser sign-off completion.

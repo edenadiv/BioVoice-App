@@ -3,13 +3,13 @@
 > **Status**: drafted 2026-05-12 · supervisor-driven · branch `main`
 > **Supersedes**: the v1.0.3 visualisations plan (closed; V0–V6 shipped at tag `v1.0.3`).
 > **Goal**: produce a single Docker image deployable to any cloud (FastAPI serves both API + the built React UI), and make the kiosk installable as a Progressive Web App from any browser.
-> **Design spec**: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). Covers v1.1.0 (this plan) + v1.2.0 (desktop bundled installer, follow-up plan).
+> **Design spec**: [`docs/superpowers/specs/2026-05-12-packaging-design.md`](docs/superpowers/specs/2026-05-12-packaging-design.md). Covers v1.1.0 (this plan). The desktop bundled installer (Tauri + PyInstaller) it once proposed for v1.2.0 was **cancelled 2026-05-28** — BioVoice ships as a web app + installable PWA only.
 
 ---
 
 ## Context
 
-After v1.0.3, the kiosk renders real ML data end-to-end but only ships as a local-dev experience: `pnpm dev` + `uvicorn` on two ports, `docker-compose.yml` for single-host staging only. The user-facing ask is "create the native installer. i want also web version and also app". The packaging spec decomposed that into three deliverables — the web image and the PWA-installable surface land in v1.1.0; the desktop bundled installer ships in v1.2.0 because PyInstaller bundling of torch is the only ~2-week effort in the stack.
+After v1.0.3, the kiosk renders real ML data end-to-end but only ships as a local-dev experience: `pnpm dev` + `uvicorn` on two ports, `docker-compose.yml` for single-host staging only. The user-facing ask is "create the native installer. i want also web version and also app". The packaging spec originally decomposed that into three deliverables — web image, PWA-installable surface, and a desktop bundled installer. The first two landed in v1.1.0; the desktop installer (Tauri + PyInstaller) was **cancelled 2026-05-28**: BioVoice ships as a web app + installable PWA only, which already satisfies the "web version and app" ask without the ~2-week PyInstaller-bundling cost.
 
 This plan covers v1.1.0 only.
 
@@ -196,9 +196,7 @@ Already done; this file IS Plan.md.
 
 ## Out of scope
 
-- Code signing for desktop installers — v1.2.0
-- PyInstaller-bundled Python backend — v1.2.0
-- Tauri desktop wrapper — v1.2.0
+- Desktop bundled installer (Tauri wrapper + PyInstaller-bundled Python backend + code signing) — **cancelled 2026-05-28**; web app + PWA only
 - Capacitor / native mobile — explicitly chose PWA
 - Hosted deployment — operator deploys the image
 - Postgres migration — SQLite is fine

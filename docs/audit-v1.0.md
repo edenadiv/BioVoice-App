@@ -228,7 +228,7 @@ This audit is harsh. To balance:
 - ✅ **Web version** — top-level 3-stage `Dockerfile` produces a 1.66 GB image with the FastAPI backend + bundled React UI + ML weights baked in. Deploys to Fly / Render / Railway / VPS via `docs/deployment.md`. Operator deploys; Anthropic does not host.
 - ✅ **PWA install** — `vite-plugin-pwa` generates manifest + service worker; iOS Safari + Android Chrome + desktop browsers can install it as a standalone app. Lighthouse PWA: 0.88 (only `content-width` fails — intentional for a fixed-stage kiosk).
 
-Audit findings F-1..F-8 status unchanged. Desktop bundled installer (Tauri + PyInstaller) ships in v1.2.0 per `docs/superpowers/specs/2026-05-12-packaging-design.md`.
+Audit findings F-1..F-8 status unchanged. A desktop bundled installer (Tauri + PyInstaller) was once planned for v1.2.0 but was **cancelled 2026-05-28** — BioVoice ships as a web app + installable PWA only.
 
 ## Update — v1.0.3 (2026-05-12)
 
