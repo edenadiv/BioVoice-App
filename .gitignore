@@ -44,3 +44,4 @@ XTTS-v2/mel_stats.pth
 XTTS-v2/model.pth
 XTTS-v2/speakers_xtts.pth
 XTTS-v2/vocab.json
+backend/models/ecapa_voxceleb/

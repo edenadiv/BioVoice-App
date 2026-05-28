@@ -49,6 +49,15 @@ ECAPA_SIMILARITY_THRESHOLD=0.75
 WESPEAKER_SIMILARITY_THRESHOLD=0.75
 ```
 
+Model assets:
+
+- `WeSpeaker ResNet293` is carried in the repo via Git LFS under `backend/models/wespeaker_resnet293_lm/`
+- `ECAPA` is not committed as machine-local symlinks; populate it locally with:
+
+```powershell
+.\.venv\Scripts\python.exe .\backend\scripts\setup_ecapa.py
+```
+
 Then run the backend:
 
 ```powershell
