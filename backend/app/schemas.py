@@ -177,6 +177,50 @@ class SpoofTestResponse(BaseModel):
     model_provenance: ModelProvenance | None = None
 
 
+class SpoofBatchRequest(BaseModel):
+    """Forge many clones of an enrolled target voice and keep only the
+    candidates that actually resemble the target. The DeepfakeLab "Batch
+    Forge" mode posts this: the backend generates `candidates_per_text`
+    clones for each text, scores each against the target's enrolled
+    speaker centroid, and discards those below `keep_threshold`."""
+
+    target_user_id: str
+    texts: list[str] = Field(min_length=1)
+    candidates_per_text: int = Field(default=4, ge=1, le=32)
+    engine: str | None = None
+    voice: str | None = None
+    language: str = "en"
+    # Defaults to the service's similarity_threshold when omitted.
+    keep_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    run_aasist: bool = True
+
+
+class SpoofBatchCandidate(BaseModel):
+    index: int
+    text: str
+    similarity_to_target: float = Field(ge=0.0, le=1.0)
+    kept: bool
+    deepfake_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    decision: SpoofDecision | None = None
+    engine_id: str
+    voice_id: str | None = None
+    file_name: str
+    # base64-encoded WAV — only populated for kept candidates so the
+    # response stays small when most candidates are discarded.
+    audio_b64: str | None = None
+
+
+class SpoofBatchResponse(BaseModel):
+    target_user_id: str
+    centroid_present: bool
+    keep_threshold: float = Field(ge=0.0, le=1.0)
+    requested: int = Field(ge=0)
+    generated: int = Field(ge=0)
+    kept: int = Field(ge=0)
+    candidates: list[SpoofBatchCandidate] = Field(default_factory=list)
+    model_provenance: ModelProvenance | None = None
+
+
 class VerificationResponse(BaseModel):
     result_id: str
     user_id: str

@@ -20,6 +20,23 @@ export async function decodeFileToBuffer(file: Blob): Promise<AudioBuffer> {
   }
 }
 
+// Extract the [startMs, endMs] slice of an AudioBuffer's first channel as a
+// Float32Array at the buffer's native sample rate. Used to embed a Grad-CAM
+// salient region via /embed and project it into the voice-space constellation.
+// Mirrors the offset/duration math in playSegment.
+export function sliceBufferToFloat32(
+  buffer: Pick<AudioBuffer, "sampleRate" | "getChannelData">,
+  startMs: number,
+  endMs: number,
+): Float32Array {
+  const sr = buffer.sampleRate;
+  const channel = buffer.getChannelData(0);
+  const startSample = Math.max(0, Math.floor((startMs / 1000) * sr));
+  const endSample = Math.min(channel.length, Math.ceil((endMs / 1000) * sr));
+  if (endSample <= startSample) return new Float32Array(0);
+  return channel.slice(startSample, endSample);
+}
+
 export type SalientPlayback = { stop: () => void; promise: Promise<void> };
 
 // `onTick` reports the current playhead position in milliseconds along the

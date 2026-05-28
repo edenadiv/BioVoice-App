@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
-import { explainAudio, type ExplainResult, type ModelCAM, type ExplainModelKey } from "../lib/api";
-import { decodeFileToBuffer, playSalient, playSegment, type SalientPlayback } from "../lib/explainAudio";
+import type { CSSProperties, FC } from "react";
+import { embedAudio, explainAudio, type ExplainResult, type ModelCAM, type ExplainModelKey } from "../lib/api";
+import { decodeFileToBuffer, playSalient, playSegment, sliceBufferToFloat32, type SalientPlayback } from "../lib/explainAudio";
+import { useEmbeddingProjection } from "../hooks/useEmbeddingProjection";
+import { projectPCA3 } from "../lib/pca";
+// EmbeddingConstellation is the Dashboard's voice-space visual (untyped .jsx);
+// its props infer as `null` from JS defaults, so type it loosely here.
+import { EmbeddingConstellation as EmbeddingConstellationImpl } from "../console-ext.jsx";
+const EmbeddingConstellation = EmbeddingConstellationImpl as unknown as FC<Record<string, unknown>>;
+
+type HeatZonePoint = { point: [number, number, number]; label: string; peak: number };
 
 interface ExplainTabProps {
   wavFile: File | Blob | null;
@@ -39,6 +47,10 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
   const playbackRef = useRef<SalientPlayback | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
+  const [heatZones, setHeatZones] = useState<HeatZonePoint[]>([]);
+  // Same enrolled embeddings + deterministic PCA basis the Console
+  // constellation uses, so heat-zone points share its coordinate system.
+  const projection = useEmbeddingProjection("redimnet_b5", matchUserId ?? "");
 
   useEffect(() => {
     if (!open || !wavFile) return;
@@ -74,6 +86,43 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
       playbackRef.current?.stop();
     };
   }, []);
+
+  // Slice the active model's salient segments out of the decoded clip,
+  // embed each via /embed, and project into the constellation's PCA basis.
+  useEffect(() => {
+    const basis = projection.basis;
+    const buffer = bufferRef.current;
+    if (!open || !result || !basis || !buffer) {
+      setHeatZones([]);
+      return;
+    }
+    const cam = result.cams.find((c) => c.modelKey === activeModel) ?? result.cams[0] ?? null;
+    if (!cam || cam.salientSegments.length === 0) {
+      setHeatZones([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      // Cap the round-trips; skip slices too short for the encoder's VAD.
+      const segs = cam.salientSegments.filter((s) => s.endMs - s.startMs >= 250).slice(0, 8);
+      const zones: HeatZonePoint[] = [];
+      for (const s of segs) {
+        try {
+          const samples = sliceBufferToFloat32(buffer, s.startMs, s.endMs);
+          if (samples.length < 1) continue;
+          const res = await embedAudio(samples, buffer.sampleRate, "redimnet_b5");
+          if (cancelled) return;
+          zones.push({ point: projectPCA3(res.embedding, basis), label: `${(s.startMs / 1000).toFixed(1)}s`, peak: s.peak });
+        } catch {
+          // Short / silent slice → /embed 400. Skip it rather than fail the overlay.
+        }
+      }
+      if (!cancelled) setHeatZones(zones);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, result, activeModel, projection.basis, matchUserId]);
 
   const startPlayback = useCallback((key: string, pb: SalientPlayback) => {
     playbackRef.current?.stop();
@@ -234,6 +283,26 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
             </ul>
           )}
         </>
+      )}
+
+      {result && (projection.profiles.length > 0 || heatZones.length > 0) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
+            Voice space · heat zones{matchUserId ? ` vs ${matchUserId}` : ""}
+          </div>
+          <EmbeddingConstellation
+            width={Math.max(280, panelWidth - 28)}
+            height={260}
+            projectedProfiles={projection.profiles}
+            heatZonePoints={heatZones}
+            heatZoneTargetId={matchUserId ?? null}
+            matchId={matchUserId ?? null}
+            loading={projection.loading}
+          />
+          <div style={mutedStyle}>
+            {heatZones.length} heat-zone embedding{heatZones.length === 1 ? "" : "s"} · magenta = salient region · dashed link → {matchUserId ?? "match"}
+          </div>
+        </div>
       )}
 
       {result && cams.length === 0 && <div style={mutedStyle}>No explainable models loaded.</div>}

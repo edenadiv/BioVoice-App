@@ -213,9 +213,9 @@ def main() -> int:
 
     audio = AudioService(target_sample_rate=settings.sample_rate)
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
-    # Heuristic mode (no trained heads) — the heads_path setting was
-    # removed in the strip; the trained-heads path is a v1.1 follow-up.
-    probe = AcousticProbe()
+    # Trained-head mode when models/aasist_heads.pt is present; otherwise
+    # AcousticProbe falls back to the heuristic axis mapping.
+    probe = AcousticProbe(heads_path=settings.aasist_heads_path)
 
     results: dict = {
         "dataset": args.dataset_name,

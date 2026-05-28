@@ -19,6 +19,7 @@ import type {
   ModelCAM,
   ModelProvenance,
   Speaker,
+  SpoofBatchResult,
   SpoofDecision,
   SpoofEngines,
   SpoofGenerationResult,
@@ -513,6 +514,93 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     analysisDetails: toAnalysisDetails(response.analysis_details),
     modelProvenance: toModelProvenance(response.model_provenance),
   };
+}
+
+type SpoofBatchCandidateResponse = {
+  index: number;
+  text: string;
+  similarity_to_target: number;
+  kept: boolean;
+  deepfake_score: number | null;
+  decision: SpoofDecision | null;
+  engine_id: string;
+  voice_id: string | null;
+  file_name: string;
+  audio_b64: string | null;
+};
+type SpoofBatchResponse = {
+  target_user_id: string;
+  centroid_present: boolean;
+  keep_threshold: number;
+  requested: number;
+  generated: number;
+  kept: number;
+  candidates: SpoofBatchCandidateResponse[];
+  model_provenance?: ModelProvenanceResponse | null;
+};
+
+/**
+ * Forge many clones of an enrolled target voice and keep only those that
+ * resemble the target. `texts` are the utterance variations; the backend
+ * generates `candidatesPerText` clones per text, scores each against the
+ * target centroid, and discards those below `keepThreshold`.
+ */
+export async function generateSpoofBatch(payload: {
+  targetUserId: string;
+  texts: string[];
+  candidatesPerText?: number;
+  engine?: string;
+  voice?: string;
+  language?: string;
+  keepThreshold?: number;
+  runAasist?: boolean;
+}): Promise<SpoofBatchResult> {
+  const body: Record<string, unknown> = {
+    target_user_id: payload.targetUserId,
+    texts: payload.texts,
+  };
+  if (payload.candidatesPerText != null) body.candidates_per_text = payload.candidatesPerText;
+  if (payload.engine) body.engine = payload.engine;
+  if (payload.voice) body.voice = payload.voice;
+  if (payload.language) body.language = payload.language;
+  if (payload.keepThreshold != null) body.keep_threshold = payload.keepThreshold;
+  if (payload.runAasist != null) body.run_aasist = payload.runAasist;
+
+  const response = await request<SpoofBatchResponse>("/spoof/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  return {
+    targetUserId: response.target_user_id,
+    centroidPresent: response.centroid_present,
+    keepThreshold: response.keep_threshold,
+    requested: response.requested,
+    generated: response.generated,
+    kept: response.kept,
+    candidates: response.candidates.map((c) => ({
+      index: c.index,
+      text: c.text,
+      similarityToTarget: c.similarity_to_target,
+      kept: c.kept,
+      deepfakeScore: c.deepfake_score,
+      decision: c.decision,
+      engineId: c.engine_id,
+      voiceId: c.voice_id,
+      fileName: c.file_name,
+      audioB64: c.audio_b64,
+    })),
+    modelProvenance: toModelProvenance(response.model_provenance),
+  };
+}
+
+/** Decode a base64 WAV (e.g. a kept batch candidate) into an object URL. */
+export function wavUrlFromBase64(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
 }
 
 // -- Explain (Grad-CAM) -------------------------------------------------------

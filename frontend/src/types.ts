@@ -124,6 +124,31 @@ export type SpoofTestResult = {
   modelProvenance: ModelProvenance | null;
 };
 
+export type SpoofBatchCandidate = {
+  index: number;
+  text: string;
+  similarityToTarget: number;
+  kept: boolean;
+  deepfakeScore: number | null;
+  decision: SpoofDecision | null;
+  engineId: string;
+  voiceId: string | null;
+  fileName: string;
+  /** base64-encoded WAV — only present for kept candidates. */
+  audioB64: string | null;
+};
+
+export type SpoofBatchResult = {
+  targetUserId: string;
+  centroidPresent: boolean;
+  keepThreshold: number;
+  requested: number;
+  generated: number;
+  kept: number;
+  candidates: SpoofBatchCandidate[];
+  modelProvenance: ModelProvenance | null;
+};
+
 export type IdentificationMatch = {
   userId: string;
   similarityScore: number;

@@ -1,0 +1,7 @@
+path,voice_naturalness,spectral_consistency,temporal_patterns,artifact_detection
+bona_0.wav,0.85,0.82,0.80,0.85
+bona_1.wav,0.85,0.82,0.80,0.85
+bona_2.wav,0.85,0.82,0.80,0.85
+spoof_0.wav,0.20,0.18,0.25,0.20
+spoof_1.wav,0.20,0.18,0.25,0.20
+spoof_2.wav,0.20,0.18,0.25,0.20
