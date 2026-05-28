@@ -618,22 +618,24 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>1 kHz</span><span>500 Hz</span>
         </div>
         {micState !== 'live' && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'grid',
-            placeItems: 'center',
-            pointerEvents: 'none',
-          }}>
+          <div
+            onClick={micStart}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); micStart(); } }}
+            role="button"
+            tabIndex={0}
+            title="Enable microphone"
+            style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
+          >
             <div style={{
-              padding: '10px 14px',
-              borderRadius: 10,
-              background: 'rgba(4,7,13,0.72)',
-              border: '1px solid rgba(125,200,255,0.12)',
-              color: 'var(--ink-soft)',
+              padding: '14px 20px',
+              borderRadius: 12,
+              background: 'rgba(4,7,13,0.82)',
+              border: '1px solid rgba(126,240,255,0.4)',
+              color: 'var(--ink)', textAlign: 'center',
             }}>
               <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
-              <div style={{ fontSize: 12, marginTop: 6 }}>Grant mic access to stream the spectrogram.</div>
+              <div style={{ fontSize: 14, marginTop: 8, fontWeight: 600 }}>▶ Tap to enable live mic</div>
+              <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 5 }}>grant microphone access to stream the spectrogram</div>
             </div>
           </div>
         )}
@@ -895,8 +897,13 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
           <PanelTitle eyebrow="01 · IDENTITY" title="Verify a speaker"/>
 
-          {/* Mic visualizer */}
-          <div className="panel outline-glow" style={{ position: 'relative', overflow: 'hidden', minHeight: 280, display: 'grid', placeItems: 'center', padding: 24 }}>
+          {/* Mic visualizer — tap to enable the live mic when in standby */}
+          <div
+            className="panel outline-glow"
+            onClick={micState !== 'live' ? micStart : undefined}
+            title={micState !== 'live' ? 'Tap to enable live mic' : undefined}
+            style={{ position: 'relative', overflow: 'hidden', minHeight: 280, display: 'grid', placeItems: 'center', padding: 24, cursor: micState !== 'live' ? 'pointer' : 'default' }}
+          >
             {orbBody({ onExpand: () => setExpanded('orb') })}
           </div>
 
