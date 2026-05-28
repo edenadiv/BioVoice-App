@@ -27,6 +27,7 @@ import {
   type CSSProperties,
 } from "react";
 import { enrollSpeaker, type EnrollResult } from "../lib/api";
+import { InfoButton } from "./InfoButton";
 import {
   decodeAudioFileToWav,
   listAudioInputs,
@@ -245,7 +246,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
         {/* Header */}
         <div style={headerStyle}>
           <div>
-            <div className="label-mono" style={{ fontSize: 14, color: "var(--teal-2)" }}>NEW PROFILE</div>
+            <div className="label-mono" style={{ fontSize: 14, color: "var(--teal-2)", display: "inline-flex", alignItems: "center", gap: 8 }}>NEW PROFILE <InfoButton k="enroll.modal" /></div>
             <div style={{ fontSize: 35, fontWeight: 200, marginTop: 6 }}>Enrol a voice</div>
             <div style={{ fontSize: 16, color: "var(--ink-mute)", marginTop: 6, maxWidth: 520 }}>
               Capture or upload as many samples as you like. The backend

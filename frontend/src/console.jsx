@@ -10,6 +10,7 @@ import { getReady } from "./lib/api";
 import { useEmbeddingProjection } from "./hooks/useEmbeddingProjection";
 import { useLiveEmbedding } from "./hooks/useLiveEmbedding";
 import { projectPCA3 } from "./lib/pca";
+import { InfoButton } from "./components/InfoButton";
 
 const SPEAKER_MODEL_LABELS = {
   redimnet_b5: "ReDimNet B5",
@@ -532,6 +533,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="num-mono" style={{ fontSize: 14, color: 'var(--ink-soft)' }}>16 KHZ</span>
+          <InfoButton k="console.orb"/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -547,6 +549,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <span className="label-mono" style={{ fontSize: 13 }}>ENROLLED PROFILE · CHOOSE ONE</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="num-mono" style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
+          <InfoButton k="console.profiles"/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -601,6 +604,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
           <span className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>80 BANDS · 0.5–8 K HZ</span>
           <LivePulse size={8}/>
+          <InfoButton k="console.melspec"/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </div>
       </div>
@@ -649,6 +653,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <span className="label-mono" style={{ fontSize: 13 }}>INFERENCE PIPELINE · IDLE</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="num-mono" style={{ fontSize: 13, color: 'var(--good)' }}>READY</span>
+          <InfoButton k="console.pipeline"/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -698,6 +703,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           {projection.error && (
             <span className="label-mono" style={{ fontSize: 11, color: 'var(--bad)' }}>OFFLINE</span>
           )}
+          <InfoButton k="console.embedding"/>
           <RecenterButton onClick={() => setRecenterSignal((s) => s + 1)}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
@@ -819,6 +825,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <span className="label-mono" style={{ fontSize: 13 }}>LIVE EVENT FEED</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <LivePulse size={8}/>
+          <InfoButton k="console.eventfeed"/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -895,7 +902,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
         {/* ============ LEFT: Identity check ============ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
-          <PanelTitle eyebrow="01 · IDENTITY" title="Verify a speaker"/>
+          <PanelTitle eyebrow="01 · IDENTITY" title="Verify a speaker" infoKey="console.verify"/>
 
           {/* Mic visualizer — tap to enable the live mic when in standby */}
           <div
@@ -995,11 +1002,14 @@ const kbdStyle = {
   color: 'var(--ink)',
 };
 
-function PanelTitle({ eyebrow, title }) {
+function PanelTitle({ eyebrow, title, infoKey }) {
   return (
-    <div>
-      <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>{eyebrow}</div>
-      <div style={{ fontSize: 28, fontWeight: 300, marginTop: 4 }}>{title}</div>
+    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+      <div>
+        <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>{eyebrow}</div>
+        <div style={{ fontSize: 28, fontWeight: 300, marginTop: 4 }}>{title}</div>
+      </div>
+      {infoKey && <InfoButton k={infoKey} />}
     </div>
   );
 }

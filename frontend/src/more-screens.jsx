@@ -9,6 +9,7 @@ import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers, useAppDispatc
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
 import { ExplainTab } from "./components/ExplainTab.tsx";
+import { InfoButton } from "./components/InfoButton";
 import {
   decodeAudioFileToWav,
   listAudioInputs,
@@ -264,7 +265,7 @@ function DeepfakeLab({ audio, profiles }) {
         {/* LEFT: Forge */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 13, color: 'var(--warn)' }}>RED-TEAM · FORGE</div>
+            <div className="label-mono" style={{ fontSize: 13, color: 'var(--warn)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>RED-TEAM · FORGE <InfoButton k="lab.generate"/></div>
             <div style={{ fontSize: 38, fontWeight: 200, marginTop: 4 }}>Create a deepfake</div>
             <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
               Try to clone an enrolled voice and use it to authenticate. BioVoice catches the fakes — even ones a human ear can't distinguish.
@@ -466,7 +467,7 @@ function DeepfakeLab({ audio, profiles }) {
         {/* RIGHT: Outcome */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>BLUE-TEAM · DETECTOR</div>
+            <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>BLUE-TEAM · DETECTOR <InfoButton k="lab.test"/></div>
             <div style={{ fontSize: 38, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
           </div>
 
@@ -811,7 +812,7 @@ function IdentifyScreen({ profiles }) {
   const renderCapture = () => (
     <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, height: '100%', textAlign: 'center' }}>
       <div>
-        <div className="label-mono" style={{ fontSize: 15, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>WHO IS THIS VOICE?</div>
+        <div className="label-mono" style={{ fontSize: 15, color: 'var(--teal-2)', letterSpacing: '0.32em', display: 'inline-flex', alignItems: 'center', gap: 8 }}>WHO IS THIS VOICE? <InfoButton k="identify.capture"/></div>
         <div className="biovoice-identify-hero" style={{ fontSize: 68, fontWeight: 200, marginTop: 10, lineHeight: 1.02 }}>Most similar match</div>
         <div style={{ fontSize: 20, color: 'var(--ink-mute)', marginTop: 14, maxWidth: 620, marginInline: 'auto' }}>
           Record or upload a voice — it’s ranked against all <strong style={{ color: 'var(--ink)' }}>{profiles.length}</strong> enrolled profile{profiles.length === 1 ? '' : 's'} across three speaker models.
@@ -977,7 +978,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
       >
         {/* CARD 1 — Per-model Grad-CAM spectrograms, side by side */}
         <div className="biovoice-rise" style={{ ...cardBase, width: 'min(860px, 90vw)', animationDelay: '0ms' }}>
-          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL GRAD-CAM · vs {top?.userId ?? '—'}</div>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em', display: 'inline-flex', alignItems: 'center', gap: 8 }}>PER-MODEL GRAD-CAM · vs {top?.userId ?? '—'} <InfoButton k="explain.gradcam"/></div>
           <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 0, overflowY: 'auto' }}>
             <ExplainTab
               wavFile={wavFile ?? null}
@@ -991,7 +992,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
 
         {/* CARD 2 — Top 3 + gauge */}
         <div className="biovoice-rise" style={{ ...cardBase, width: 'min(460px, 88vw)', animationDelay: '90ms' }}>
-          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 6, letterSpacing: '0.2em' }}>TOP 3 · FUSED SCORE</div>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 6, letterSpacing: '0.2em', display: 'inline-flex', alignItems: 'center', gap: 8 }}>TOP 3 · FUSED SCORE <InfoButton k="identify.gauge"/></div>
           <div style={{ display: 'grid', placeItems: 'center' }}>
             <SimilarityGauge value={combined} threshold={result.similarityThreshold} size={250} label={top?.userId ?? '—'}/>
           </div>
@@ -1238,7 +1239,7 @@ function LogsScreen({ profiles }) {
         <div style={{ maxWidth: 1180, margin: '0 auto' }}>
           <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>VERIFY · IDENTIFY</div>
+              <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>VERIFY · IDENTIFY <InfoButton k="logs.list"/></div>
               <div style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>Run logs</div>
               <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Every verification and identification, newest first. Click a run to reopen its full result.</div>
             </div>
@@ -1404,7 +1405,7 @@ function UserSettingsPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <SectionCard id="sec-0" title="Detection thresholds" desc="When does the system call something a match — or a fake? These gate ACCEPT / REJECT / DEEPFAKE.">
+              <SectionCard id="sec-0" infoKey="settings.thresholds" title="Detection thresholds" desc="When does the system call something a match — or a fake? These gate ACCEPT / REJECT / DEEPFAKE.">
                 <SliderRow label="Voice match threshold" value={cfg.similarityThreshold} min={0.5} max={0.95} step={0.01}
                   onChange={(v) => setLocal({ similarityThreshold: v })} onCommit={(v) => apply({ similarityThreshold: v })} hint={matchHint}/>
                 <SliderRow label="Anti-spoof threshold" value={cfg.deepfakeThreshold} min={0.3} max={0.8} step={0.01}
@@ -1424,7 +1425,7 @@ function UserSettingsPage() {
                   onChange={(v) => setLocal({ wespeakerSimilarityThreshold: v })} onCommit={(v) => apply({ wespeakerSimilarityThreshold: v })}/>
               </SectionCard>
 
-              <SectionCard id="sec-2" title="Comparison models" desc="Toggle which encoders join the fusion vote. A model that didn’t load can’t be enabled.">
+              <SectionCard id="sec-2" infoKey="settings.models" title="Comparison models" desc="Toggle which encoders join the fusion vote. A model that didn’t load can’t be enabled.">
                 <ToggleRow
                   label="ECAPA-TDNN" sub={toggleable.ecapa_voxceleb?.loaded ? 'SpeechBrain · 192-d' : 'not loaded on this server'}
                   value={cfg.enableEcapaComparison} disabled={!toggleable.ecapa_voxceleb?.canToggle}
@@ -1451,10 +1452,13 @@ function UserSettingsPage() {
   );
 }
 
-function SectionCard({ id, title, desc, children }) {
+function SectionCard({ id, title, desc, children, infoKey }) {
   return (
     <div id={id} className="panel" style={{ padding: 26 }}>
-      <div style={{ fontSize: 23, fontWeight: 400 }}>{title}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ fontSize: 23, fontWeight: 400 }}>{title}</div>
+        {infoKey && <InfoButton k={infoKey} />}
+      </div>
       {desc && <div style={{ fontSize: 15, color: 'var(--ink-mute)', marginTop: 4, marginBottom: 18 }}>{desc}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
     </div>
@@ -1583,7 +1587,7 @@ function ProfilesPage({ profiles, audio }) {
       <div className="biovoice-page-content biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
         <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
+            <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>VOICE PROFILES <InfoButton k="profiles.list"/></div>
             <div style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
             <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
           </div>

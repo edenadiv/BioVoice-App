@@ -5,6 +5,7 @@ import { decodeFileToBuffer, playSalient, playSegment, sliceBufferToFloat32, typ
 import { useEmbeddingProjection } from "../hooks/useEmbeddingProjection";
 import { projectPCA3 } from "../lib/pca";
 import { nearestByCosine, type CosineMatch } from "../lib/embeddingMatch";
+import { InfoButton } from "./InfoButton";
 // EmbeddingConstellation is the Dashboard's voice-space visual (untyped .jsx);
 // its props infer as `null` from JS defaults, so type it loosely here.
 import { EmbeddingConstellation as EmbeddingConstellationImpl } from "../console-ext.jsx";
@@ -191,7 +192,10 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
   return (
     <aside style={{ ...panelStyle, width: panelWidth }}>
       <header style={headerStyle}>
-        <span>Grad-CAM{matchUserId ? ` · vs ${matchUserId}` : ""}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          Grad-CAM{matchUserId ? ` · vs ${matchUserId}` : ""}
+          <InfoButton k="explain.gradcam" />
+        </span>
         {bufferRef.current && (
           <button type="button" style={origBtnStyle} onClick={handlePlayOriginal}>
             {playingKey === "__original__" ? "■ stop" : "▶ original"}
@@ -295,8 +299,9 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
 
       {result && (projection.profiles.length > 0 || heatZones.length > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
             Voice space · heat zones{nearest ? ` · closest ${nearest.userId}` : ""}
+            <InfoButton k="explain.voicespace" />
           </div>
           <EmbeddingConstellation
             width={Math.max(280, panelWidth - 28)}
