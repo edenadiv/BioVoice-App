@@ -2,7 +2,7 @@
 // Stub `fetch` so the tests are hermetic — no backend required.
 
 import { describe, expect, it, beforeEach, afterEach, vi, type Mock } from "vitest";
-import { listSpeakers, listResults, deleteUser, enrollSpeaker, verifySpeaker, identifySpeaker } from "./api";
+import { listSpeakers, listResults, deleteUser, enrollSpeaker, verifySpeaker, identifySpeaker, generateSpoofBatch } from "./api";
 
 const originalFetch = globalThis.fetch;
 
@@ -232,6 +232,49 @@ describe("model_provenance snake→camel transform", () => {
     const file = new File([new Uint8Array([0])], "q.wav", { type: "audio/wav" });
     const r = await verifySpeaker("alice", file);
     expect(r.modelProvenance).toBeNull();
+  });
+});
+
+describe("generateSpoofBatch — request body + snake→camel mapping", () => {
+  it("posts JSON with snake_case keys and maps the response", async () => {
+    (globalThis.fetch as Mock).mockResolvedValueOnce(jsonResponse({
+      target_user_id: "alice",
+      centroid_present: true,
+      keep_threshold: 0.75,
+      requested: 2,
+      generated: 2,
+      kept: 1,
+      candidates: [
+        {
+          index: 1, text: "hello", similarity_to_target: 0.91, kept: true,
+          deepfake_score: 0.2, decision: "FAKE", engine_id: "xtts",
+          voice_id: null, file_name: "c1.wav", audio_b64: "AAAA",
+        },
+        {
+          index: 2, text: "hello", similarity_to_target: 0.40, kept: false,
+          deepfake_score: null, decision: null, engine_id: "xtts",
+          voice_id: null, file_name: "c2.wav", audio_b64: null,
+        },
+      ],
+      model_provenance: { encoder: "redimnet_b5", detector: "aasist", acoustic_probe: "heuristic", is_degraded: false },
+    }));
+    const result = await generateSpoofBatch({
+      targetUserId: "alice", texts: ["hello"], candidatesPerText: 2, engine: "xtts",
+    });
+    const [url, init] = (globalThis.fetch as Mock).mock.calls[0];
+    expect(String(url)).toMatch(/\/spoof\/batch$/);
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body as string);
+    expect(body.target_user_id).toBe("alice");
+    expect(body.texts).toEqual(["hello"]);
+    expect(body.candidates_per_text).toBe(2);
+    expect(body.engine).toBe("xtts");
+
+    expect(result.kept).toBe(1);
+    expect(result.candidates[0].similarityToTarget).toBeCloseTo(0.91);
+    expect(result.candidates[0].audioB64).toBe("AAAA");
+    expect(result.candidates[1].deepfakeScore).toBeNull();
+    expect(result.modelProvenance?.acousticProbe).toBe("heuristic");
   });
 });
 

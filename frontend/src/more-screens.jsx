@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { LivePulse, VoiceOrb, Waveform, SimilarityGauge, PipelineFlow } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker, listLogs, getLogDetail, fetchLogAudio, getConfig, patchConfig } from "./lib/api";
+import { generateSpoof, generateSpoofBatch, wavUrlFromBase64, getSpoofEngines, spoofTest, deleteUser, identifySpeaker, listLogs, getLogDetail, fetchLogAudio, getConfig, patchConfig } from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers, useAppDispatch } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
@@ -196,6 +196,58 @@ function DeepfakeLab({ audio, profiles }) {
     }
   }, [target, text, engineId, voiceId]);
 
+  // Batch Forge — generate many clones against the target and keep only
+  // the candidates whose speaker-similarity to the target clears the bar.
+  const [batchMode, setBatchMode] = useState(false);
+  const [candidatesPerText, setCandidatesPerText] = useState(4);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchResult, setBatchResult] = useState(null);
+  const [batchError, setBatchError] = useState(null);
+  const selectedEngineClones = engineId === 'xtts';
+
+  const generateBatch = useCallback(async () => {
+    if (!target) { setBatchError('Enrol at least one profile first.'); return; }
+    const texts = text.split('\n').map((t) => t.trim()).filter(Boolean);
+    if (texts.length === 0) { setBatchError('Enter at least one utterance (one per line).'); return; }
+    setBatchError(null);
+    setBatchResult(null);
+    setBatchRunning(true);
+    try {
+      const res = await generateSpoofBatch({
+        targetUserId: target,
+        texts,
+        candidatesPerText,
+        engine: engineId || undefined,
+        voice: voiceId || undefined,
+        language: 'en',
+      });
+      setBatchResult(res);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      let friendly = msg;
+      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
+        friendly = 'Batch forge needs a voice-cloning TTS engine (XTTS-v2) on the backend.';
+      } else if (msg.includes('404') || msg.toLowerCase().includes('enrol')) {
+        friendly = `"${target}" isn't enrolled — add them in Profiles first.`;
+      }
+      setBatchError(friendly);
+    } finally {
+      setBatchRunning(false);
+    }
+  }, [target, text, candidatesPerText, engineId, voiceId]);
+
+  // Precompute object URLs for kept candidates once per batch result so
+  // we don't leak a new URL on every render.
+  const batchUrls = useMemo(() => {
+    const map = {};
+    if (batchResult) {
+      for (const c of batchResult.candidates) {
+        if (c.kept && c.audioB64) map[c.index] = wavUrlFromBase64(c.audioB64);
+      }
+    }
+    return map;
+  }, [batchResult]);
+
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
     { label: 'Cloning voice timbre', sub: 'XTTS-v2 → 24 kHz waveform' },
@@ -362,12 +414,46 @@ function DeepfakeLab({ audio, profiles }) {
               </Field>
             )}
 
-            <button onClick={generate} disabled={generating} className="btn btn-primary"
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[['single', 'SINGLE'], ['batch', 'BATCH']].map(([m, label]) => {
+                const active = batchMode === (m === 'batch');
+                return (
+                  <button key={m} onClick={() => setBatchMode(m === 'batch')} className="lift"
+                    style={{ flex: 1, padding: '8px', borderRadius: 8, cursor: 'pointer',
+                      background: active ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
+                      border: active ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
+                      color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: '0.18em' }}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {batchMode && (
+              <Field label="CANDIDATES PER UTTERANCE  ·  ONE UTTERANCE PER LINE">
+                <input type="number" min={1} max={32} value={candidatesPerText}
+                  onChange={(e) => setCandidatesPerText(Math.max(1, Math.min(32, Number(e.target.value) || 1)))}
+                  style={{ width: '100%', padding: '10px 14px', background: 'rgba(125,200,255,0.04)',
+                    border: '1px solid var(--line-2)', borderRadius: 10, color: 'var(--ink)',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12, outline: 'none' }}/>
+                {!selectedEngineClones && (
+                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 6 }}>
+                    {`"${selectedEngine?.label ?? engineId}" speaks in its own voice — pick XTTS so clones can match the target.`}
+                  </div>
+                )}
+              </Field>
+            )}
+
+            <button onClick={batchMode ? generateBatch : generate}
+              disabled={batchMode ? batchRunning : generating} className="btn btn-primary"
               style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,
-                opacity: generating ? 0.7 : 1, cursor: generating ? 'wait' : 'pointer' }}>
-              {generating
-                ? (stage === 1 ? 'Cloning voice…' : 'Running detector…')
-                : <>⚡  Forge & test attack</>}
+                opacity: (batchMode ? batchRunning : generating) ? 0.7 : 1,
+                cursor: (batchMode ? batchRunning : generating) ? 'wait' : 'pointer' }}>
+              {batchMode
+                ? (batchRunning ? 'Forging batch…' : <>⚡  Forge batch &amp; keep matches</>)
+                : (generating
+                    ? (stage === 1 ? 'Cloning voice…' : 'Running detector…')
+                    : <>⚡  Forge &amp; test attack</>)}
             </button>
             {!target && (
               <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 4 }}>
@@ -384,6 +470,61 @@ function DeepfakeLab({ audio, profiles }) {
             <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
           </div>
 
+          {batchMode && (
+            <div className="panel outline-glow" style={{ padding: 20, flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, overflow: 'auto' }}>
+              {batchRunning && (
+                <div style={{ display: 'grid', placeItems: 'center', flex: 1, padding: 30 }}><ScanRings/></div>
+              )}
+              {batchError && !batchRunning && (
+                <div style={{ color: '#ff8080', textAlign: 'center', padding: 20, fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>{batchError}</div>
+              )}
+              {!batchRunning && !batchError && !batchResult && (
+                <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
+                  <div>
+                    <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>◍</div>
+                    <div style={{ fontSize: 14 }}>Forge a batch to keep only the clones that match the target.</div>
+                    <div className="label-mono" style={{ fontSize: 9, marginTop: 6 }}>ONE UTTERANCE PER LINE</div>
+                  </div>
+                </div>
+              )}
+              {batchResult && !batchRunning && (
+                <>
+                  <DegradedBanner provenance={batchResult.modelProvenance} variant="full"/>
+                  <div className="label-mono" style={{ fontSize: 10 }}>
+                    KEPT {batchResult.kept} / {batchResult.generated} GENERATED · THRESHOLD {batchResult.keepThreshold.toFixed(2)}
+                  </div>
+                  {batchResult.candidates.length === 0 && (
+                    <div style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No candidates generated.</div>
+                  )}
+                  {batchResult.candidates.map((c) => (
+                    <div key={c.index} style={{ padding: 12, borderRadius: 10,
+                      background: c.kept ? 'rgba(106,255,200,0.06)' : 'rgba(125,200,255,0.03)',
+                      border: c.kept ? '1px solid rgba(106,255,200,0.3)' : '1px solid var(--line)',
+                      opacity: c.kept ? 1 : 0.6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <span className="label-mono" style={{ fontSize: 9, color: c.kept ? '#6affc8' : 'var(--ink-soft)' }}>
+                          #{c.index} · {c.kept ? 'KEPT' : 'DISCARDED'}
+                        </span>
+                        <span className="num-mono" style={{ fontSize: 16, color: c.kept ? '#6affc8' : 'var(--ink-mute)' }}>
+                          {(c.similarityToTarget * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-mute)', margin: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.text}</div>
+                      {c.decision && (
+                        <div className="label-mono" style={{ fontSize: 8, color: c.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)' }}>
+                          AASIST {c.decision} · {c.deepfakeScore != null ? c.deepfakeScore.toFixed(3) : '—'}
+                        </div>
+                      )}
+                      {c.kept && batchUrls[c.index] && (
+                        <audio src={batchUrls[c.index]} controls style={{ width: '100%', marginTop: 8, borderRadius: 8 }}/>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+          {!batchMode && (<>
           {/* Pipeline */}
           <div className="panel" style={{ padding: 20 }}>
             <div className="label-mono" style={{ fontSize: 10, marginBottom: 14 }}>ATTACK PIPELINE</div>
@@ -532,6 +673,7 @@ function DeepfakeLab({ audio, profiles }) {
               </div>
             )}
           </div>
+          </>)}
         </div>
       </div>
     </div>
