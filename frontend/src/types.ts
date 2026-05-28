@@ -25,6 +25,22 @@ export type AnalysisDetails = {
 };
 
 export type SpeakerModelKey = "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
+export type ExplainModelKey = "aasist" | "redimnet_b5" | "ecapa_voxceleb";
+
+export type CamSegment = {
+  startMs: number;
+  endMs: number;
+  peak: number;
+};
+
+export type ModelCAM = {
+  modelKey: ExplainModelKey;
+  frameTimesMs: number[];
+  freqHz: number[];
+  heatmap: number[][];
+  threshold: number;
+  salientSegments: CamSegment[];
+};
 
 export type VerificationResult = {
   resultId: string;

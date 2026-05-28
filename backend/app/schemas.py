@@ -17,6 +17,26 @@ EncoderProvenance = Literal[
 DetectorProvenance = Literal["aasist", "heuristic"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
+ExplainModelKey = Literal["aasist", "redimnet_b5", "ecapa_voxceleb"]
+
+
+class CamSegment(BaseModel):
+    start_ms: float = Field(ge=0.0)
+    end_ms: float = Field(ge=0.0)
+    peak: float = Field(ge=0.0, le=1.0)
+
+
+class ModelCAM(BaseModel):
+    model_key: ExplainModelKey
+    frame_times_ms: list[float]
+    freq_hz: list[float]
+    heatmap: list[list[float]]
+    threshold: float = Field(ge=0.0, le=1.0)
+    salient_segments: list[CamSegment] = Field(default_factory=list)
+
+
+class ExplainResponse(BaseModel):
+    cams: list[ModelCAM]
 
 
 class ModelProvenance(BaseModel):

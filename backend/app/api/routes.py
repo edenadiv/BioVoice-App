@@ -22,6 +22,7 @@ from app.core.metrics import metrics
 from app.schemas import (
     EmbedResponse,
     EnrollmentResponse,
+    ExplainResponse,
     HealthResponse,
     IdentificationResponse,
     SpeakerResponse,
@@ -34,6 +35,7 @@ from app.schemas import (
     SpeakerModelKey,
 )
 from app.services.audio import NoSpeechDetectedError
+from app.services.explain import build_adapters, explain_model
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
 
@@ -250,6 +252,53 @@ async def identify(
 @router.get("/results", response_model=list[VerificationResponse])
 def list_results(service: VerificationService = Depends(get_verification_service)) -> list[VerificationResponse]:
     return service.list_results()
+
+
+# -----------------------------------------------------------------------------
+# Explain — per-model Grad-CAM on an arbitrary WAV
+# -----------------------------------------------------------------------------
+
+
+@router.post("/explain", response_model=ExplainResponse)
+async def explain(
+    audio: UploadFile = File(...),
+    user_id: str = Form(default=""),
+    service: VerificationService = Depends(get_verification_service),
+) -> ExplainResponse:
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    try:
+        decoded = service.audio.decode_wav(payload)
+        trimmed, _ = service.audio.trim_to_voice(decoded)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    service.detector.load()
+    detector_model = service.detector.model
+    redimnet_model = getattr(service.encoder, "model", None)
+    ecapa_encoder = service.comparison_encoders.get("ecapa_voxceleb")
+    ecapa_model = getattr(ecapa_encoder, "model", None) if ecapa_encoder else None
+
+    redimnet_centroid = None
+    ecapa_centroid = None
+    if user_id:
+        speaker = service.store.get_speaker(user_id)
+        if speaker is not None:
+            redimnet_centroid = speaker.embedding
+            ecapa_centroid = speaker.comparison_embeddings.get("ecapa_voxceleb")
+
+    adapters = build_adapters(
+        detector_model,
+        redimnet_model,
+        ecapa_model,
+        redimnet_centroid=redimnet_centroid,
+        ecapa_centroid=ecapa_centroid,
+    )
+    cams = [explain_model(key, ctx, trimmed.waveform) for key, ctx in adapters.items()]
+    return ExplainResponse(cams=cams)
 
 
 # -----------------------------------------------------------------------------

@@ -111,6 +111,9 @@ class Settings:
     wespeaker_similarity_threshold: float = field(default_factory=lambda: _float_from_env("WESPEAKER_SIMILARITY_THRESHOLD", 0.75))
 
     min_enrollment_samples: int = 3
+    cam_thr_aasist: float = float(os.environ.get("CAM_THR_AASIST", "0.55"))
+    cam_thr_redimnet: float = float(os.environ.get("CAM_THR_REDIMNET", "0.50"))
+    cam_thr_ecapa: float = float(os.environ.get("CAM_THR_ECAPA", "0.50"))
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = _BACKEND_DIR / "models" / "aasist.pt"
