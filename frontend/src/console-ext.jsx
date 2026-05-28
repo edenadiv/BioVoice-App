@@ -91,6 +91,47 @@ function EmbeddingConstellation({
   matchRef.current = matchId;
   liveRef.current = livePoint;
 
+  // Free-rotate the sphere by dragging; `auto` is the gentle idle spin.
+  // yaw = turn (around the vertical axis), pitch = roll (tilt up/down).
+  const DEFAULT_PITCH = 0.35;
+  const yawRef = useRef(0);
+  const pitchRef = useRef(DEFAULT_PITCH);
+  const autoRef = useRef(true);
+  const draggingRef = useRef(false);
+  const velRef = useRef({ x: 0, y: 0 });
+  const lastRef = useRef({ x: 0, y: 0 });
+
+  const clampPitch = (p) => Math.max(-1.45, Math.min(1.45, p));
+
+  const handlePointerDown = (e) => {
+    draggingRef.current = true;
+    autoRef.current = false;
+    velRef.current = { x: 0, y: 0 };
+    lastRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.style.cursor = 'grabbing';
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const handlePointerMove = (e) => {
+    if (!draggingRef.current) return;
+    const dx = (e.clientX - lastRef.current.x) * 0.01;
+    const dy = (e.clientY - lastRef.current.y) * 0.01;
+    yawRef.current += dx;
+    pitchRef.current = clampPitch(pitchRef.current + dy);
+    velRef.current = { x: dx, y: dy };
+    lastRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const handlePointerUp = (e) => {
+    draggingRef.current = false;
+    if (e.currentTarget.style) e.currentTarget.style.cursor = 'grab';
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
+  const recenter = () => {
+    yawRef.current = 0;
+    pitchRef.current = DEFAULT_PITCH;
+    velRef.current = { x: 0, y: 0 };
+    autoRef.current = true;
+  };
+
   // Normalise the projected coords to a unit sphere for rendering.
   // PCA component magnitudes vary with the input scale; this keeps the
   // canvas geometry stable regardless of how many speakers are enrolled.
@@ -145,11 +186,12 @@ function EmbeddingConstellation({
     const proj = 320;
     const baseR = Math.min(width, height) * 0.42;
 
-    function project(x, y, z, time) {
-      const cy_ = Math.cos(time), sy_ = Math.sin(time);
+    function project(x, y, z) {
+      const yaw = yawRef.current, pitch = pitchRef.current;
+      const cy_ = Math.cos(yaw), sy_ = Math.sin(yaw);
       let x1 = x * cy_ - z * sy_;
       let z1 = x * sy_ + z * cy_;
-      const cx_ = Math.cos(0.35), sx_ = Math.sin(0.35);
+      const cx_ = Math.cos(pitch), sx_ = Math.sin(pitch);
       let y1 = y * cx_ - z1 * sx_;
       let z2 = y * sx_ + z1 * cx_;
       const f = proj / (proj + z2 * baseR);
@@ -162,7 +204,19 @@ function EmbeddingConstellation({
     }
 
     const draw = () => {
-      t += 0.005;
+      t += 0.016; // pulse clock (independent of orientation)
+      // Orientation: idle auto-spin, drag (handlers update directly), or a
+      // decaying inertia glide after release.
+      if (!draggingRef.current) {
+        if (autoRef.current) {
+          yawRef.current += 0.005;
+        } else {
+          yawRef.current += velRef.current.x;
+          pitchRef.current = clampPitch(pitchRef.current + velRef.current.y);
+          velRef.current.x *= 0.94;
+          velRef.current.y *= 0.94;
+        }
+      }
       ctx.clearRect(0, 0, width, height);
 
       // ambient halo
@@ -183,7 +237,7 @@ function EmbeddingConstellation({
           const x = Math.cos(u) * Math.sin(a);
           const y = Math.cos(a);
           const z = Math.sin(u) * Math.sin(a);
-          const p = project(x, y, z, t);
+          const p = project(x, y, z);
           if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
         }
         ctx.stroke();
@@ -191,7 +245,7 @@ function EmbeddingConstellation({
 
       // Per-sample dots — real per-recording 192-d embeddings projected.
       const projected = sampleDots.map((p) => {
-        const pp = project(p.x, p.y, p.z, t);
+        const pp = project(p.x, p.y, p.z);
         return { ...p, ...pp };
       }).sort((a, b) => a.depth - b.depth);
 
@@ -212,7 +266,7 @@ function EmbeddingConstellation({
 
       // Cluster centres + labels.
       centers.forEach((c) => {
-        const pp = project(c.x, c.y, c.z, t);
+        const pp = project(c.x, c.y, c.z);
         const isMatch = matchRef.current === c.id;
         if (isMatch) {
           ctx.shadowBlur = 16;
@@ -240,7 +294,7 @@ function EmbeddingConstellation({
       // Live voice — real /embed projection, only if we have one.
       const live = liveRef.current;
       if (live) {
-        const lp = project(live[0] * scale, live[1] * scale, live[2] * scale, t);
+        const lp = project(live[0] * scale, live[1] * scale, live[2] * scale);
         ctx.shadowBlur = 18; ctx.shadowColor = '#7ef0ff';
         ctx.fillStyle = '#bff4ff';
         ctx.beginPath();
@@ -256,7 +310,7 @@ function EmbeddingConstellation({
         if (matchRef.current) {
           const m = centers.find(c => c.id === matchRef.current);
           if (m) {
-            const mp = project(m.x, m.y, m.z, t);
+            const mp = project(m.x, m.y, m.z);
             ctx.strokeStyle = `rgba(126,240,255,${0.3 + 0.3 * Math.sin(t * 4)})`;
             ctx.lineWidth = 1;
             ctx.setLineDash([3, 3]);
@@ -282,7 +336,47 @@ function EmbeddingConstellation({
     return () => cancelAnimationFrame(raf);
   }, [width, height, centers, sampleDots, scale, loading]);
 
-  return <canvas ref={ref} style={{ display: 'block' }}/>;
+  return (
+    <div style={{ position: 'relative', width, height, touchAction: 'none' }}>
+      <canvas
+        ref={ref}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
+      />
+      <button
+        type="button"
+        onClick={recenter}
+        title="Recenter view"
+        aria-label="Recenter embedding view"
+        style={{
+          position: 'absolute', bottom: 8, left: 8,
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '5px 9px', borderRadius: 8,
+          border: '1px solid var(--line-2)', background: 'rgba(8,14,24,0.6)',
+          backdropFilter: 'blur(6px)', color: 'var(--ink-soft)',
+          font: '9px/1 "JetBrains Mono", monospace', letterSpacing: '0.08em',
+          cursor: 'pointer', transition: 'all 160ms',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--teal-2)';
+          e.currentTarget.style.borderColor = 'rgba(126,240,255,0.55)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--ink-soft)';
+          e.currentTarget.style.borderColor = 'var(--line-2)';
+        }}
+      >
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+          <path d="M13.5 8 A5.5 5.5 0 1 1 11.6 3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          <path d="M11.5 1.5 L11.9 4.1 L9.3 4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        RECENTER
+      </button>
+    </div>
+  );
 }
 
 // ============================================================================
