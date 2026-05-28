@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useMicrophone, useSilentAudio } from "./audio.jsx";
 import { ConsoleScreen } from "./console.jsx";
-import { Sidebar, DeepfakeLab, IdentifyScreen, ProfilesPage } from "./more-screens.jsx";
+import { Sidebar, DeepfakeLab, IdentifyScreen, LogsScreen, UserSettingsPage, ProfilesPage } from "./more-screens.jsx";
 import { VerificationOverlay } from "./console-ext.jsx";
 import { AppStateProvider, useDerivedCounts, useProfiles } from "./lib/session";
 
@@ -34,8 +34,10 @@ function AppShell() {
       if (k === 'v' && profiles[0]) setOverlayProfile(profiles[0]);
       else if (k === '1') setPage('console');
       else if (k === '2') setPage('identify');
-      else if (k === '3') setPage('lab');
-      else if (k === '4') setPage('profiles');
+      else if (k === '3') setPage('logs');
+      else if (k === '4') setPage('lab');
+      else if (k === '5') setPage('profiles');
+      else if (k === '6') setPage('settings');
       else if (k === 'escape') setOverlayProfile(null);
     };
     window.addEventListener('keydown', onKey);
@@ -48,10 +50,14 @@ function AppShell() {
   switch (page) {
     case 'identify':
       body = <IdentifyScreen profiles={profiles}/>; break;
+    case 'logs':
+      body = <LogsScreen profiles={profiles}/>; break;
     case 'lab':
       body = <DeepfakeLab audio={audio} profiles={profiles}/>; break;
     case 'profiles':
       body = <ProfilesPage profiles={profiles} audio={audio}/>; break;
+    case 'settings':
+      body = <UserSettingsPage/>; break;
     default:
       body = <ConsoleScreen
         audio={audio} micState={mic.state} micStart={startMic}

@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Protocol
 from uuid import uuid4
 
-from app.models import SpeakerRecord, VerificationRecord
+from app.models import IdentificationRecord, SpeakerRecord, VerificationRecord
 from app.schemas import (
     AnalysisDetails,
     DecisionReason,
@@ -18,6 +18,8 @@ from app.schemas import (
     EnrollmentResponse,
     IdentificationMatch,
     IdentificationResponse,
+    LogDetailResponse,
+    LogEntry,
     ModelProvenance,
     SampleQuality,
     SpeakerFusionDecision,
@@ -58,6 +60,12 @@ class VerificationStore(Protocol):
     def list_results(self) -> list[VerificationRecord]: ...
     def get_result(self, result_id: str) -> VerificationRecord | None: ...
     def next_verification_seq(self, day: str) -> int: ...
+    def add_identification(self, record: IdentificationRecord) -> None: ...
+    def list_identifications(self) -> list[IdentificationRecord]: ...
+    def get_identification(self, result_id: str) -> IdentificationRecord | None: ...
+    def save_run_audio(self, result_id: str, audio_bytes: bytes) -> None: ...
+    def has_run_audio(self, result_id: str) -> bool: ...
+    def get_run_audio(self, result_id: str) -> bytes | None: ...
 
 
 class VerificationService:
@@ -73,6 +81,7 @@ class VerificationService:
         acoustic_probe: AcousticProbe | None = None,
         comparison_encoders: dict[str, SpeakerEncoder] | None = None,
         model_similarity_thresholds: dict[str, float] | None = None,
+        identify_top_n: int = 3,
     ):
         self.store = store
         self.detector = detector
@@ -84,6 +93,9 @@ class VerificationService:
         }
         self.deepfake_threshold = deepfake_threshold
         self.min_enrollment_samples = min_enrollment_samples
+        # Default top-N for /identify when the request doesn't specify one.
+        # Runtime-tunable via PATCH /config.
+        self.identify_top_n = identify_top_n
         self.audio = AudioService(target_sample_rate=sample_rate)
         self.encoder = speaker_encoder
         self.comparison_encoders = dict(comparison_encoders or {})
@@ -317,6 +329,7 @@ class VerificationService:
             },
         )
         self.store.add_result(record)
+        self.store.save_run_audio(result_id, audio_bytes)
 
         return VerificationResponse(
             result_id=record.result_id,
@@ -338,10 +351,14 @@ class VerificationService:
             created_at=created_at,
         )
 
-    def identify(self, audio_bytes: bytes, top_n: int = 3) -> IdentificationResponse:
+    def identify(self, audio_bytes: bytes, top_n: int | None = None) -> IdentificationResponse:
         speakers = self.store.list_users()
         if not speakers:
             raise RuntimeError("No users enrolled. Enrol at least one profile first.")
+
+        if top_n is None:
+            top_n = self.identify_top_n
+        top_n = max(1, min(20, top_n))
 
         payload, _ = self.audio.decode_wav_with_timings(audio_bytes)
         trimmed, _ = self.audio.trim_to_voice(payload)
@@ -412,7 +429,11 @@ class VerificationService:
             bool(top_fusion and top_fusion.combined_match)
             and deepfake_score >= self.deepfake_threshold
         )
-        return IdentificationResponse(
+        result_id = str(uuid4())
+        created_at = datetime.now(timezone.utc)
+        response = IdentificationResponse(
+            result_id=result_id,
+            created_at=created_at,
             matches=top,
             speaker_model_matches=speaker_model_matches,
             speaker_fusion=top_fusion,
@@ -425,6 +446,19 @@ class VerificationService:
             model_provenance=self._collect_provenance(),
             query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
         )
+        self.store.add_identification(
+            IdentificationRecord(
+                result_id=result_id,
+                created_at=created_at,
+                top_user_id=top[0].user_id if top else None,
+                top_score=top[0].similarity_score if top else 0.0,
+                deepfake_score=deepfake_score,
+                would_accept=would_accept,
+                metadata=response.model_dump(mode="json"),
+            )
+        )
+        self.store.save_run_audio(result_id, audio_bytes)
+        return response
 
     def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:
         record = self.store.get_result(result_id)
@@ -434,6 +468,71 @@ class VerificationService:
 
     def list_results(self) -> list[VerificationResponse]:
         return [self._record_to_response(record) for record in self.store.list_results()]
+
+    def list_logs(self) -> list[LogEntry]:
+        """Unified verify + identify history for the Logs tab, newest first."""
+        entries: list[LogEntry] = []
+        for rec in self.store.list_results():
+            meta = rec.metadata or {}
+            models = [s["model_key"] for s in meta.get("speaker_model_scores", []) if s.get("model_key")]
+            entries.append(
+                LogEntry(
+                    id=rec.result_id,
+                    kind="verify",
+                    created_at=rec.created_at,
+                    label=rec.user_id,
+                    decision=rec.decision,
+                    score=_clamp_unit(rec.similarity_score),
+                    deepfake_score=_clamp_unit(rec.deepfake_score),
+                    models=models or ["redimnet_b5"],
+                    has_audio=self.store.has_run_audio(rec.result_id),
+                )
+            )
+        for irec in self.store.list_identifications():
+            meta = irec.metadata or {}
+            models = [m["model_key"] for m in meta.get("speaker_model_matches", []) if m.get("model_key")]
+            df_threshold = float(meta.get("deepfake_threshold", self.deepfake_threshold))
+            if irec.deepfake_score < df_threshold:
+                decision = "DEEPFAKE"
+            elif irec.would_accept:
+                decision = "ACCEPT"
+            else:
+                decision = "NO MATCH"
+            entries.append(
+                LogEntry(
+                    id=irec.result_id,
+                    kind="identify",
+                    created_at=irec.created_at,
+                    label=irec.top_user_id or "—",
+                    decision=decision,
+                    score=_clamp_unit(irec.top_score),
+                    deepfake_score=_clamp_unit(irec.deepfake_score),
+                    models=models or ["redimnet_b5"],
+                    has_audio=self.store.has_run_audio(irec.result_id),
+                )
+            )
+        entries.sort(key=lambda entry: entry.created_at, reverse=True)
+        return entries
+
+    def get_log_detail(self, result_id: str) -> LogDetailResponse | None:
+        """Full result for one logged run, in its native shape. Verify and
+        identify differ; the client adapts a verify run into a single-match
+        identify view so both reuse the same results filmstrip."""
+        vrec = self.store.get_result(result_id)
+        if vrec is not None:
+            return LogDetailResponse(
+                kind="verify",
+                verify=self._record_to_response(vrec),
+                has_audio=self.store.has_run_audio(result_id),
+            )
+        irec = self.store.get_identification(result_id)
+        if irec is not None:
+            return LogDetailResponse(
+                kind="identify",
+                identify=IdentificationResponse.model_validate(irec.metadata or {}),
+                has_audio=self.store.has_run_audio(result_id),
+            )
+        return None
 
     def _decide(self, speaker_fusion: SpeakerFusionDecision, deepfake_score: float) -> tuple[str, DecisionReason, str]:
         if deepfake_score < self.deepfake_threshold:

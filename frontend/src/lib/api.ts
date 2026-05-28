@@ -5,12 +5,17 @@
 
 import type {
   AnalysisDetails,
+  AppConfig,
   CamSegment,
+  ConfigModelInfo,
+  ConfigPatch,
   EmbedResult,
   ExplainModelKey,
   ExplainResult,
   IdentificationMatch,
   IdentificationResult,
+  LogDetail,
+  LogEntry,
   ModelCAM,
   ModelProvenance,
   Speaker,
@@ -539,11 +544,7 @@ export async function explainAudio(file: File, userId?: string): Promise<Explain
 
 // -- Open-set identification --------------------------------------------------
 
-export async function identifySpeaker(file: File, topN: number = 3): Promise<IdentificationResult> {
-  const formData = new FormData();
-  formData.append("audio", file);
-  formData.append("top_n", String(topN));
-  const response = await postForm<IdentificationResponse>("/identify", formData);
+function toIdentificationResult(response: IdentificationResponse): IdentificationResult {
   return {
     matches: response.matches.map((m) => toIdentificationMatch(m)),
     speakerModelMatches: (response.speaker_model_matches ?? []).map((group) => ({
@@ -561,6 +562,15 @@ export async function identifySpeaker(file: File, topN: number = 3): Promise<Ide
     modelProvenance: toModelProvenance(response.model_provenance),
     queryEmbeddings: response.query_embeddings ?? {},
   };
+}
+
+// `topN` omitted → the backend uses its runtime-configured default (PATCH /config).
+export async function identifySpeaker(file: File, topN?: number): Promise<IdentificationResult> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  if (topN != null) formData.append("top_n", String(topN));
+  const response = await postForm<IdentificationResponse>("/identify", formData);
+  return toIdentificationResult(response);
 }
 
 function toIdentificationMatch(m: IdentificationMatchResponse): IdentificationMatch {
@@ -594,4 +604,137 @@ export async function getReady(): Promise<ReadyState> {
     aasistWeightsOk: response.checks.aasist_weights?.ok ?? false,
     redimnetWeightsOk: response.checks.redimnet_weights?.ok ?? false,
   };
+}
+
+// -- Logs (unified verify + identify history) --------------------------------
+
+type LogEntryResponse = {
+  id: string;
+  kind: "verify" | "identify";
+  created_at: string;
+  label: string;
+  decision: string;
+  score: number;
+  deepfake_score: number;
+  models: SpeakerModelKey[];
+  has_audio: boolean;
+};
+
+type LogDetailResponse = {
+  kind: "verify" | "identify";
+  verify: VerificationResponse | null;
+  identify: IdentificationResponse | null;
+  has_audio: boolean;
+};
+
+export async function listLogs(): Promise<LogEntry[]> {
+  const response = await request<LogEntryResponse[]>("/logs");
+  return response.map((e) => ({
+    id: e.id,
+    kind: e.kind,
+    createdAt: e.created_at,
+    label: e.label,
+    decision: e.decision,
+    score: e.score,
+    deepfakeScore: e.deepfake_score,
+    models: e.models,
+    hasAudio: e.has_audio,
+  }));
+}
+
+export async function getLogDetail(id: string): Promise<LogDetail> {
+  const response = await request<LogDetailResponse>(`/logs/${encodeURIComponent(id)}`);
+  return {
+    kind: response.kind,
+    verify: response.verify ? toVerificationResult(response.verify) : null,
+    identify: response.identify ? toIdentificationResult(response.identify) : null,
+    hasAudio: response.has_audio,
+  };
+}
+
+/** Fetch a logged run's captured audio as a File, for re-running /explain. */
+export async function fetchLogAudio(id: string): Promise<File> {
+  const response = await fetch(`${API_BASE}/logs/${encodeURIComponent(id)}/audio`, { credentials: "include" });
+  if (!response.ok) throw new Error(`Audio fetch failed (${response.status})`);
+  const blob = await response.blob();
+  return new File([blob], `${id}.wav`, { type: "audio/wav" });
+}
+
+// -- Runtime config (Settings tab) -------------------------------------------
+
+type ConfigModelInfoResponse = {
+  key: SpeakerModelKey;
+  label: string;
+  loaded: boolean;
+  participating: boolean;
+  can_toggle: boolean;
+};
+
+type ConfigResponse = {
+  similarity_threshold: number;
+  deepfake_threshold: number;
+  redimnet_similarity_threshold: number;
+  ecapa_similarity_threshold: number;
+  wespeaker_similarity_threshold: number;
+  min_enrollment_samples: number;
+  identify_top_n: number;
+  enable_ecapa_comparison: boolean;
+  enable_wespeaker_comparison: boolean;
+  sample_rate: number;
+  models: ConfigModelInfoResponse[];
+  model_provenance?: ModelProvenanceResponse | null;
+  provenance?: ModelProvenanceResponse | null;
+};
+
+function toAppConfig(c: ConfigResponse): AppConfig {
+  return {
+    similarityThreshold: c.similarity_threshold,
+    deepfakeThreshold: c.deepfake_threshold,
+    redimnetSimilarityThreshold: c.redimnet_similarity_threshold,
+    ecapaSimilarityThreshold: c.ecapa_similarity_threshold,
+    wespeakerSimilarityThreshold: c.wespeaker_similarity_threshold,
+    minEnrollmentSamples: c.min_enrollment_samples,
+    identifyTopN: c.identify_top_n,
+    enableEcapaComparison: c.enable_ecapa_comparison,
+    enableWespeakerComparison: c.enable_wespeaker_comparison,
+    sampleRate: c.sample_rate,
+    models: c.models.map((m): ConfigModelInfo => ({
+      key: m.key,
+      label: m.label,
+      loaded: m.loaded,
+      participating: m.participating,
+      canToggle: m.can_toggle,
+    })),
+    provenance: toModelProvenance(c.provenance ?? c.model_provenance),
+  };
+}
+
+const CONFIG_PATCH_KEYS: Record<keyof ConfigPatch, string> = {
+  similarityThreshold: "similarity_threshold",
+  deepfakeThreshold: "deepfake_threshold",
+  redimnetSimilarityThreshold: "redimnet_similarity_threshold",
+  ecapaSimilarityThreshold: "ecapa_similarity_threshold",
+  wespeakerSimilarityThreshold: "wespeaker_similarity_threshold",
+  minEnrollmentSamples: "min_enrollment_samples",
+  identifyTopN: "identify_top_n",
+  enableEcapaComparison: "enable_ecapa_comparison",
+  enableWespeakerComparison: "enable_wespeaker_comparison",
+};
+
+export async function getConfig(): Promise<AppConfig> {
+  return toAppConfig(await request<ConfigResponse>("/config"));
+}
+
+export async function patchConfig(patch: ConfigPatch): Promise<AppConfig> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    body[CONFIG_PATCH_KEYS[key as keyof ConfigPatch]] = value;
+  }
+  const response = await request<ConfigResponse>("/config", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return toAppConfig(response);
 }

@@ -20,11 +20,15 @@ from app.api.dependencies import (
 )
 from app.core.metrics import metrics
 from app.schemas import (
+    ConfigPatch,
+    ConfigResponse,
     EmbedResponse,
     EnrollmentResponse,
     ExplainResponse,
     HealthResponse,
     IdentificationResponse,
+    LogDetailResponse,
+    LogEntry,
     SpeakerResponse,
     SpoofEngineInfo,
     SpoofEnginesResponse,
@@ -34,6 +38,7 @@ from app.schemas import (
     VerificationResponse,
     SpeakerModelKey,
 )
+from app.services import runtime_config
 from app.services.audio import NoSpeechDetectedError
 from app.services.explain import (
     SAMPLE_RATE as EXPLAIN_SAMPLE_RATE,
@@ -229,15 +234,16 @@ async def embed_audio(
 @router.post("/identify", response_model=IdentificationResponse)
 async def identify(
     audio: UploadFile = File(...),
-    top_n: int = Form(default=3, ge=1, le=20),
+    top_n: int | None = Form(default=None, ge=1, le=20),
     service: VerificationService = Depends(get_verification_service),
 ) -> IdentificationResponse:
     """Open-set "most similar" — score the input WAV against every
     enrolled centroid and return the ranked top-N. Doesn't require a
     user_id; returns the system's best guess at who the speaker is.
 
-    Errors: 400 on empty / unspeechy / undecodable audio; 404 when
-    no users are enrolled."""
+    `top_n` defaults to the runtime-configured value (PATCH /config) when
+    the caller omits it. Errors: 400 on empty / unspeechy / undecodable
+    audio; 404 when no users are enrolled."""
     payload = await audio.read()
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
@@ -258,6 +264,68 @@ async def identify(
 @router.get("/results", response_model=list[VerificationResponse])
 def list_results(service: VerificationService = Depends(get_verification_service)) -> list[VerificationResponse]:
     return service.list_results()
+
+
+# -----------------------------------------------------------------------------
+# Logs — unified verify + identify run history
+# -----------------------------------------------------------------------------
+
+
+@router.get("/logs", response_model=list[LogEntry])
+def list_logs(service: VerificationService = Depends(get_verification_service)) -> list[LogEntry]:
+    """Every verification + identification run, newest first. Click an
+    entry → GET /logs/{id} for the full result the UI re-renders."""
+    return service.list_logs()
+
+
+@router.get("/logs/{result_id}", response_model=LogDetailResponse)
+def get_log(result_id: str, service: VerificationService = Depends(get_verification_service)) -> LogDetailResponse:
+    detail = service.get_log_detail(result_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Run '{result_id}' not found")
+    return detail
+
+
+@router.get("/logs/{result_id}/audio")
+def get_log_audio(result_id: str, request: Request) -> StreamingResponse:
+    """The captured audio for a logged run, so the detail view can re-run
+    /explain and reproduce the Grad-CAM. 404 when audio wasn't retained."""
+    container = get_container(request)
+    audio_bytes = container.store.get_run_audio(result_id)
+    if audio_bytes is None:
+        raise HTTPException(status_code=404, detail="Audio not retained for this run")
+    return StreamingResponse(
+        BytesIO(audio_bytes),
+        media_type="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="{result_id}.wav"'},
+    )
+
+
+# -----------------------------------------------------------------------------
+# Runtime config — live-tunable thresholds + model participation
+# -----------------------------------------------------------------------------
+
+
+@router.get("/config", response_model=ConfigResponse)
+def get_config(request: Request) -> ConfigResponse:
+    """Effective decision thresholds + model participation, plus read-only
+    context (sample rate, which models are loaded, provenance)."""
+    return runtime_config.effective_config(get_container(request))
+
+
+@router.patch("/config", response_model=ConfigResponse)
+def patch_config(patch: ConfigPatch, request: Request) -> ConfigResponse:
+    """Update thresholds / model participation on the live service and
+    persist the new operating point. Bounds are enforced by ConfigPatch;
+    enabling an unavailable model returns 400."""
+    container = get_container(request)
+    body = patch.model_dump(exclude_unset=True)
+    if not body:
+        return runtime_config.effective_config(container)
+    try:
+        return runtime_config.apply_patch(container, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # -----------------------------------------------------------------------------
