@@ -509,7 +509,10 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     ? latestModelScores.map((score) => score.modelKey)
     : ["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"];
   const spectrogramWidth = Math.max(300, Math.floor((spectrogramSize.width || 860) - 52));
-  const spectrogramHeight = Math.max(220, Math.min(340, Math.floor(spectrogramWidth * 0.38)));
+  // Fill the wrap's measured height so the spectrogram data spans the same
+  // vertical extent the frequency-axis labels are distributed over (otherwise
+  // a centered, shorter canvas renders the 500 Hz row above the 500 Hz label).
+  const spectrogramHeight = Math.max(220, Math.floor(spectrogramSize.height || 300));
   const constellationWidth = Math.max(320, Math.min(Math.floor(constellationSize.width || 480), 640));
   const constellationHeight = Math.max(300, Math.min(Math.floor(constellationSize.height || 360), 600));
 
@@ -596,7 +599,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <div style={{ fontSize: 19, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
         </div>
         <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>80 BANDS · 20–8 K HZ</span>
+          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>80 BANDS · 0.5–8 K HZ</span>
           <LivePulse size={8}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </div>
@@ -608,7 +611,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       >
         <MelSpectrogram freqs={audio.freqs} width={width} height={height} mels={80} sampleRate={audio.sampleRateRef?.current ?? 48000}/>
         <div style={{
-          position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
+          position: 'absolute', left: 8, top: 0, bottom: 0, width: 36,
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
           fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-soft)',
         }}>
@@ -651,25 +654,26 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         {[
           { label: 'Capture', sub: 'PCM' },
           { label: 'Mel-Spec', sub: '80 ch' },
-          { label: 'ReDimNet', sub: '192 d' },
+          { label: 'Models', sub: '×3' },
           { label: 'AASIST', sub: 'auth' },
+          { label: 'Grad-CAM', sub: 'XAI' },
           { label: 'Decision', sub: 'A / R' },
         ].map((s, i, arr) => (
           <React.Fragment key={i}>
             <div style={{
               flex: '0 0 auto',
-              padding: '8px 10px',
+              padding: '8px 8px',
               border: '1px solid var(--line-2)',
               borderRadius: 8,
               background: 'rgba(125,200,255,0.04)',
-              width: 84, textAlign: 'center',
+              width: 78, textAlign: 'center',
             }}>
               <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>{s.sub.toUpperCase()}</div>
-              <div style={{ fontSize: 12, marginTop: 2 }}>{s.label}</div>
+              <div style={{ fontSize: 11, marginTop: 2 }}>{s.label}</div>
             </div>
             {i < arr.length - 1 && (
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                <ParticleFlow width={64} height={28} count={3} speed={0.6}/>
+                <ParticleFlow width={48} height={26} count={3} speed={0.6}/>
               </div>
             )}
           </React.Fragment>

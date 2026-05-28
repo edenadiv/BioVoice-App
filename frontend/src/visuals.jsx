@@ -205,7 +205,9 @@ function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80, sampleRat
       // bins are linear over 0..Nyquist, where voice is a thin low sliver).
       const n = freqs.length || 1;
       const nyquist = sampleRate / 2;
-      const loBin = Math.max(1, Math.floor((480 / nyquist) * n));
+      // Band floor pinned to 500 Hz so the bottom data row lines up with the
+      // "500 Hz" axis label exactly.
+      const loBin = Math.max(1, Math.floor((500 / nyquist) * n));
       const hiBin = Math.min(n, Math.max(loBin + mels, Math.floor((Math.min(8000, nyquist) / nyquist) * n)));
       const ratio = hiBin / loBin;
       for (let y = 0; y < mels; y++) {
