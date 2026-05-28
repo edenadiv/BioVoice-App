@@ -3,16 +3,10 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { VoiceOrb, Waveform, MelSpectrogram, LivePulse } from "./visuals.jsx";
-import { AmbientField, EmbeddingConstellation, LiveFeatures } from "./console-ext.jsx";
+import { AmbientField, EmbeddingConstellation } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { useAppState } from "./lib/session";
 import { getReady } from "./lib/api";
-import {
-  useMetricsSummary,
-  formatLatency,
-  formatThroughput,
-  formatUptime,
-} from "./lib/useMetricsSummary";
 import { useEmbeddingProjection } from "./hooks/useEmbeddingProjection";
 import { useLiveEmbedding } from "./hooks/useLiveEmbedding";
 
@@ -314,6 +308,121 @@ function Toggle({ label, value, onChange }) {
 }
 
 // ============================================================================
+// ExpandButton — small corner control that opens a panel's large-mode modal.
+// ============================================================================
+function ExpandButton({ onClick, title = "Expand" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label="Expand panel"
+      style={{
+        flexShrink: 0, width: 26, height: 26, padding: 0,
+        display: 'grid', placeItems: 'center',
+        borderRadius: 7, border: '1px solid var(--line-2)',
+        background: 'transparent', color: 'var(--ink-soft)',
+        cursor: 'pointer', transition: 'all 160ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--teal-2)';
+        e.currentTarget.style.borderColor = 'rgba(126,240,255,0.55)';
+        e.currentTarget.style.background = 'rgba(126,240,255,0.10)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--ink-soft)';
+        e.currentTarget.style.borderColor = 'var(--line-2)';
+        e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <path d="M6 2 H2 V6 M10 2 H14 V6 M14 10 V14 H10 M2 10 V14 H6"
+              stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
+  );
+}
+
+// ============================================================================
+// PanelModal — centered overlay that re-renders a panel's content at a large
+// size. Mirrors the `biovoice-overlay` idiom used by VerificationOverlay.
+// `children` is a render-prop called with the measured body {width,height}.
+// ============================================================================
+const PANEL_TITLES = {
+  orb: "LIVE MIC · VOICE ORB",
+  profiles: "ENROLLED PROFILES",
+  spectrogram: "MEL-SPECTROGRAM · STREAMING",
+  pipeline: "INFERENCE PIPELINE",
+  constellation: "VOICE EMBEDDING SPACE",
+  fusion: "FUSION DECISION",
+  counters: "SESSION COUNTERS",
+  activity: "LIVE EVENT FEED",
+};
+
+function PanelModal({ title, onClose, children }) {
+  const [bodyRef, bodySize] = useElementSize();
+  const closeRef = useRef(null);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  useEffect(() => { closeRef.current?.focus(); }, []);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        display: 'grid', placeItems: 'center', padding: 32,
+        background: 'rgba(2,5,12,0.72)', backdropFilter: 'blur(10px)',
+        animation: 'fadeIn 240ms ease both',
+      }}
+    >
+      <div
+        style={{
+          width: 'min(92vw, 1100px)', height: 'min(88vh, 760px)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          background: 'linear-gradient(180deg, rgba(10,16,28,0.97), rgba(8,12,22,0.97))',
+          border: '1px solid rgba(125,200,255,0.18)', borderRadius: 16,
+          boxShadow: '0 30px 120px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
+          <span className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>{title}</span>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 30, height: 30, padding: 0, lineHeight: 1,
+              display: 'grid', placeItems: 'center',
+              borderRadius: 8, border: '1px solid var(--line-2)',
+              background: 'transparent', color: 'var(--ink-soft)',
+              cursor: 'pointer', fontSize: 18,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div
+          ref={bodyRef}
+          style={{ flex: 1, minHeight: 0, padding: 22, overflow: 'auto', display: 'flex', flexDirection: 'column' }}
+        >
+          {bodySize.width > 0 ? children(bodySize) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // ConsoleScreen — the default expert dashboard.
 // ============================================================================
 function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll, onShowDetails, threatCount, verifyCount }) {
@@ -321,6 +430,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const [hoverProfile, setHoverProfile] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [embeddingModelKey, setEmbeddingModelKey] = useState("redimnet_b5");
+  const [expanded, setExpanded] = useState(null);
   const [spectrogramRef, spectrogramSize] = useElementSize();
   const [constellationRef, constellationSize] = useElementSize();
 
@@ -347,10 +457,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
   const acceptedCount = useCounter(verifyCount, 1400, [verifyCount]);
   const blockedCount = useCounter(threatCount, 1400, [threatCount]);
-  const profilesCount = useCounter(profiles.length, 1000, [profiles.length]);
-
-  // Real backend telemetry — replaces the old hardcoded "11ms / 62/s / 14d".
-  const metrics = useMetricsSummary();
 
   // V3 — real ReDimNet embeddings projected to 3-d for the constellation.
   const projection = useEmbeddingProjection(embeddingModelKey, profiles.length);
@@ -371,6 +477,396 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const constellationWidth = Math.max(280, Math.floor(Math.min(constellationSize.width || 420, 520)));
   const constellationHeight = Math.max(240, Math.min(340, Math.floor(constellationWidth * 0.72)));
 
+  // --------------------------------------------------------------------------
+  // Panel bodies — defined once and reused by both the inline panel and the
+  // large-mode modal. `onExpand` (when present) renders the corner expand
+  // button; the modal omits it. Canvas panels take explicit width/height so
+  // they redraw crisply at modal size.
+  // --------------------------------------------------------------------------
+  const orbBody = ({ onExpand, orbSize = 260, waveWidth = 352, waveHeight = 48 } = {}) => (
+    <>
+      <VoiceOrb size={orbSize} samples={audio.samples} level={audio.level} hue="cyan" intensity={1.1}/>
+      <div style={{ position: 'absolute', top: 16, left: 16, right: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <span className={`pill ${micState === 'live' ? 'good' : 'warn'}`}>
+          <span className="dot"></span>
+          {micState === 'live' ? 'LIVE MIC' : 'STANDBY MIC'}
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>16 KHZ</span>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12 }}>
+        <Waveform samples={audio.samples} width={waveWidth} height={waveHeight} bars={80} mirror={true}/>
+      </div>
+    </>
+  );
+
+  const profilesBody = ({ onExpand } = {}) => (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span className="label-mono" style={{ fontSize: 10 }}>ENROLLED PROFILE · CHOOSE ONE</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="num-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      {/* G17 — buttons inside are focusable but axe needs the
+          scrollable region itself to be reachable too. Lightweight
+          defensive tabIndex + role keeps the panel green even if
+          the button list is empty. */}
+      <div
+        style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1 }}
+        tabIndex={0}
+        role="region"
+        aria-label="Enrolled profiles"
+      >
+        {profiles.map(p => (
+          <button key={p.id}
+            onClick={() => setSelectedProfile(p.id)}
+            onMouseEnter={() => setHoverProfile(p.id)}
+            onMouseLeave={() => setHoverProfile(null)}
+            style={{
+              background: selectedProfile === p.id ? 'rgba(126,240,255,0.10)' : (hoverProfile === p.id ? 'rgba(125,200,255,0.04)' : 'transparent'),
+              border: `1px solid ${selectedProfile === p.id ? 'rgba(126,240,255,0.5)' : 'var(--line)'}`,
+              borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 12,
+              color: 'var(--ink)', textAlign: 'left',
+              transition: 'all 180ms',
+              transform: hoverProfile === p.id && selectedProfile !== p.id ? 'translateX(2px)' : 'none',
+            }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
+              display: 'grid', placeItems: 'center',
+              color: '#04070d', fontWeight: 600, fontSize: 13,
+            }}>{p.initials}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14 }}>{p.name}</div>
+              <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>{p.id}</div>
+            </div>
+            {selectedProfile === p.id && <span style={{ color: 'var(--teal-2)' }}>●</span>}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+
+  const spectrogramBody = ({ onExpand, width, height, wrapRef } = {}) => (
+    <>
+      <div className="biovoice-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+        <div>
+          <div className="label-mono" style={{ fontSize: 10 }}>MEL-SPECTROGRAM · STREAMING</div>
+          <div style={{ fontSize: 19, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
+        </div>
+        <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
+          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>80 BANDS · 20–8 K HZ</span>
+          <LivePulse size={8}/>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </div>
+      </div>
+      <div
+        ref={wrapRef}
+        className="biovoice-spectrogram-wrap"
+        style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280, width: '100%' }}
+      >
+        <MelSpectrogram freqs={audio.freqs} width={width} height={height} mels={80}/>
+        <div style={{
+          position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-soft)',
+        }}>
+          <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>500</span><span>20 Hz</span>
+        </div>
+        {micState !== 'live' && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: 'none',
+          }}>
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: 10,
+              background: 'rgba(4,7,13,0.72)',
+              border: '1px solid rgba(125,200,255,0.12)',
+              color: 'var(--ink-soft)',
+            }}>
+              <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
+              <div style={{ fontSize: 12, marginTop: 6 }}>Grant mic access to stream the spectrogram.</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  const pipelineBody = ({ onExpand } = {}) => (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span className="label-mono" style={{ fontSize: 10 }}>INFERENCE PIPELINE · IDLE</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="num-mono" style={{ fontSize: 10, color: 'var(--good)' }}>READY</span>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      <div className="biovoice-pipeline-row" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        {[
+          { label: 'Capture', sub: 'PCM' },
+          { label: 'Mel-Spec', sub: '80 ch' },
+          { label: 'ReDimNet', sub: '192 d' },
+          { label: 'AASIST', sub: 'auth' },
+          { label: 'Decision', sub: 'A / R' },
+        ].map((s, i, arr) => (
+          <React.Fragment key={i}>
+            <div style={{
+              flex: '0 0 auto',
+              padding: '8px 10px',
+              border: '1px solid var(--line-2)',
+              borderRadius: 8,
+              background: 'rgba(125,200,255,0.04)',
+              width: 84, textAlign: 'center',
+            }}>
+              <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>{s.sub.toUpperCase()}</div>
+              <div style={{ fontSize: 12, marginTop: 2 }}>{s.label}</div>
+            </div>
+            {i < arr.length - 1 && (
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                <ParticleFlow width={64} height={28} count={3} speed={0.6}/>
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    </>
+  );
+
+  const constellationBody = ({ onExpand, width, height, wrapRef } = {}) => (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span
+          className="label-mono"
+          style={{ fontSize: 10 }}
+          title="Selected speaker model embeddings projected to PCA(3). Live point updates from the current mic window."
+        >
+          VOICE EMBEDDING SPACE
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {projection.error && (
+            <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
+          )}
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      <div
+        ref={wrapRef}
+        className="biovoice-constellation-wrap"
+        style={{ display: 'grid', placeItems: 'center', width: '100%', minHeight: 280 }}
+      >
+        <EmbeddingConstellation
+          width={width}
+          height={height}
+          projectedProfiles={projection.profiles}
+          livePoint={live.liveProjected}
+          matchId={selectedProfile}
+          loading={projection.loading}
+        />
+      </div>
+      <div className="biovoice-constellation-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+        <div className="biovoice-constellation-legend" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.loading || live.liveProjected ? 1 : 0.45 }}></span>
+            <span className="label-mono" style={{ fontSize: 9 }}>{live.liveProjected ? 'LIVE VOICE' : live.loading ? 'UPDATING LIVE POINT' : 'WAITING FOR MIC'}</span>
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3da9fc' }}></span>
+            <span className="label-mono" style={{ fontSize: 9 }}>{profiles.length} ENROLLED</span>
+          </span>
+        </div>
+        <div className="biovoice-constellation-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {activeModelKeys.map((modelKey) => {
+            const active = embeddingModelKey === modelKey;
+            return (
+              <button
+                key={modelKey}
+                onClick={() => setEmbeddingModelKey(modelKey)}
+                className="label-mono"
+                style={{
+                  fontSize: 9,
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  border: `1px solid ${active ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
+                  background: active ? 'rgba(126,240,255,0.10)' : 'transparent',
+                  color: active ? 'var(--teal-2)' : 'var(--ink-soft)',
+                  cursor: 'pointer',
+                  transition: 'all 180ms',
+                }}
+              >
+                {SPEAKER_MODEL_LABELS[modelKey]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+
+  const fusionBody = ({ onExpand } = {}) => (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <span className="label-mono" style={{ fontSize: 10 }}>FUSION DECISION</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SEPARATE FROM EMBEDDING VIEW</span>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      {latestFusion ? (
+        <>
+          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <Metric
+              label="Combined score"
+              value={latestFusion.combinedSimilarityScore.toFixed(3)}
+              sub={`${latestFusion.matchedModels}/${latestFusion.totalModels} matched`}
+              trend={latestFusion.combinedMatch ? 'up' : 'flat'}
+            />
+            <Metric
+              label="Decision rule"
+              value={`${latestFusion.majorityRequired}/${latestFusion.totalModels}`}
+              sub={latestFusion.combinedMatch ? 'majority reached' : 'majority not reached'}
+              trend={latestFusion.combinedMatch ? 'up' : 'flat'}
+            />
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {latestModelScores.map((score) => (
+              <div key={score.modelKey} className="biovoice-model-score-row" style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+                gap: 12,
+                alignItems: 'center',
+                padding: '10px 12px',
+                borderRadius: 10,
+                background: score.passedThreshold ? 'rgba(106,255,200,0.06)' : 'rgba(255,178,74,0.06)',
+                border: `1px solid ${score.passedThreshold ? 'rgba(106,255,200,0.20)' : 'rgba(255,178,74,0.20)'}`,
+              }}>
+                <div>
+                  <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey]}</div>
+                  <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                    {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
+                  </div>
+                </div>
+                <div className="num-mono" style={{ fontSize: 16, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
+                  {score.similarityScore.toFixed(3)}
+                </div>
+                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
+                  THR {score.threshold.toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
+          Run a verification to see the majority vote and the per-model agreement here.
+        </div>
+      )}
+    </>
+  );
+
+  const countersBody = () => (
+    <>
+      <div className="panel" style={{ padding: '14px 18px' }}>
+        <div className="label-mono" style={{ fontSize: 9 }}>VERIFIED TODAY</div>
+        <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--teal-2)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
+          {Math.floor(acceptedCount).toLocaleString()}
+        </div>
+        <div className="label-mono" style={{ fontSize: 8, color: 'var(--good)', marginTop: 2 }}>+12% VS YESTERDAY</div>
+      </div>
+      <div className="panel" style={{ padding: '14px 18px', border: '1px solid rgba(255,85,119,0.25)', boxShadow: '0 0 30px rgba(255,85,119,0.06)' }}>
+        <div className="label-mono" style={{ fontSize: 9 }}>DEEPFAKES BLOCKED</div>
+        <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--bad)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
+          {Math.floor(blockedCount).toLocaleString()}
+        </div>
+        <div className="label-mono" style={{ fontSize: 8, color: 'var(--bad)', marginTop: 2 }}>3 IN LAST HOUR</div>
+      </div>
+    </>
+  );
+
+  const activityBody = ({ onExpand } = {}) => (
+    <>
+      <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span className="label-mono" style={{ fontSize: 10 }}>LIVE EVENT FEED</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <LivePulse size={8}/>
+          {onExpand && <ExpandButton onClick={onExpand}/>}
+        </span>
+      </div>
+      {/* G17 — `tabIndex={0}` lets keyboard users scroll the live
+          event feed; without it, axe flags `scrollable-region-
+          focusable` (Safari + WCAG 2.1.1). aria-label gives the
+          feed a discoverable name in screen readers. */}
+      <div
+        style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}
+        tabIndex={0}
+        role="region"
+        aria-label="Live event feed"
+      >
+        {activity.length === 0 ? (
+          <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 12, lineHeight: 1.6 }}>
+            <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
+            Verifications appear here as they happen.<br/>
+            Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enrol your first speaker.
+          </div>
+        ) : (
+          activity.map((a, i) => (
+            <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
+          ))
+        )}
+      </div>
+    </>
+  );
+
+  // Re-render a panel's content at the measured modal size.
+  const renderLarge = (key, size) => {
+    const w = size.width, h = size.height;
+    switch (key) {
+      case 'orb':
+        return (
+          <div style={{ position: 'relative', width: '100%', flex: 1, minHeight: 0, display: 'grid', placeItems: 'center' }}>
+            {orbBody({ orbSize: Math.max(200, Math.min(w, h) - 80), waveWidth: Math.min(w - 24, 900), waveHeight: 72 })}
+          </div>
+        );
+      case 'profiles':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            {profilesBody()}
+          </div>
+        );
+      case 'spectrogram':
+        return spectrogramBody({ width: Math.max(320, w - 48), height: Math.max(240, h - 80) });
+      case 'pipeline':
+        return <div>{pipelineBody()}</div>;
+      case 'constellation':
+        return constellationBody({ width: Math.max(300, Math.min(w - 48, 820)), height: Math.max(260, h - 150) });
+      case 'fusion':
+        return <div style={{ display: 'grid', gap: 12 }}>{fusionBody()}</div>;
+      case 'counters':
+        return (
+          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            {countersBody()}
+          </div>
+        );
+      case 'activity':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            {activityBody()}
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="screen fade-enter">
       <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Operator console" screenName="CONSOLE"/>
@@ -384,63 +880,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
           {/* Mic visualizer */}
           <div className="panel outline-glow" style={{ position: 'relative', overflow: 'hidden', minHeight: 280, display: 'grid', placeItems: 'center', padding: 24 }}>
-            <VoiceOrb size={260} samples={audio.samples} level={audio.level} hue="cyan" intensity={1.1}/>
-            <div style={{ position: 'absolute', top: 16, left: 16, right: 16, display: 'flex', justifyContent: 'space-between' }}>
-              <span className={`pill ${micState === 'live' ? 'good' : 'warn'}`}>
-                <span className="dot"></span>
-                {micState === 'live' ? 'LIVE MIC' : 'STANDBY MIC'}
-              </span>
-              <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>16 KHZ</span>
-            </div>
-            <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12 }}>
-              <Waveform samples={audio.samples} width={352} height={48} bars={80} mirror={true}/>
-            </div>
+            {orbBody({ onExpand: () => setExpanded('orb') })}
           </div>
 
           {/* Profile picker */}
           <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>ENROLLED PROFILE · CHOOSE ONE</span>
-              <span className="num-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
-            </div>
-            {/* G17 — buttons inside are focusable but axe needs the
-                scrollable region itself to be reachable too. Lightweight
-                defensive tabIndex + role keeps the panel green even if
-                the button list is empty. */}
-            <div
-              style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1 }}
-              tabIndex={0}
-              role="region"
-              aria-label="Enrolled profiles"
-            >
-              {profiles.map(p => (
-                <button key={p.id}
-                  onClick={() => setSelectedProfile(p.id)}
-                  onMouseEnter={() => setHoverProfile(p.id)}
-                  onMouseLeave={() => setHoverProfile(null)}
-                  style={{
-                    background: selectedProfile === p.id ? 'rgba(126,240,255,0.10)' : (hoverProfile === p.id ? 'rgba(125,200,255,0.04)' : 'transparent'),
-                    border: `1px solid ${selectedProfile === p.id ? 'rgba(126,240,255,0.5)' : 'var(--line)'}`,
-                    borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    color: 'var(--ink)', textAlign: 'left',
-                    transition: 'all 180ms',
-                    transform: hoverProfile === p.id && selectedProfile !== p.id ? 'translateX(2px)' : 'none',
-                  }}>
-                  <div style={{
-                    width: 32, height: 32, borderRadius: '50%',
-                    background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
-                    display: 'grid', placeItems: 'center',
-                    color: '#04070d', fontWeight: 600, fontSize: 13,
-                  }}>{p.initials}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14 }}>{p.name}</div>
-                    <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>{p.id}</div>
-                  </div>
-                  {selectedProfile === p.id && <span style={{ color: 'var(--teal-2)' }}>●</span>}
-                </button>
-              ))}
-            </div>
+            {profilesBody({ onExpand: () => setExpanded('profiles') })}
           </div>
 
           <button className="btn btn-primary" onClick={() => onVerify(profiles.find(p => p.id === selectedProfile))}
@@ -460,110 +905,14 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minHeight: 0, minWidth: 0 }}>
           <PanelTitle eyebrow="02 · LIVE SIGNAL" title="Room audio · real time"/>
 
-          {/* Big spectrogram */}
+          {/* Big spectrogram — grows to fill the column */}
           <div className="panel outline-glow" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, padding: 22, overflow: 'hidden' }}>
-            <div className="biovoice-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
-              <div>
-                <div className="label-mono" style={{ fontSize: 10 }}>MEL-SPECTROGRAM · STREAMING</div>
-                <div style={{ fontSize: 19, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
-              </div>
-              <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-                <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>80 BANDS · 20–8 K HZ</span>
-                <LivePulse size={8}/>
-              </div>
-            </div>
-            <div
-              ref={spectrogramRef}
-              className="biovoice-spectrogram-wrap"
-              style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280, width: '100%' }}
-            >
-              <MelSpectrogram freqs={audio.freqs} width={spectrogramWidth} height={spectrogramHeight} mels={80}/>
-              <div style={{
-                position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
-                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-soft)',
-              }}>
-                <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>500</span><span>20 Hz</span>
-              </div>
-              {micState !== 'live' && (
-                <div style={{
-                  position: 'absolute',
-                  inset: 0,
-                  display: 'grid',
-                  placeItems: 'center',
-                  pointerEvents: 'none',
-                }}>
-                  <div style={{
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    background: 'rgba(4,7,13,0.72)',
-                    border: '1px solid rgba(125,200,255,0.12)',
-                    color: 'var(--ink-soft)',
-                  }}>
-                    <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
-                    <div style={{ fontSize: 12, marginTop: 6 }}>Grant mic access to stream the spectrogram.</div>
-                  </div>
-                </div>
-              )}
-            </div>
+            {spectrogramBody({ onExpand: () => setExpanded('spectrogram'), width: spectrogramWidth, height: spectrogramHeight, wrapRef: spectrogramRef })}
           </div>
 
           {/* Pipeline mini-viz with particles */}
           <div className="panel" style={{ padding: '18px 20px', minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>INFERENCE PIPELINE · IDLE</span>
-              <span className="num-mono" style={{ fontSize: 10, color: 'var(--good)' }}>READY</span>
-            </div>
-            <div className="biovoice-pipeline-row" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              {[
-                { label: 'Capture', sub: 'PCM' },
-                { label: 'Mel-Spec', sub: '80 ch' },
-                { label: 'ReDimNet', sub: '192 d' },
-                { label: 'AASIST', sub: 'auth' },
-                { label: 'Decision', sub: 'A / R' },
-              ].map((s, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{
-                    flex: '0 0 auto',
-                    padding: '8px 10px',
-                    border: '1px solid var(--line-2)',
-                    borderRadius: 8,
-                    background: 'rgba(125,200,255,0.04)',
-                    width: 84, textAlign: 'center',
-                  }}>
-                    <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>{s.sub.toUpperCase()}</div>
-                    <div style={{ fontSize: 12, marginTop: 2 }}>{s.label}</div>
-                  </div>
-                  {i < arr.length - 1 && (
-                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                      <ParticleFlow width={64} height={28} count={3} speed={0.6}/>
-                    </div>
-                  )}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Live extracted voice features */}
-          <div className="panel" style={{ padding: '16px 20px', minWidth: 0 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>
-                EXTRACTED VOICE FEATURES {micState === 'live' ? '(live mic)' : '(idle)'}
-              </span>
-              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>AUTOCORR PITCH · LPC FORMANTS · VAD-GATED SNR</span>
-            </div>
-            <LiveFeatures
-              getRecentFloat={micState === 'live' ? audio.getRecentFloat : null}
-              sampleRate={audio.sampleRateRef?.current ?? 16000}
-            />
-          </div>
-
-          {/* Health bar — real backend telemetry from /metrics/summary. */}
-          <div className="biovoice-console-metrics" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-            <Metric label="Verify p50" value={formatLatency(metrics?.p50VerifyMs ?? null)} sub="rolling" trend="flat"/>
-            <Metric label="Throughput" value={formatThroughput(metrics?.throughputPerSec ?? 0)} sub="lifetime avg" trend="up"/>
-            <Metric label="Profiles" value={profilesCount.toFixed(0)} sub="enrolled" trend="up"/>
-            <Metric label="Uptime" value={metrics ? formatUptime(metrics.uptimeSec) : "—"} sub="since boot" trend="flat"/>
+            {pipelineBody({ onExpand: () => setExpanded('pipeline') })}
           </div>
         </div>
 
@@ -573,172 +922,24 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
           {/* Embedding Constellation — the showpiece */}
           <div className="panel outline-glow" style={{ padding: '18px 18px 14px', position: 'relative', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-              <span
-                className="label-mono"
-                style={{ fontSize: 10 }}
-                title="Selected speaker model embeddings projected to PCA(3). Live point updates from the current mic window."
-              >
-                VOICE EMBEDDING SPACE
-              </span>
-              {projection.error && (
-                <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
-              )}
-            </div>
-            <div
-              ref={constellationRef}
-              className="biovoice-constellation-wrap"
-              style={{ display: 'grid', placeItems: 'center', width: '100%', minHeight: 280 }}
-            >
-              <EmbeddingConstellation
-                width={constellationWidth}
-                height={constellationHeight}
-                projectedProfiles={projection.profiles}
-                livePoint={live.liveProjected}
-                matchId={selectedProfile}
-                loading={projection.loading}
-              />
-            </div>
-            <div className="biovoice-constellation-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
-              <div className="biovoice-constellation-legend" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.loading || live.liveProjected ? 1 : 0.45 }}></span>
-                  <span className="label-mono" style={{ fontSize: 9 }}>{live.liveProjected ? 'LIVE VOICE' : live.loading ? 'UPDATING LIVE POINT' : 'WAITING FOR MIC'}</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3da9fc' }}></span>
-                  <span className="label-mono" style={{ fontSize: 9 }}>{profiles.length} ENROLLED</span>
-                </span>
-              </div>
-              <div className="biovoice-constellation-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                {activeModelKeys.map((modelKey) => {
-                  const active = embeddingModelKey === modelKey;
-                  return (
-                    <button
-                      key={modelKey}
-                      onClick={() => setEmbeddingModelKey(modelKey)}
-                      className="label-mono"
-                      style={{
-                        fontSize: 9,
-                        padding: '4px 10px',
-                        borderRadius: 999,
-                        border: `1px solid ${active ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
-                        background: active ? 'rgba(126,240,255,0.10)' : 'transparent',
-                        color: active ? 'var(--teal-2)' : 'var(--ink-soft)',
-                        cursor: 'pointer',
-                        transition: 'all 180ms',
-                      }}
-                    >
-                      {SPEAKER_MODEL_LABELS[modelKey]}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {constellationBody({ onExpand: () => setExpanded('constellation'), width: constellationWidth, height: constellationHeight, wrapRef: constellationRef })}
           </div>
 
           <div className="panel" style={{ padding: '16px 18px', display: 'grid', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>FUSION DECISION</span>
-              <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SEPARATE FROM EMBEDDING VIEW</span>
-            </div>
-            {latestFusion ? (
-              <>
-                <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                  <Metric
-                    label="Combined score"
-                    value={latestFusion.combinedSimilarityScore.toFixed(3)}
-                    sub={`${latestFusion.matchedModels}/${latestFusion.totalModels} matched`}
-                    trend={latestFusion.combinedMatch ? 'up' : 'flat'}
-                  />
-                  <Metric
-                    label="Decision rule"
-                    value={`${latestFusion.majorityRequired}/${latestFusion.totalModels}`}
-                    sub={latestFusion.combinedMatch ? 'majority reached' : 'majority not reached'}
-                    trend={latestFusion.combinedMatch ? 'up' : 'flat'}
-                  />
-                </div>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {latestModelScores.map((score) => (
-                    <div key={score.modelKey} className="biovoice-model-score-row" style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'minmax(0, 1fr) auto auto',
-                      gap: 12,
-                      alignItems: 'center',
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      background: score.passedThreshold ? 'rgba(106,255,200,0.06)' : 'rgba(255,178,74,0.06)',
-                      border: `1px solid ${score.passedThreshold ? 'rgba(106,255,200,0.20)' : 'rgba(255,178,74,0.20)'}`,
-                    }}>
-                      <div>
-                        <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey]}</div>
-                        <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
-                          {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
-                        </div>
-                      </div>
-                      <div className="num-mono" style={{ fontSize: 16, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
-                        {score.similarityScore.toFixed(3)}
-                      </div>
-                      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
-                        THR {score.threshold.toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
-                Run a verification to see the majority vote and the per-model agreement here.
-              </div>
-            )}
+            {fusionBody({ onExpand: () => setExpanded('fusion') })}
           </div>
 
           {/* Compact counters */}
-          <div className="biovoice-console-counters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="panel" style={{ padding: '14px 18px' }}>
-              <div className="label-mono" style={{ fontSize: 9 }}>VERIFIED TODAY</div>
-              <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--teal-2)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
-                {Math.floor(acceptedCount).toLocaleString()}
-              </div>
-              <div className="label-mono" style={{ fontSize: 8, color: 'var(--good)', marginTop: 2 }}>+12% VS YESTERDAY</div>
-            </div>
-            <div className="panel" style={{ padding: '14px 18px', border: '1px solid rgba(255,85,119,0.25)', boxShadow: '0 0 30px rgba(255,85,119,0.06)' }}>
-              <div className="label-mono" style={{ fontSize: 9 }}>DEEPFAKES BLOCKED</div>
-              <div className="num-mono" style={{ fontSize: 30, fontWeight: 200, color: 'var(--bad)', lineHeight: 1, marginTop: 6, letterSpacing: '-0.02em' }}>
-                {Math.floor(blockedCount).toLocaleString()}
-              </div>
-              <div className="label-mono" style={{ fontSize: 8, color: 'var(--bad)', marginTop: 2 }}>3 IN LAST HOUR</div>
+          <div className="biovoice-console-counters" style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {countersBody()}
+            <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 3 }}>
+              <ExpandButton onClick={() => setExpanded('counters')}/>
             </div>
           </div>
 
           {/* Activity feed */}
           <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: 0 }}>
-            <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="label-mono" style={{ fontSize: 10 }}>LIVE EVENT FEED</span>
-              <LivePulse size={8}/>
-            </div>
-            {/* G17 — `tabIndex={0}` lets keyboard users scroll the live
-                event feed; without it, axe flags `scrollable-region-
-                focusable` (Safari + WCAG 2.1.1). aria-label gives the
-                feed a discoverable name in screen readers. */}
-            <div
-              style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}
-              tabIndex={0}
-              role="region"
-              aria-label="Live event feed"
-            >
-              {activity.length === 0 ? (
-                <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 12, lineHeight: 1.6 }}>
-                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
-                  Verifications appear here as they happen.<br/>
-                  Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enrol your first speaker.
-                </div>
-              ) : (
-                activity.map((a, i) => (
-                  <ActivityRow key={a.id} {...a} fresh={i === 0} now={now}/>
-                ))
-              )}
-            </div>
+            {activityBody({ onExpand: () => setExpanded('activity') })}
           </div>
 
           {/* Hint */}
@@ -758,6 +959,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
         </div>
       </div>
+
+      {expanded && (
+        <PanelModal title={PANEL_TITLES[expanded]} onClose={() => setExpanded(null)}>
+          {(size) => renderLarge(expanded, size)}
+        </PanelModal>
+      )}
     </div>
   );
 }

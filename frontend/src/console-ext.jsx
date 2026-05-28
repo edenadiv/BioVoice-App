@@ -1,5 +1,5 @@
 // Console extras — high-impact visualizations and overlays for the operator console.
-// Components: AmbientField, EmbeddingConstellation, LiveFeatures, VerificationOverlay,
+// Components: AmbientField, EmbeddingConstellation, VerificationOverlay,
 // LiveClock, ThreatLevel, ScanLine.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,12 +15,6 @@ import { useAppDispatch } from "./lib/session";
 import { useCalibratedTimeline } from "./lib/useCalibratedTimeline";
 import { SIM_THRESHOLD, DF_THRESHOLD } from "./lib/thresholds";
 import { DegradedBanner } from "./components/DegradedBanner";
-import {
-  formantsLPC,
-  jitterPercent,
-  pitchAutocorrelation,
-  snrFromVad,
-} from "./lib/dsp";
 
 // ============================================================================
 // AmbientField — slow-drifting particles with parallax depth in the backdrop.
@@ -289,96 +283,6 @@ function EmbeddingConstellation({
   }, [width, height, centers, sampleDots, scale, loading]);
 
   return <canvas ref={ref} style={{ display: 'block' }}/>;
-}
-
-// ============================================================================
-// LiveFeatures — pitch / formants / jitter / SNR computed from the real
-// rolling Float32 mic buffer using the algorithms in `lib/dsp.ts`:
-// time-domain autocorrelation pitch, Levinson-Durbin LPC formants,
-// cycle-to-cycle jitter, VAD-gated SNR. No FFT-bin shortcuts, no
-// magic offsets, no per-frame faux jitter.
-// ============================================================================
-function LiveFeatures({ getRecentFloat, sampleRate, vadThreshold = 0.018 }) {
-  const [feat, setFeat] = useState({ pitch: 0, f1: 0, f2: 0, f3: 0, jitter: 0, snr: 0, vad: false });
-  const periodBufRef = useRef([]);
-
-  useEffect(() => {
-    let raf;
-    const tick = () => {
-      const samples = getRecentFloat ? getRecentFloat(0.5) : null;
-      if (samples && samples.length > 256) {
-        // Pitch — autocorrelation, sub-sample peak refinement.
-        const pitch = pitchAutocorrelation(samples, sampleRate);
-        // Formants — pre-emphasis + Hamming + LPC(order=12) + roots.
-        const [f1, f2, f3] = formantsLPC(samples, sampleRate, 12);
-        // Cycle-to-cycle jitter — keep a buffer of detected periods.
-        if (pitch > 0) {
-          const periodSamples = sampleRate / pitch;
-          const buf = periodBufRef.current;
-          buf.push(periodSamples);
-          if (buf.length > 20) buf.shift();
-        }
-        const jitter = jitterPercent(periodBufRef.current);
-        // SNR — VAD-gated, energy-based per-sample mask.
-        // Window-averaged frame energy keeps the mask stable across short bursts.
-        const FRAME = 320; // 20 ms at 16 kHz; scales naturally to 48 kHz too
-        const energies = new Float32Array(Math.floor(samples.length / FRAME));
-        for (let f = 0; f < energies.length; f++) {
-          let sum = 0;
-          const start = f * FRAME;
-          for (let i = 0; i < FRAME; i++) {
-            const v = samples[start + i];
-            sum += v * v;
-          }
-          energies[f] = Math.sqrt(sum / FRAME);
-        }
-        // VAD threshold: bigger than absolute floor AND ≥ noise floor × 3.
-        const sortedE = Array.from(energies).sort((a, b) => a - b);
-        const noiseFloor = sortedE[Math.floor(sortedE.length * 0.2)] || 0;
-        const vadMask = new Array(samples.length);
-        for (let f = 0; f < energies.length; f++) {
-          const isVoice = energies[f] > Math.max(vadThreshold, noiseFloor * 3);
-          for (let i = 0; i < FRAME; i++) vadMask[f * FRAME + i] = isVoice;
-        }
-        for (let i = energies.length * FRAME; i < samples.length; i++) vadMask[i] = false;
-        const snr = snrFromVad(samples, vadMask);
-        const anyVoice = vadMask.some(Boolean);
-        setFeat({ pitch, f1, f2, f3, jitter, snr, vad: anyVoice });
-      } else {
-        // Mic not yet active or ring not full enough.
-        setFeat({ pitch: 0, f1: 0, f2: 0, f3: 0, jitter: 0, snr: 0, vad: false });
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [getRecentFloat, sampleRate, vadThreshold]);
-
-  const Cell = ({ label, value, unit, hint }) => (
-    <div style={{
-      padding: '10px 12px',
-      borderRadius: 8,
-      background: 'rgba(125,200,255,0.04)',
-      border: '1px solid var(--line)',
-      minWidth: 0,
-    }}>
-      <div className="label-mono" style={{ fontSize: 8.5, color: 'var(--ink-soft)' }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
-        <span className="num-mono" style={{ fontSize: 17, color: 'var(--teal-2)', fontWeight: 300 }}>{value}</span>
-        <span className="num-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>{unit}</span>
-      </div>
-      {hint && <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>{hint}</div>}
-    </div>
-  );
-
-  return (
-    <div className="biovoice-live-features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-      <Cell label="Pitch · F0" value={feat.pitch ? feat.pitch.toFixed(0) : '—'} unit="Hz" hint={feat.pitch > 165 ? 'female range' : feat.pitch > 0 ? 'male range' : 'silence'}/>
-      <Cell label="Formant F1" value={feat.f1 ? feat.f1.toFixed(0) : '—'} unit="Hz" hint={feat.f2 ? `F2 ${feat.f2.toFixed(0)} · F3 ${feat.f3.toFixed(0)}` : 'LPC'}/>
-      <Cell label="Jitter"     value={feat.jitter ? feat.jitter.toFixed(2) : '—'} unit="%" hint="cycle-to-cycle"/>
-      <Cell label="SNR"        value={feat.snr ? feat.snr.toFixed(1) : '—'} unit="dB" hint={feat.vad ? 'voiced / unvoiced' : 'no voice'}/>
-    </div>
-  );
 }
 
 // ============================================================================
@@ -1077,6 +981,6 @@ function hexA(hex, a) {
 }
 
 export {
-  AmbientField, EmbeddingConstellation, LiveFeatures,
+  AmbientField, EmbeddingConstellation,
   LiveClock, ThreatLevel, VerificationOverlay, CosineMatchViz, ResultPanel,
 };
