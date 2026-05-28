@@ -80,11 +80,23 @@ function AppShell() {
 // responsive.css can linearise the kiosk on small viewports.
 function useMobileViewportClass() {
   useEffect(() => {
-    const mql = window.matchMedia("(max-width: 767px)");
-    const apply = () => document.body.classList.toggle("biovoice-mobile", mql.matches);
+    const compactMql = window.matchMedia("(max-width: 1439px)");
+    const tabletMql = window.matchMedia("(max-width: 1023px)");
+    const mobileMql = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      document.body.classList.toggle("biovoice-compact", compactMql.matches);
+      document.body.classList.toggle("biovoice-tablet", tabletMql.matches);
+      document.body.classList.toggle("biovoice-mobile", mobileMql.matches);
+    };
     apply();
-    mql.addEventListener("change", apply);
-    return () => mql.removeEventListener("change", apply);
+    compactMql.addEventListener("change", apply);
+    tabletMql.addEventListener("change", apply);
+    mobileMql.addEventListener("change", apply);
+    return () => {
+      compactMql.removeEventListener("change", apply);
+      tabletMql.removeEventListener("change", apply);
+      mobileMql.removeEventListener("change", apply);
+    };
   }, []);
 }
 

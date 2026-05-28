@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getUserEmbeddings } from "../lib/api";
 import { fitPCA3, projectPCA3, type PCA3 } from "../lib/pca";
 import { deriveProfile } from "../lib/profileVisual";
-import type { UserEmbedding } from "../types";
+import type { SpeakerModelKey, UserEmbedding } from "../types";
 
 export type ProjectedProfile = {
   userId: string;
+  modelKey: SpeakerModelKey;
   centroid: [number, number, number];
   samples: Array<[number, number, number]>;
   color1: string;
@@ -36,7 +37,10 @@ export type EmbeddingProjectionState = {
  * Caller passes `refreshKey` (e.g. `profilesCount`) so the projection
  * re-fits whenever the enrolment set changes.
  */
-export function useEmbeddingProjection(refreshKey: unknown = 0): EmbeddingProjectionState {
+export function useEmbeddingProjection(
+  modelKey: SpeakerModelKey = "redimnet_b5",
+  refreshKey: unknown = 0,
+): EmbeddingProjectionState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [embeddings, setEmbeddings] = useState<UserEmbedding[]>([]);
@@ -47,7 +51,7 @@ export function useEmbeddingProjection(refreshKey: unknown = 0): EmbeddingProjec
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getUserEmbeddings()
+    getUserEmbeddings(modelKey)
       .then((rows) => {
         if (cancelled) return;
         setEmbeddings(rows);
@@ -62,7 +66,7 @@ export function useEmbeddingProjection(refreshKey: unknown = 0): EmbeddingProjec
     return () => {
       cancelled = true;
     };
-  }, [tick, refreshKey]);
+  }, [tick, refreshKey, modelKey]);
 
   const { basis, profiles } = useMemo(() => {
     if (embeddings.length === 0) {
@@ -84,6 +88,7 @@ export function useEmbeddingProjection(refreshKey: unknown = 0): EmbeddingProjec
       });
       return {
         userId: emb.userId,
+        modelKey: emb.modelKey,
         centroid: projectPCA3(emb.centroid, fitted),
         samples: emb.samples.map((s) => projectPCA3(s, fitted)),
         color1: visual.color1,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
@@ -15,6 +16,8 @@ from app.services.spoof import SpoofGenerationService
 from app.services.sub_classifier import AcousticProbe
 from app.services.verification import VerificationService
 from app.storage.sqlite_store import SQLiteStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -32,20 +35,20 @@ def build_container(settings: Settings) -> AppContainer:
         reference_samples_path=settings.reference_samples_path,
     )
     detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
-    # `verified-models` stages ECAPA + WeSpeaker loaders, but ReDimNet
-    # remains the only production encoder until those paths are vetted.
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
     comparison_encoders = {}
-    try:
-        comparison_encoders["ecapa_voxceleb"] = EcapaSpeakerEncoder(savedir=settings.ecapa_savedir)
-    except Exception:
-        pass
-    try:
-        comparison_encoders["wespeaker_resnet293_lm"] = WeSpeakerResNet293SpeakerEncoder(
-            model_dir=settings.wespeaker_resnet293_dir
-        )
-    except Exception:
-        pass
+    if settings.enable_ecapa_comparison:
+        try:
+            comparison_encoders["ecapa_voxceleb"] = EcapaSpeakerEncoder(savedir=settings.ecapa_savedir)
+        except Exception as exc:
+            logger.warning("Failed to enable ECAPA comparison model: %s", exc)
+    if settings.enable_wespeaker_comparison:
+        try:
+            comparison_encoders["wespeaker_resnet293_lm"] = WeSpeakerResNet293SpeakerEncoder(
+                model_dir=settings.wespeaker_resnet293_dir
+            )
+        except Exception as exc:
+            logger.warning("Failed to enable WeSpeaker ResNet293 comparison model: %s", exc)
     acoustic_probe = AcousticProbe()
     verification_service = VerificationService(
         store=store,
@@ -53,6 +56,11 @@ def build_container(settings: Settings) -> AppContainer:
         speaker_encoder=speaker_encoder,
         sample_rate=settings.sample_rate,
         similarity_threshold=settings.similarity_threshold,
+        model_similarity_thresholds={
+            "redimnet_b5": settings.redimnet_similarity_threshold,
+            "ecapa_voxceleb": settings.ecapa_similarity_threshold,
+            "wespeaker_resnet293_lm": settings.wespeaker_similarity_threshold,
+        },
         deepfake_threshold=settings.deepfake_threshold,
         min_enrollment_samples=settings.min_enrollment_samples,
         acoustic_probe=acoustic_probe,

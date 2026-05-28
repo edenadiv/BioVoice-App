@@ -18,13 +18,54 @@ The backend currently uses in-memory storage and a feature-based speaker embeddi
 
 Installation:
 
-- Base backend plus local model stack: `python -m pip install -e .[model] --no-build-isolation`
+- Base backend plus local model stack, including ECAPA + WeSpeaker ResNet293 deps: `python -m pip install -e .[model] --no-build-isolation`
+- The dedicated speaker-model extra still works too: `python -m pip install -e .[model,speaker_models] --no-build-isolation`
 - Add spoof-generation support (XTTS): `python -m pip install -e .[model,spoof] --no-build-isolation`
 
 Notes:
 
 - The `spoof` extra depends on `TTS`, which is currently expected to work on Python 3.11 or 3.12.
 - On Python 3.13, install the backend without `spoof` unless `TTS` publishes compatible builds.
+
+## Local run (Windows)
+
+From the repo root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .\backend[model,test] --no-build-isolation
+Copy-Item .\backend\.env.example .\backend\.env
+```
+
+If you want ECAPA and WeSpeaker ResNet293 enabled, add these lines to `backend/.env`:
+
+```env
+ENABLE_ECAPA_COMPARISON=1
+ENABLE_WESPEAKER_COMPARISON=1
+REDIMNET_SIMILARITY_THRESHOLD=0.75
+ECAPA_SIMILARITY_THRESHOLD=0.75
+WESPEAKER_SIMILARITY_THRESHOLD=0.75
+```
+
+Model assets:
+
+- `WeSpeaker ResNet293` is carried in the repo via Git LFS under `backend/models/wespeaker_resnet293_lm/`
+- `ECAPA` is not committed as machine-local symlinks; populate it locally with:
+
+```powershell
+.\.venv\Scripts\python.exe .\backend\scripts\setup_ecapa.py
+```
+
+Then run the backend:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+The API docs will be at `http://127.0.0.1:8000/docs`.
 
 ## Environment variables
 
@@ -35,13 +76,18 @@ deploy time (see "Secrets management" below).
 
 | Var | Purpose | Example |
 |---|---|---|
-| `CORS_ORIGINS` | Comma-separated list of allowed origins for browser CORS. Defaults to `http://localhost:5173`. Add the LAN IP for phone/iPad demos. | `CORS_ORIGINS=http://localhost:5173,http://10.0.0.10:5173` |
+| `CORS_ORIGINS` | Comma-separated list of allowed origins for browser CORS. Defaults to `http://localhost:5173,http://127.0.0.1:5173`. Add the LAN IP for phone/iPad demos. | `CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://10.0.0.10:5173` |
 | `SESSION_IDLE_SECONDS` | F2.1 — rolling idle window for `/auth/session` and refresh. Default 1800 (30 min). | `SESSION_IDLE_SECONDS=1800` |
 | `LOGIN_RATE_MAX_ATTEMPTS` | F2.2 — failures within `LOGIN_RATE_WINDOW_SECONDS` before lockout. Default 5. | `LOGIN_RATE_MAX_ATTEMPTS=5` |
 | `LOGIN_RATE_WINDOW_SECONDS` | F2.2 — rolling window. Default 300 (5 min). | `LOGIN_RATE_WINDOW_SECONDS=300` |
 | `LOGIN_LOCKOUT_SECONDS` | F2.2 — lockout duration once exceeded. Default 900 (15 min). | `LOGIN_LOCKOUT_SECONDS=900` |
 | `BIOVOICE_ADMIN_API_KEY` | F2.4 / F6 — gates the `/admin/*` surface. Unset = admin endpoints disabled (default). Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. | `BIOVOICE_ADMIN_API_KEY=...` |
 | `LOG_LEVEL` | Python `logging` level. F7.2 ships JSON logs by default; set `BIOVOICE_LOG_FORMAT=plain` for human-readable dev. | `LOG_LEVEL=INFO` |
+| `ENABLE_ECAPA_COMPARISON` | Set to `1` to load the optional SpeechBrain ECAPA comparison model at startup. | `ENABLE_ECAPA_COMPARISON=1` |
+| `ENABLE_WESPEAKER_COMPARISON` | Set to `1` to load the optional WeSpeaker ResNet293 ONNX comparison model at startup. | `ENABLE_WESPEAKER_COMPARISON=1` |
+| `REDIMNET_SIMILARITY_THRESHOLD` | Per-model threshold used by the fused speaker vote for ReDimNet. | `REDIMNET_SIMILARITY_THRESHOLD=0.75` |
+| `ECAPA_SIMILARITY_THRESHOLD` | Per-model threshold used by the fused speaker vote for ECAPA. | `ECAPA_SIMILARITY_THRESHOLD=0.75` |
+| `WESPEAKER_SIMILARITY_THRESHOLD` | Per-model threshold used by the fused speaker vote for WeSpeaker ResNet293. | `WESPEAKER_SIMILARITY_THRESHOLD=0.75` |
 | `BIOVOICE_LOG_FORMAT` | F7.2 — `json` (default) emits one JSON line per record; `plain` for local dev. | `BIOVOICE_LOG_FORMAT=plain` |
 | `BIOVOICE_COOKIE_INSECURE` | F2.5 — set to `1` to drop the `Secure` flag on the session cookie so HTTP local dev (no TLS) works. Production must leave this **unset** so the cookie is HTTPS-only. | `BIOVOICE_COOKIE_INSECURE=1` |
 | `DATABASE_URL` | F7.1 (planned) — Postgres connection string. Unset = SQLite at `backend/data/biovoice.sqlite3`. | `DATABASE_URL=postgres://…` |

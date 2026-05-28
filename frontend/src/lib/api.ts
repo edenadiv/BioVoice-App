@@ -5,9 +5,12 @@
 
 import type {
   AnalysisDetails,
+  CamSegment,
   EmbedResult,
+  ExplainModelKey,
   IdentificationMatch,
   IdentificationResult,
+  ModelCAM,
   ModelProvenance,
   Speaker,
   SpoofDecision,
@@ -16,6 +19,7 @@ import type {
   SpoofTestResult,
   UserEmbedding,
   VerificationResult,
+  SpeakerModelKey,
 } from "../types";
 import { encodeWav } from "./wav";
 
@@ -67,6 +71,7 @@ type VerificationResponse = {
   centroid_similarity: number;
   sample_similarities: number[];
   speaker_model_scores?: SpeakerModelScoreResponse[];
+  speaker_fusion?: SpeakerFusionDecisionResponse | null;
   message: string;
   session_id: string;
   stage_breakdown?: StageBreakdownResponse;
@@ -80,7 +85,19 @@ type SpeakerModelScoreResponse = {
   similarity_score: number;
   centroid_similarity: number;
   sample_similarities: number[];
+  threshold: number;
+  passed_threshold: boolean;
   drives_decision: boolean;
+};
+
+type SpeakerFusionDecisionResponse = {
+  strategy: "majority_vote";
+  combined_match: boolean;
+  combined_similarity_score: number;
+  matched_models: number;
+  total_models: number;
+  majority_required: number;
+  decisive_model_keys: Array<"redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm">;
 };
 
 type SampleQualityResponse = {
@@ -118,6 +135,7 @@ type IdentificationMatchResponse = {
 type IdentificationResponse = {
   matches: IdentificationMatchResponse[];
   speaker_model_matches?: SpeakerModelMatchesResponse[];
+  speaker_fusion?: SpeakerFusionDecisionResponse | null;
   deepfake_score: number;
   analysis_details: AnalysisDetailsResponse | null;
   would_accept_top1: boolean;
@@ -166,6 +184,19 @@ export type ReadyState = {
   redimnetWeightsOk: boolean;
 };
 
+type CamSegmentResponse = { start_ms: number; end_ms: number; peak: number };
+type ModelCAMResponse = {
+  model_key: ExplainModelKey;
+  frame_times_ms: number[];
+  freq_hz: number[];
+  heatmap: number[][];
+  threshold: number;
+  salient_segments: CamSegmentResponse[];
+};
+type ExplainResponse = { cams: ModelCAMResponse[] };
+
+export type { CamSegment, ModelCAM, ExplainModelKey };
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     // Kiosk + backend are same-origin in production (nginx fronts both)
@@ -211,6 +242,19 @@ function toAnalysisDetails(payload: AnalysisDetailsResponse): AnalysisDetails {
   };
 }
 
+function toSpeakerFusionDecision(payload: SpeakerFusionDecisionResponse | null | undefined) {
+  if (!payload) return null;
+  return {
+    strategy: payload.strategy,
+    combinedMatch: payload.combined_match,
+    combinedSimilarityScore: payload.combined_similarity_score,
+    matchedModels: payload.matched_models,
+    totalModels: payload.total_models,
+    majorityRequired: payload.majority_required,
+    decisiveModelKeys: payload.decisive_model_keys,
+  };
+}
+
 function toVerificationResult(response: VerificationResponse): VerificationResult {
   const stage = response.stage_breakdown;
   const details = response.analysis_details;
@@ -228,8 +272,11 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
       similarityScore: score.similarity_score,
       centroidSimilarity: score.centroid_similarity,
       sampleSimilarities: score.sample_similarities,
+      threshold: score.threshold,
+      passedThreshold: score.passed_threshold,
       drivesDecision: score.drives_decision,
     })),
+    speakerFusion: toSpeakerFusionDecision(response.speaker_fusion),
     message: response.message,
     sessionId: response.session_id,
     stageBreakdown: stage
@@ -291,6 +338,7 @@ export async function deleteUser(userId: string): Promise<void> {
 
 type UserEmbeddingResponse = {
   user_id: string;
+  model_key: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
   centroid: number[];
   samples: number[][];
   sample_count: number;
@@ -298,6 +346,7 @@ type UserEmbeddingResponse = {
 };
 
 type EmbedResponse = {
+  model_key: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
   embedding: number[];
   duration_ms: number;
   snr_db: number;
@@ -305,10 +354,13 @@ type EmbedResponse = {
   model_provenance?: ModelProvenanceResponse | null;
 };
 
-export async function getUserEmbeddings(): Promise<UserEmbedding[]> {
-  const response = await request<UserEmbeddingResponse[]>("/users/embeddings");
+export async function getUserEmbeddings(modelKey: SpeakerModelKey = "redimnet_b5"): Promise<UserEmbedding[]> {
+  const response = await request<UserEmbeddingResponse[]>(
+    `/users/embeddings?model_key=${encodeURIComponent(modelKey)}`,
+  );
   return response.map((row) => ({
     userId: row.user_id,
+    modelKey: row.model_key,
     centroid: row.centroid,
     samples: row.samples,
     sampleCount: row.sample_count,
@@ -322,12 +374,18 @@ export async function getUserEmbeddings(): Promise<UserEmbedding[]> {
  * vector the backend would have produced for the same audio at /verify
  * time. Does NOT touch the verification log.
  */
-export async function embedAudio(samples: Float32Array, sampleRate: number = 16000): Promise<EmbedResult> {
+export async function embedAudio(
+  samples: Float32Array,
+  sampleRate: number = 16000,
+  modelKey: SpeakerModelKey = "redimnet_b5",
+): Promise<EmbedResult> {
   const blob = encodeWav(samples, sampleRate);
   const formData = new FormData();
   formData.append("audio", blob, "preview.wav");
+  formData.append("model_key", modelKey);
   const response = await postForm<EmbedResponse>("/embed", formData);
   return {
+    modelKey: response.model_key,
     embedding: response.embedding,
     durationMs: response.duration_ms,
     snrDb: response.snr_db,
@@ -443,30 +501,6 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
 
 // -- Explain (Grad-CAM) -------------------------------------------------------
 
-export type ExplainModelKey = "aasist" | "redimnet_b5" | "ecapa_voxceleb";
-
-export type CamSegment = { startMs: number; endMs: number; peak: number };
-
-export type ModelCAM = {
-  modelKey: ExplainModelKey;
-  frameTimesMs: number[];
-  freqHz: number[];
-  heatmap: number[][];
-  threshold: number;
-  salientSegments: CamSegment[];
-};
-
-type CamSegmentResponse = { start_ms: number; end_ms: number; peak: number };
-type ModelCAMResponse = {
-  model_key: ExplainModelKey;
-  frame_times_ms: number[];
-  freq_hz: number[];
-  heatmap: number[][];
-  threshold: number;
-  salient_segments: CamSegmentResponse[];
-};
-type ExplainResponse = { cams: ModelCAMResponse[] };
-
 export async function explainAudio(file: File, userId?: string): Promise<ModelCAM[]> {
   const formData = new FormData();
   formData.append("audio", file);
@@ -500,6 +534,7 @@ export async function identifySpeaker(file: File, topN: number = 3): Promise<Ide
       matches: group.matches.map((m) => toIdentificationMatch(m)),
       drivesDecision: group.drives_decision,
     })),
+    speakerFusion: toSpeakerFusionDecision(response.speaker_fusion),
     deepfakeScore: response.deepfake_score,
     analysisDetails: response.analysis_details ? toAnalysisDetails(response.analysis_details) : null,
     wouldAcceptTop1: response.would_accept_top1,

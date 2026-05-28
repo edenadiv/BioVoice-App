@@ -10,16 +10,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from wave import Error as WaveError
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Request,
-    Response,
-    UploadFile,
-)
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import (
@@ -41,11 +32,13 @@ from app.schemas import (
     SpoofVoice,
     UserEmbedding,
     VerificationResponse,
+    SpeakerModelKey,
 )
 from app.services.audio import NoSpeechDetectedError
 from app.services.explain import build_adapters, explain_model
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
+
 
 router = APIRouter()
 
@@ -106,9 +99,7 @@ def ready(request: Request) -> dict:
     checks["aasist_weights"] = {"ok": s.aasist_weights_path.exists()}
     checks["redimnet_weights"] = {"ok": s.redimnet_weights_path.exists()}
     if not checks["aasist_weights"]["ok"] or not checks["redimnet_weights"]["ok"]:
-        checks["models_note"] = (
-            "Weights missing — falling back to heuristic detector + encoder"
-        )
+        checks["models_note"] = "Weights missing — falling back to heuristic detector + encoder"
 
     if not overall_ok:
         raise HTTPException(status_code=503, detail={"ready": False, "checks": checks})
@@ -121,21 +112,20 @@ def ready(request: Request) -> dict:
 
 
 @router.get("/users", response_model=list[SpeakerResponse])
-def list_users(
-    service: VerificationService = Depends(get_verification_service),
-) -> list[SpeakerResponse]:
+def list_users(service: VerificationService = Depends(get_verification_service)) -> list[SpeakerResponse]:
     return service.list_users()
 
 
 @router.get("/users/embeddings", response_model=list[UserEmbedding])
 def list_user_embeddings(
+    model_key: SpeakerModelKey = Query(default="redimnet_b5"),
     service: VerificationService = Depends(get_verification_service),
 ) -> list[UserEmbedding]:
     """V1 — bulk dump of every enrolled profile's centroid + per-sample
     192-d embeddings. Feeds the operator-console EmbeddingConstellation
     so it can render real PCA(3) projections instead of the previous
     deterministic-hash placeholders."""
-    return service.list_user_embeddings()
+    return service.list_user_embeddings(model_key=model_key)
 
 
 @router.post("/enroll", response_model=EnrollmentResponse)
@@ -152,9 +142,7 @@ async def enroll(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
-        return service.enroll(
-            user_id=user_id, audio_bytes=payload, filename=audio.filename
-        )
+        return service.enroll(user_id=user_id, audio_bytes=payload, filename=audio.filename)
     # NoSpeechDetectedError + SampleQualityRejectedError are ValueError
     # subclasses; both map to 400 with the operator-friendly message.
     except (ValueError, WaveError) as exc:
@@ -193,9 +181,7 @@ async def verify(
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
         with metrics.histogram("biovoice_verify_seconds").time():
-            result = service.verify(
-                user_id=user_id, audio_bytes=payload, filename=audio.filename
-            )
+            result = service.verify(user_id=user_id, audio_bytes=payload, filename=audio.filename)
         metrics.counter("biovoice_verifications_total").inc(
             labels={"decision": result.decision}
         )
@@ -211,6 +197,7 @@ async def verify(
 @router.post("/embed", response_model=EmbedResponse)
 async def embed_audio(
     audio: UploadFile = File(...),
+    model_key: SpeakerModelKey = Form(default="redimnet_b5"),
     service: VerificationService = Depends(get_verification_service),
 ) -> EmbedResponse:
     """V1 — encoder-only pass for the constellation's live point.
@@ -224,8 +211,10 @@ async def embed_audio(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio file is empty")
     try:
-        return service.embed_only(audio_bytes=payload)
+        return service.embed_only(audio_bytes=payload, model_key=model_key)
     except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -261,9 +250,7 @@ async def identify(
 
 
 @router.get("/results", response_model=list[VerificationResponse])
-def list_results(
-    service: VerificationService = Depends(get_verification_service),
-) -> list[VerificationResponse]:
+def list_results(service: VerificationService = Depends(get_verification_service)) -> list[VerificationResponse]:
     return service.list_results()
 
 
@@ -338,10 +325,7 @@ def list_spoof_engines(
                 description=e.description,
                 requires_network=e.requires_network,
                 available=e.available,
-                voices=[
-                    SpoofVoice(id=v.id, label=v.label, language=v.language)
-                    for v in e.voices
-                ],
+                voices=[SpoofVoice(id=v.id, label=v.label, language=v.language) for v in e.voices],
                 default_voice=e.default_voice,
             )
             for e in engines

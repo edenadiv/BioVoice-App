@@ -103,19 +103,12 @@ class RedimNetSpeakerEncoder:
 
 
 class EcapaSpeakerEncoder:
-    """Optional SpeechBrain ECAPA-TDNN encoder.
-
-    This is intentionally not wired into `core/container.py` yet. The
-    goal of this branch is to stage and validate the loader path without
-    changing production verification behavior.
-    """
-
     provenance: str = "ecapa_voxceleb"
 
     def __init__(self, savedir: Path | None = None, source: str = "speechbrain/spkrec-ecapa-voxceleb"):
         try:
             from speechbrain.inference.speaker import EncoderClassifier
-        except ImportError as exc:  # pragma: no cover - depends on optional extra
+        except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "SpeechBrain is not installed. Install `backend[speaker_models]` to use ECAPA."
             ) from exc
@@ -140,14 +133,6 @@ class EcapaSpeakerEncoder:
 
 
 class WeSpeakerResNet293SpeakerEncoder:
-    """Optional WeSpeaker ResNet293 LM encoder.
-
-    Uses the official ONNX export from the published Hugging Face
-    checkpoint bundle. This avoids the broader WeSpeaker CLI/runtime
-    dependency graph, which currently breaks on modern torchaudio builds
-    in this Windows environment.
-    """
-
     provenance: str = "wespeaker_resnet293_lm"
 
     def __init__(self, model_dir: Path):
@@ -162,13 +147,9 @@ class WeSpeakerResNet293SpeakerEncoder:
         self.onnx_path = self.model_dir / "voxceleb_resnet293_LM.onnx"
         self.config_path = self.model_dir / "config.yaml"
         if not self.onnx_path.exists():
-            raise RuntimeError(
-                f"WeSpeaker ONNX checkpoint missing at '{self.onnx_path}'."
-            )
+            raise RuntimeError(f"WeSpeaker ONNX checkpoint missing at '{self.onnx_path}'.")
         if not self.config_path.exists():
-            raise RuntimeError(
-                f"WeSpeaker config missing at '{self.config_path}'."
-            )
+            raise RuntimeError(f"WeSpeaker config missing at '{self.config_path}'.")
 
         with self.config_path.open("r", encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
@@ -177,10 +158,7 @@ class WeSpeakerResNet293SpeakerEncoder:
         self.num_mel_bins = int(fbank_args.get("num_mel_bins", 80))
         self.frame_length = int(fbank_args.get("frame_length", 25))
         self.frame_shift = int(fbank_args.get("frame_shift", 10))
-        self.session = ort.InferenceSession(
-            str(self.onnx_path),
-            providers=["CPUExecutionProvider"],
-        )
+        self.session = ort.InferenceSession(str(self.onnx_path), providers=["CPUExecutionProvider"])
 
     def embed(self, waveform: list[float]) -> list[float]:
         if not waveform:
@@ -211,7 +189,7 @@ class WeSpeakerResNet293SpeakerEncoder:
 class PlaceholderSpeakerEncoder:
     """Fallback deterministic encoder used only if the real model cannot load.
 
-    NOT WIRED IN PRODUCTION — `core/container.py` constructs
+    NOT WIRED IN PRODUCTION ג€” `core/container.py` constructs
     `RedimNetSpeakerEncoder` directly, which raises on missing weights.
     Kept as a defensive shim for any future code path that wants
     degraded-mode operation. The `provenance` flag flows through to the

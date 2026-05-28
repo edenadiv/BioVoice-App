@@ -113,9 +113,13 @@ def test_verify_returns_speaker_model_scores(verification_service, enrolled_user
     assert len(result.speaker_model_scores) == 1
     score = result.speaker_model_scores[0]
     assert score.model_key == "redimnet_b5"
+    assert score.passed_threshold is True
     assert score.drives_decision is True
     assert score.similarity_score == pytest.approx(result.similarity_score)
     assert score.centroid_similarity == pytest.approx(result.centroid_similarity)
+    assert result.speaker_fusion is not None
+    assert result.speaker_fusion.combined_match is True
+    assert result.speaker_fusion.matched_models == 1
 
 
 def test_verify_reports_comparison_model_scores(store, detector):
@@ -151,6 +155,8 @@ def test_verify_reports_comparison_model_scores(store, detector):
 
     keys = {score.model_key for score in result.speaker_model_scores}
     assert keys == {"redimnet_b5", "ecapa_voxceleb"}
+    assert result.speaker_fusion is not None
+    assert result.speaker_fusion.total_models == 2
 
 
 def test_identify_reports_per_model_matches(store, detector):
@@ -188,6 +194,111 @@ def test_identify_reports_per_model_matches(store, detector):
     assert result.speaker_model_matches[0].model_key == "redimnet_b5"
     assert result.speaker_model_matches[0].drives_decision is True
     assert result.speaker_model_matches[1].model_key == "ecapa_voxceleb"
+    assert result.speaker_model_matches[1].drives_decision is True
+
+
+def test_verify_accepts_when_majority_of_models_match(store, detector):
+    class SwitchingEncoder:
+        def __init__(self, provenance: str, reference_embedding: list[float], query_embedding: list[float]):
+            self.provenance = provenance
+            self.reference_embedding = reference_embedding
+            self.query_embedding = query_embedding
+            self.mode = "reference"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            return list(self.reference_embedding if self.mode == "reference" else self.query_embedding)
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    primary = SwitchingEncoder("redimnet_b5", [1.0, 0.0], [0.0, 1.0])
+    ecapa = SwitchingEncoder("ecapa_voxceleb", [1.0, 0.0], [1.0, 0.0])
+    wespeaker = SwitchingEncoder("wespeaker_resnet293_lm", [1.0, 0.0], [1.0, 0.0])
+    service = VerificationService(
+        store=store,
+        detector=detector,
+        speaker_encoder=primary,
+        sample_rate=16000,
+        similarity_threshold=0.75,
+        deepfake_threshold=0.5,
+        min_enrollment_samples=3,
+        comparison_encoders={
+            "ecapa_voxceleb": ecapa,
+            "wespeaker_resnet293_lm": wespeaker,
+        },
+    )
+    wav = make_wav(2.0, frequency=220.0)
+    for _ in range(3):
+        service.enroll(user_id="alice", audio_bytes=wav, filename="alice.wav")
+
+    primary.mode = "query"
+    ecapa.mode = "query"
+    wespeaker.mode = "query"
+
+    result = service.verify(user_id="alice", audio_bytes=wav)
+
+    assert result.decision == "ACCEPT"
+    assert result.speaker_fusion is not None
+    assert result.speaker_fusion.matched_models == 2
+    assert result.speaker_fusion.majority_required == 2
+    by_key = {score.model_key: score for score in result.speaker_model_scores}
+    assert by_key["redimnet_b5"].passed_threshold is False
+    assert by_key["ecapa_voxceleb"].passed_threshold is True
+    assert by_key["wespeaker_resnet293_lm"].passed_threshold is True
+
+
+def test_verify_rejects_when_only_one_model_matches(store, detector):
+    class SwitchingEncoder:
+        def __init__(self, provenance: str, reference_embedding: list[float], query_embedding: list[float]):
+            self.provenance = provenance
+            self.reference_embedding = reference_embedding
+            self.query_embedding = query_embedding
+            self.mode = "reference"
+
+        def embed(self, waveform: list[float]) -> list[float]:
+            return list(self.reference_embedding if self.mode == "reference" else self.query_embedding)
+
+        @staticmethod
+        def cosine_similarity(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = sum(x * x for x in a) ** 0.5
+            norm_b = sum(y * y for y in b) ** 0.5
+            return (dot / max(norm_a * norm_b, 1e-8) + 1.0) / 2.0
+
+    primary = SwitchingEncoder("redimnet_b5", [1.0, 0.0], [1.0, 0.0])
+    ecapa = SwitchingEncoder("ecapa_voxceleb", [1.0, 0.0], [0.0, 1.0])
+    wespeaker = SwitchingEncoder("wespeaker_resnet293_lm", [1.0, 0.0], [0.0, 1.0])
+    service = VerificationService(
+        store=store,
+        detector=detector,
+        speaker_encoder=primary,
+        sample_rate=16000,
+        similarity_threshold=0.75,
+        deepfake_threshold=0.5,
+        min_enrollment_samples=3,
+        comparison_encoders={
+            "ecapa_voxceleb": ecapa,
+            "wespeaker_resnet293_lm": wespeaker,
+        },
+    )
+    wav = make_wav(2.0, frequency=220.0)
+    for _ in range(3):
+        service.enroll(user_id="alice", audio_bytes=wav, filename="alice.wav")
+
+    primary.mode = "query"
+    ecapa.mode = "query"
+    wespeaker.mode = "query"
+
+    result = service.verify(user_id="alice", audio_bytes=wav)
+
+    assert result.decision == "REJECT"
+    assert result.speaker_fusion is not None
+    assert result.speaker_fusion.matched_models == 1
+    assert result.speaker_fusion.combined_match is False
 
 
 def test_get_result_round_trip(verification_service, enrolled_user, detector):

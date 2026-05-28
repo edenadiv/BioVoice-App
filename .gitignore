@@ -37,5 +37,11 @@ backend/data/
 *.zip
 *.tar.gz
 *yarn.lock
+XTTS-v2/config.json
+XTTS-v2/dvae.pth
+XTTS-v2/hash.md5
+XTTS-v2/mel_stats.pth
+XTTS-v2/model.pth
+XTTS-v2/speakers_xtts.pth
+XTTS-v2/vocab.json
 backend/models/ecapa_voxceleb/
-backend/models/wespeaker_resnet293_lm/

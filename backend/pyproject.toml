@@ -25,6 +25,10 @@ model = [
   "torch>=2.2",
   "torchaudio>=2.2",
   "scipy>=1.11",
+  "onnxruntime>=1.18",
+  "huggingface_hub>=0.23",
+  "speechbrain>=1.0",
+  "soundfile>=0.12",
   # T1 (v1.1.1) — fast TTS engines for DeepfakeLab. Pure-Python, no
   # native deps; safe to bake into the standard runtime image so the
   # operator can pick from multiple synthesisers out of the box.
@@ -38,6 +42,7 @@ model = [
 # generation route is in scope.
 speaker_models = [
   "onnxruntime>=1.18",
+  "huggingface_hub>=0.23",
   "speechbrain>=1.0",
   "soundfile>=0.12",
 ]
