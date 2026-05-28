@@ -109,8 +109,10 @@ class EcapaSpeakerEncoder:
         try:
             from speechbrain.inference.speaker import EncoderClassifier
         except ImportError as exc:  # pragma: no cover
+            # Surface the real cause — a missing transitive dep (e.g. `packaging`)
+            # reads very differently from SpeechBrain itself being absent.
             raise RuntimeError(
-                "SpeechBrain is not installed. Install `backend[speaker_models]` to use ECAPA."
+                f"SpeechBrain unavailable: {exc}. Install `backend[model]` to use ECAPA."
             ) from exc
 
         kwargs = {"source": source}

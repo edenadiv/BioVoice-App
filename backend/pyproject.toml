@@ -28,6 +28,7 @@ model = [
   "onnxruntime>=1.18",
   "huggingface_hub>=0.23",
   "speechbrain>=1.0",
+  "packaging>=23",       # speechbrain imports `packaging`; not always pulled transitively
   "soundfile>=0.12",
   # T1 (v1.1.1) — fast TTS engines for DeepfakeLab. Pure-Python, no
   # native deps; safe to bake into the standard runtime image so the
@@ -44,6 +45,7 @@ speaker_models = [
   "onnxruntime>=1.18",
   "huggingface_hub>=0.23",
   "speechbrain>=1.0",
+  "packaging>=23",       # speechbrain imports `packaging`; not always pulled transitively
   "soundfile>=0.12",
 ]
 spoof = [

@@ -61,6 +61,14 @@ RUN pip install --prefix=/install \
 RUN PYTHONPATH=/install/lib/python3.12/site-packages \
     pip install --prefix=/install --no-build-isolation -e ".[${INSTALL_EXTRAS}]"
 
+# `packaging` gets pulled into the build env's DEFAULT site-packages by the
+# setuptools/wheel upgrade above, so the --prefix=/install editable install
+# treats it as already-satisfied and never copies it into /install — the only
+# tree the runtime stage keeps. speechbrain imports `packaging` at module load,
+# so ECAPA silently fails to enable without this. --ignore-installed forces a
+# copy into /install regardless of the build env.
+RUN pip install --prefix=/install --ignore-installed "packaging>=23"
+
 # -----------------------------------------------------------------------------
 # Stage 3 — slim runtime image, frontend + backend served on one port.
 # -----------------------------------------------------------------------------
@@ -90,6 +98,12 @@ COPY backend/scripts /app/backend/scripts
 COPY backend/models /app/backend/models
 COPY --from=frontend /build/dist /app/frontend_dist
 
+# Bake the ECAPA-TDNN comparison model into the image so the kiosk runs all
+# three speaker models offline (no Hugging Face download at runtime). WeSpeaker
+# ResNet293 ONNX weights are already carried in backend/models via Git LFS
+# (run `git lfs pull` before building). ReDimNet is the vendored primary.
+RUN python scripts/setup_ecapa.py
+
 # Mountable volume:
 #   /app/backend/data       persistent SQLite + reference samples
 RUN mkdir -p /app/backend/data && \
@@ -104,9 +118,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # JSON logs by default; flip BIOVOICE_LOG_FORMAT=plain for human-readable dev.
 # BIOVOICE_FRONTEND_DIST is honoured by app.main as an override; pinned to the
 # baked-in path here so reverse-proxy deployments don't have to re-export it.
+# Run all three speaker models by default: ReDimNet (primary) + ECAPA + WeSpeaker,
+# fused via majority vote in /verify and /identify. Set either flag to 0 to
+# fall back to fewer models.
 ENV BIOVOICE_LOG_FORMAT=json \
     LOG_LEVEL=INFO \
-    BIOVOICE_FRONTEND_DIST=/app/frontend_dist
+    BIOVOICE_FRONTEND_DIST=/app/frontend_dist \
+    ENABLE_ECAPA_COMPARISON=1 \
+    ENABLE_WESPEAKER_COMPARISON=1
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
