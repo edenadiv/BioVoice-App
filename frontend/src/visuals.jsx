@@ -165,7 +165,7 @@ function Waveform({ samples, width = 800, height = 140, color = '#7ef0ff', bars 
 // ----------------------------------------------------------------------------
 // MelSpectrogram — scrolling 2D heatmap fed by frequency data.
 // ----------------------------------------------------------------------------
-function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80 }) {
+function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80, sampleRate = 48000 }) {
   const ref = useRef();
   const bufRef = useRef(null);
 
@@ -200,10 +200,19 @@ function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80 }) {
         }
       }
       // new column from freqs (downsample to `mels`)
-      const step = Math.floor((freqs.length || 1) / mels);
+      // Show a fixed ~500 Hz–8 kHz band, log-spaced, so the speech formants
+      // fill the vertical height instead of hugging the bottom (the raw FFT
+      // bins are linear over 0..Nyquist, where voice is a thin low sliver).
+      const n = freqs.length || 1;
+      const nyquist = sampleRate / 2;
+      const loBin = Math.max(1, Math.floor((480 / nyquist) * n));
+      const hiBin = Math.min(n, Math.max(loBin + mels, Math.floor((Math.min(8000, nyquist) / nyquist) * n)));
+      const ratio = hiBin / loBin;
       for (let y = 0; y < mels; y++) {
+        const b0 = Math.floor(loBin * Math.pow(ratio, y / mels));
+        const b1 = Math.max(b0 + 1, Math.floor(loBin * Math.pow(ratio, (y + 1) / mels)));
         let v = 0;
-        for (let j = 0; j < step; j++) v = Math.max(v, freqs[y * step + j] || 0);
+        for (let j = b0; j < b1 && j < n; j++) v = Math.max(v, freqs[j] || 0);
         buf[(width - 1) * mels + y] = v;
       }
       // render
@@ -225,7 +234,7 @@ function MelSpectrogram({ freqs, width = 480, height = 180, mels = 80 }) {
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [width, height, mels]);
+  }, [width, height, mels, sampleRate]);
 
   return <canvas ref={ref} style={{ display: 'block', borderRadius: 8 }} />;
 }

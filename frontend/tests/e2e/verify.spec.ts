@@ -73,8 +73,11 @@ test.describe("verify flow", () => {
     // make it explicit so the test is robust to default-page changes.
     await page.locator(`.biovoice-sidebar button[title="Console"]`).click();
 
-    // The identity picker renders one button per enrolled profile.
-    const profileButton = page.getByRole("button", { name: new RegExp(userId, "i") });
+    // The identity picker renders one button per enrolled profile. Scope to
+    // the picker region — the live event feed also renders clickable rows that
+    // can carry the same user id.
+    const picker = page.getByRole("region", { name: /Enrolled profiles/i });
+    const profileButton = picker.getByRole("button", { name: new RegExp(userId, "i") });
     await expect(profileButton).toBeVisible();
     await profileButton.click();
 

@@ -334,6 +334,7 @@ class VerificationService:
             speaker_fusion=speaker_fusion,
             analysis_details=analysis_details,
             model_provenance=self._collect_provenance(),
+            query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
             created_at=created_at,
         )
 
@@ -422,6 +423,7 @@ class VerificationService:
             deepfake_threshold=self.deepfake_threshold,
             n_enrolled_total=len(speakers),
             model_provenance=self._collect_provenance(),
+            query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
         )
 
     def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:
@@ -491,6 +493,16 @@ class VerificationService:
             model_key: encoder.embed(waveform)
             for model_key, encoder in self.comparison_encoders.items()
         }
+
+    def _query_embeddings(self, waveform: list[float], primary: list[float] | None = None) -> dict[str, list[float]]:
+        """Raw query embedding per active speaker model, for projecting the
+        queried voice into the embedding space client-side."""
+        out: dict[str, list[float]] = {
+            "redimnet_b5": primary if primary is not None else self.encoder.embed(waveform)
+        }
+        for model_key, encoder in self.comparison_encoders.items():
+            out[model_key] = encoder.embed(waveform)
+        return out
 
     def _build_speaker_model_scores(
         self,

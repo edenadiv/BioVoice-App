@@ -9,6 +9,7 @@ import { useAppState } from "./lib/session";
 import { getReady } from "./lib/api";
 import { useEmbeddingProjection } from "./hooks/useEmbeddingProjection";
 import { useLiveEmbedding } from "./hooks/useLiveEmbedding";
+import { projectPCA3 } from "./lib/pca";
 
 const SPEAKER_MODEL_LABELS = {
   redimnet_b5: "ReDimNet B5",
@@ -343,6 +344,39 @@ function ExpandButton({ onClick, title = "Expand" }) {
   );
 }
 
+function RecenterButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Recenter view"
+      aria-label="Recenter embedding view"
+      style={{
+        flexShrink: 0, width: 26, height: 26, padding: 0,
+        display: 'grid', placeItems: 'center',
+        borderRadius: 7, border: '1px solid var(--line-2)',
+        background: 'transparent', color: 'var(--ink-soft)',
+        cursor: 'pointer', transition: 'all 160ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--teal-2)';
+        e.currentTarget.style.borderColor = 'rgba(126,240,255,0.55)';
+        e.currentTarget.style.background = 'rgba(126,240,255,0.10)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--ink-soft)';
+        e.currentTarget.style.borderColor = 'var(--line-2)';
+        e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+        <path d="M13.5 8 A5.5 5.5 0 1 1 11.6 3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="M11.5 1.5 L11.9 4.1 L9.3 4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
+  );
+}
+
 // ============================================================================
 // PanelModal — centered overlay that re-renders a panel's content at a large
 // size. Mirrors the `biovoice-overlay` idiom used by VerificationOverlay.
@@ -430,6 +464,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const [embeddingModelKey, setEmbeddingModelKey] = useState("redimnet_b5");
   const [expanded, setExpanded] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [recenterSignal, setRecenterSignal] = useState(0);
   const [spectrogramRef, spectrogramSize] = useElementSize();
   const [constellationRef, constellationSize] = useElementSize();
 
@@ -440,7 +475,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   }, []);
 
   // Derive the live event feed from real /results polling (E-16).
-  const { results } = useAppState();
+  const { results, lastQuery } = useAppState();
   const activity = useMemo(() => results.slice(0, 50).map(resultToActivity), [results]);
 
   // Keep the selected profile in sync with the live profiles list (E-15).
@@ -463,6 +498,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     basis: projection.basis,
     modelKey: embeddingModelKey,
   });
+  // Project the last verify/identify clip into the same PCA space so it shows
+  // as a "queried voice" point landing among the enrolled clusters.
+  const queryVec = lastQuery?.embeddings?.[embeddingModelKey];
+  const queryPoint = (projection.basis && queryVec && queryVec.length)
+    ? projectPCA3(queryVec, projection.basis)
+    : null;
   const latestModelScores = results[0]?.speakerModelScores ?? [];
   const activeModelKeys = latestModelScores.length > 0
     ? latestModelScores.map((score) => score.modelKey)
@@ -565,13 +606,13 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         className="biovoice-spectrogram-wrap"
         style={{ flex: 1, display: 'grid', placeItems: 'center', position: 'relative', minHeight: 280, width: '100%' }}
       >
-        <MelSpectrogram freqs={audio.freqs} width={width} height={height} mels={80}/>
+        <MelSpectrogram freqs={audio.freqs} width={width} height={height} mels={80} sampleRate={audio.sampleRateRef?.current ?? 48000}/>
         <div style={{
           position: 'absolute', left: 8, top: 8, bottom: 8, width: 36,
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
           fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-soft)',
         }}>
-          <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>500</span><span>20 Hz</span>
+          <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>1 kHz</span><span>500 Hz</span>
         </div>
         {micState !== 'live' && (
           <div style={{
@@ -647,10 +688,11 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         >
           VOICE EMBEDDING SPACE
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {projection.error && (
             <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
           )}
+          <RecenterButton onClick={() => setRecenterSignal((s) => s + 1)}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -664,8 +706,10 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           height={height}
           projectedProfiles={projection.profiles}
           livePoint={live.liveProjected}
+          queryPoint={queryPoint}
           matchId={selectedProfile}
           loading={projection.loading}
+          recenterSignal={recenterSignal}
         />
       </div>
       <div className="biovoice-constellation-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 10, borderTop: '1px solid var(--line)' }}>

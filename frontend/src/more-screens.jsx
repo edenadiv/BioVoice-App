@@ -5,7 +5,7 @@ import { LivePulse } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
-import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers } from "./lib/session";
+import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers, useAppDispatch } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
 import { ExplainTab } from "./components/ExplainTab.tsx";
@@ -554,6 +554,7 @@ function IdentifyScreen({ profiles }) {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null); // IdentificationResult
   const fileInputRef = useRef(null);
+  const dispatch = useAppDispatch();
 
   // Mic devices ----------------------------------------------------------
   const reloadDevices = useCallback(async () => {
@@ -619,13 +620,14 @@ function IdentifyScreen({ profiles }) {
     try {
       const r = await identifySpeaker(sample.wavFile, 3);
       setResult(r);
+      dispatch({ type: "set-last-query", query: { embeddings: r.queryEmbeddings ?? {}, label: r.matches[0]?.userId ?? null } });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg.length > 240 ? msg.slice(0, 240) + "…" : msg);
     } finally {
       setBusy(false);
     }
-  }, [sample]);
+  }, [sample, dispatch]);
 
   const handleReset = useCallback(() => {
     setSample(null);

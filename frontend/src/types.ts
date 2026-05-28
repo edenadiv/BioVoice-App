@@ -67,6 +67,7 @@ export type VerificationResult = {
   stageBreakdown: StageBreakdown;
   analysisDetails: AnalysisDetails | null;
   modelProvenance: ModelProvenance | null;
+  queryEmbeddings: Record<string, number[]>;
   createdAt: string;
 };
 
@@ -142,6 +143,7 @@ export type IdentificationResult = {
   deepfakeThreshold: number;
   nEnrolledTotal: number;
   modelProvenance: ModelProvenance | null;
+  queryEmbeddings: Record<string, number[]>;
 };
 
 export type SpeakerModelMatches = {

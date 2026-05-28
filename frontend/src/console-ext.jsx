@@ -82,14 +82,18 @@ function EmbeddingConstellation({
   height = 340,
   projectedProfiles,
   livePoint,
+  queryPoint = null,
   matchId = null,
   loading = false,
+  recenterSignal = 0,
 }) {
   const ref = useRef();
   const matchRef = useRef(matchId);
   const liveRef = useRef(livePoint);
+  const queryRef = useRef(queryPoint);
   matchRef.current = matchId;
   liveRef.current = livePoint;
+  queryRef.current = queryPoint;
 
   // Free-rotate the sphere by dragging; `auto` is the gentle idle spin.
   // yaw = turn (around the vertical axis), pitch = roll (tilt up/down).
@@ -131,6 +135,11 @@ function EmbeddingConstellation({
     velRef.current = { x: 0, y: 0 };
     autoRef.current = true;
   };
+
+  // Recenter when the header button bumps the signal.
+  useEffect(() => {
+    if (recenterSignal) recenter();
+  }, [recenterSignal]);
 
   // Normalise the projected coords to a unit sphere for rendering.
   // PCA component magnitudes vary with the input scale; this keeps the
@@ -322,6 +331,40 @@ function EmbeddingConstellation({
         }
       }
 
+      // Queried voice — the last verify/identify clip projected into this
+      // space, so you can see where it landed relative to the clusters.
+      const q = queryRef.current;
+      if (q) {
+        const qp = project(q[0] * scale, q[1] * scale, q[2] * scale);
+        if (matchRef.current) {
+          const m = centers.find(c => c.id === matchRef.current);
+          if (m) {
+            const mp = project(m.x, m.y, m.z);
+            ctx.strokeStyle = `rgba(255,207,122,${0.35 + 0.3 * Math.sin(t * 4)})`;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(qp.x, qp.y); ctx.lineTo(mp.x, mp.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+        ctx.shadowBlur = 18; ctx.shadowColor = '#ffcf7a';
+        ctx.fillStyle = '#ffe6b0';
+        ctx.beginPath();
+        ctx.moveTo(qp.x, qp.y - 6); ctx.lineTo(qp.x + 6, qp.y);
+        ctx.lineTo(qp.x, qp.y + 6); ctx.lineTo(qp.x - 6, qp.y);
+        ctx.closePath(); ctx.fill();
+        ctx.shadowBlur = 0;
+        const qpulse = 0.4 + 0.4 * Math.sin(t * 5);
+        ctx.strokeStyle = `rgba(255,207,122,${qpulse})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(qp.x, qp.y, 12, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#ffcf7a';
+        ctx.font = '600 9px "JetBrains Mono", monospace';
+        ctx.fillText('QUERY', qp.x + 9, qp.y - 8);
+      }
+
       // Empty / loading state.
       if (centers.length === 0) {
         ctx.fillStyle = 'rgba(125,200,255,0.45)';
@@ -337,45 +380,14 @@ function EmbeddingConstellation({
   }, [width, height, centers, sampleDots, scale, loading]);
 
   return (
-    <div style={{ position: 'relative', width, height, touchAction: 'none' }}>
-      <canvas
-        ref={ref}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
-      />
-      <button
-        type="button"
-        onClick={recenter}
-        title="Recenter view"
-        aria-label="Recenter embedding view"
-        style={{
-          position: 'absolute', bottom: 8, left: 8,
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '5px 9px', borderRadius: 8,
-          border: '1px solid var(--line-2)', background: 'rgba(8,14,24,0.6)',
-          backdropFilter: 'blur(6px)', color: 'var(--ink-soft)',
-          font: '9px/1 "JetBrains Mono", monospace', letterSpacing: '0.08em',
-          cursor: 'pointer', transition: 'all 160ms',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = 'var(--teal-2)';
-          e.currentTarget.style.borderColor = 'rgba(126,240,255,0.55)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'var(--ink-soft)';
-          e.currentTarget.style.borderColor = 'var(--line-2)';
-        }}
-      >
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-          <path d="M13.5 8 A5.5 5.5 0 1 1 11.6 3.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          <path d="M11.5 1.5 L11.9 4.1 L9.3 4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        RECENTER
-      </button>
-    </div>
+    <canvas
+      ref={ref}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      style={{ display: 'block', cursor: 'grab', touchAction: 'none' }}
+    />
   );
 }
 
@@ -534,6 +546,7 @@ function VerificationOverlay({ profile, onClose }) {
         setResult(verification);
         dispatch({ type: "set-last-verification", result: verification });
         dispatch({ type: "prepend-result", result: verification });
+        dispatch({ type: "set-last-query", query: { embeddings: verification.queryEmbeddings ?? {}, label: verification.userId } });
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err ?? "Verification failed.");

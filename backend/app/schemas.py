@@ -193,6 +193,9 @@ class VerificationResponse(BaseModel):
     speaker_fusion: SpeakerFusionDecision | None = None
     analysis_details: AnalysisDetails | None = None
     model_provenance: ModelProvenance | None = None
+    # Raw query embedding per speaker model — lets the UI project the queried
+    # voice into the embedding space alongside the enrolled clusters.
+    query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
     created_at: datetime
 
 
@@ -297,3 +300,5 @@ class IdentificationResponse(BaseModel):
     deepfake_threshold: float = Field(ge=0.0, le=1.0)
     n_enrolled_total: int = Field(ge=0)
     model_provenance: ModelProvenance | None = None
+    # Raw query embedding per speaker model (see VerificationResponse).
+    query_embeddings: dict[str, list[float]] = Field(default_factory=dict)

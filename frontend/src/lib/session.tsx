@@ -19,11 +19,17 @@ import type { Speaker, VerificationResult, SpoofGenerationResult } from "../type
 
 type FlowIntent = "enroll" | "verify" | null;
 
+export type LastQuery = {
+  embeddings: Record<string, number[]>;
+  label: string | null;
+};
+
 export type AppState = {
   speakers: Speaker[];
   results: VerificationResult[];
   lastVerification: VerificationResult | null;
   lastSpoof: SpoofGenerationResult | null;
+  lastQuery: LastQuery | null;
   flow: {
     intent: FlowIntent;
     pendingPromise: Promise<unknown> | null;
@@ -37,6 +43,7 @@ const initialState: AppState = {
   results: [],
   lastVerification: null,
   lastSpoof: null,
+  lastQuery: null,
   flow: { intent: null, pendingPromise: null, pendingError: null },
   health: "unknown",
 };
@@ -47,6 +54,7 @@ type Action =
   | { type: "prepend-result"; result: VerificationResult }
   | { type: "set-last-verification"; result: VerificationResult | null }
   | { type: "set-last-spoof"; spoof: SpoofGenerationResult | null }
+  | { type: "set-last-query"; query: LastQuery | null }
   | { type: "set-flow"; intent: FlowIntent; promise: Promise<unknown> | null }
   | { type: "set-flow-error"; error: string | null }
   | { type: "set-health"; health: AppState["health"] }
@@ -67,6 +75,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, lastVerification: action.result };
     case "set-last-spoof":
       return { ...state, lastSpoof: action.spoof };
+    case "set-last-query":
+      return { ...state, lastQuery: action.query };
     case "set-flow":
       return {
         ...state,
