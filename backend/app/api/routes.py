@@ -6,6 +6,7 @@ deployment; all routes are intentionally accessible to anyone reaching
 the kiosk's network.
 """
 
+import base64
 from datetime import datetime, timezone
 from io import BytesIO
 from wave import Error as WaveError
@@ -30,6 +31,9 @@ from app.schemas import (
     LogDetailResponse,
     LogEntry,
     SpeakerResponse,
+    SpoofBatchCandidate,
+    SpoofBatchRequest,
+    SpoofBatchResponse,
     SpoofEngineInfo,
     SpoofEnginesResponse,
     SpoofTestResponse,
@@ -508,4 +512,119 @@ async def test_spoof_sample(
         decision=decision,
         analysis_details=analysis_details,
         model_provenance=service._collect_provenance(),
+    )
+
+
+def _clamp_unit(value: float) -> float:
+    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+
+
+@router.post("/spoof/batch", response_model=SpoofBatchResponse)
+async def generate_spoof_batch(
+    req: SpoofBatchRequest,
+    spoof: SpoofGenerationService = Depends(get_spoof_generation_service),
+    verification: VerificationService = Depends(get_verification_service),
+) -> SpoofBatchResponse:
+    """Forge many clones of an enrolled target voice and keep only the
+    candidates whose speaker-similarity to the target clears the
+    threshold. XTTS conditions on the target's enrolled reference
+    samples, so no uploaded reference is required — generation is driven
+    purely by `target_user_id` + text variations."""
+    speaker = verification.store.get_speaker(req.target_user_id)
+    if speaker is None or not speaker.embedding:
+        raise HTTPException(
+            status_code=404, detail=f"User '{req.target_user_id}' is not enrolled"
+        )
+
+    total_requested = len(req.texts) * req.candidates_per_text
+    if total_requested > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="Batch too large: texts × candidates_per_text must be ≤ 64",
+        )
+
+    keep_threshold = (
+        req.keep_threshold
+        if req.keep_threshold is not None
+        else verification.similarity_threshold
+    )
+
+    # Default to a voice-cloning engine when the caller didn't pick one —
+    # non-cloning engines speak in their own voice and never match the target.
+    chosen_engine = req.engine
+    if chosen_engine is None:
+        available = {e.id for e in spoof.list_engines() if e.available}
+        chosen_engine = "xtts" if "xtts" in available else spoof.default_engine_id()
+
+    candidates: list[SpoofBatchCandidate] = []
+    generated = 0
+    index = 0
+    for text in req.texts:
+        for _ in range(req.candidates_per_text):
+            index += 1
+            try:
+                result = spoof.generate(
+                    user_id=req.target_user_id,
+                    text=text,
+                    language=req.language,
+                    engine=chosen_engine,
+                    voice=req.voice,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+            generated += 1
+            try:
+                decoded = verification.audio.decode_wav(result.audio_bytes)
+                trimmed, _ = verification.audio.trim_to_voice(decoded)
+            except (ValueError, WaveError, NoSpeechDetectedError):
+                # Unusable audio — count it as generated but never a match.
+                candidates.append(
+                    SpoofBatchCandidate(
+                        index=index, text=text, similarity_to_target=0.0, kept=False,
+                        engine_id=result.engine_id, voice_id=result.voice_id,
+                        file_name=result.file_name,
+                    )
+                )
+                continue
+
+            embedding = verification.encoder.embed(trimmed.waveform)
+            similarity = _clamp_unit(
+                verification.encoder.cosine_similarity(speaker.embedding, embedding)
+            )
+            kept = similarity >= keep_threshold
+
+            deepfake_score: float | None = None
+            decision = None
+            if req.run_aasist:
+                deepfake_score = _clamp_unit(verification.detector.detect(trimmed.waveform))
+                decision = (
+                    "GENUINE" if deepfake_score >= verification.deepfake_threshold else "FAKE"
+                )
+
+            candidates.append(
+                SpoofBatchCandidate(
+                    index=index, text=text,
+                    similarity_to_target=similarity, kept=kept,
+                    deepfake_score=deepfake_score, decision=decision,
+                    engine_id=result.engine_id, voice_id=result.voice_id,
+                    file_name=result.file_name,
+                    audio_b64=(
+                        base64.b64encode(result.audio_bytes).decode("ascii") if kept else None
+                    ),
+                )
+            )
+
+    candidates.sort(key=lambda c: c.similarity_to_target, reverse=True)
+    return SpoofBatchResponse(
+        target_user_id=req.target_user_id,
+        centroid_present=True,
+        keep_threshold=keep_threshold,
+        requested=total_requested,
+        generated=generated,
+        kept=sum(1 for c in candidates if c.kept),
+        candidates=candidates,
+        model_provenance=verification._collect_provenance(),
     )
