@@ -1,7 +1,7 @@
 // Additional pages: Sidebar nav, Deepfake Creation Lab, Profile manager.
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { LivePulse } from "./visuals.jsx";
+import { LivePulse, VoiceOrb, Waveform, SimilarityGauge, PipelineFlow } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
 import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
@@ -636,439 +636,289 @@ function IdentifyScreen({ profiles }) {
     if (recorder.state === "recording") recorder.cancel();
   }, [recorder]);
 
+  const stage = result ? 'results'
+    : busy ? 'analyzing'
+    : recorder.state === 'recording' ? 'recording'
+    : sample ? 'captured'
+    : 'idle';
+
+  // Cycle the analyzing pipeline highlight while the request is in flight.
+  const [analyzeStep, setAnalyzeStep] = useState(0);
+  useEffect(() => {
+    if (stage !== 'analyzing') { setAnalyzeStep(0); return; }
+    const id = setInterval(() => setAnalyzeStep((s) => (s + 1) % 6), 360);
+    return () => clearInterval(id);
+  }, [stage]);
+
+  const micPicker = (
+    <div className="biovoice-input-row" style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
+      <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={recorder.state === 'recording'}
+        aria-label="Microphone"
+        style={{ flex: 1, padding: '13px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.35)', color: 'var(--ink)', border: '1px solid rgba(125,200,255,0.18)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+        <option value="">Browser default mic</option>
+        {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+      </select>
+      {devices.every((d) => !d.label || d.label === 'Microphone') && (
+        <button onClick={handleEnableMicLabels} style={{ padding: '8px 12px', fontSize: 11, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer' }}>Enable labels</button>
+      )}
+    </div>
+  );
+
+  const renderCapture = () => (
+    <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, height: '100%', textAlign: 'center' }}>
+      <div>
+        <div className="label-mono" style={{ fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>WHO IS THIS VOICE?</div>
+        <div className="biovoice-identify-hero" style={{ fontSize: 60, fontWeight: 200, marginTop: 10, lineHeight: 1.02 }}>Most similar match</div>
+        <div style={{ fontSize: 16, color: 'var(--ink-mute)', marginTop: 14, maxWidth: 620, marginInline: 'auto' }}>
+          Record or upload a voice — it’s ranked against all <strong style={{ color: 'var(--ink)' }}>{profiles.length}</strong> enrolled profile{profiles.length === 1 ? '' : 's'} across three speaker models.
+        </div>
+      </div>
+
+      <VoiceOrb size={300} level={sample ? 0.2 : 0.06} samples={recorder.samples} hue="cyan" intensity={sample ? 0.95 : 0.55}/>
+
+      {!sample ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, width: '100%', maxWidth: 520 }}>
+          {micPicker}
+          <div style={{ display: 'flex', gap: 14, width: '100%' }}>
+            <button onClick={handleStartRec} disabled={busy} className="biovoice-identify-cta"
+              style={{ flex: 2, padding: '20px', borderRadius: 14, background: 'linear-gradient(180deg, #ff5577, #c8194a)', color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '0.1em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#fff' }}/> START RECORDING
+            </button>
+            <button onClick={handleUploadClick} disabled={busy}
+              style={{ flex: 1, padding: '20px', borderRadius: 14, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.35)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 600, letterSpacing: '0.08em' }}>⤴ UPLOAD</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, width: '100%', maxWidth: 660 }}>
+          <div style={{ width: '100%' }}>
+            <Waveform samples={recorder.samples} width={660} height={88} bars={120} mirror/>
+            <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)', marginTop: 8 }}>READY · {sample.source.toUpperCase()} · {sample.durationSec.toFixed(1)}s</div>
+          </div>
+          <div style={{ display: 'flex', gap: 14, width: '100%' }}>
+            <button onClick={handleSubmit} disabled={profiles.length === 0} className="biovoice-identify-cta"
+              style={{ flex: 2, padding: '22px', borderRadius: 14, background: profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.06)', color: profiles.length > 0 ? '#04070d' : 'var(--ink-mute)', border: 'none', cursor: profiles.length > 0 ? 'pointer' : 'not-allowed', fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 700, letterSpacing: '0.12em' }}>
+              {profiles.length === 0 ? 'ENROL A PROFILE FIRST' : 'FIND TOP 3 MATCHES'}
+            </button>
+            <button onClick={handleReset}
+              style={{ flex: 1, padding: '22px', borderRadius: 14, background: 'transparent', color: 'var(--ink-mute)', border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>↺ REDO</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderRecording = () => (
+    <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, height: '100%' }}>
+      <div style={{ position: 'relative', display: 'grid', placeItems: 'center' }}>
+        <div style={{ position: 'absolute', width: 380, height: 380, borderRadius: '50%', border: '1px solid rgba(255,85,119,0.4)', animation: 'scanring 2.4s ease-out infinite', pointerEvents: 'none' }}/>
+        <VoiceOrb size={380} level={recorder.level} samples={recorder.samples} hue="cyan" intensity={1 + recorder.level * 2.4}/>
+      </div>
+      <div style={{ width: 'min(780px, 82vw)' }}>
+        <Waveform samples={recorder.samples} width={780} height={130} bars={140} mirror color="#ff8aa6"/>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <LivePulse color="#ff5577" size={12}/>
+        <span className="label-mono" style={{ fontSize: 13, color: '#ff8aa6', letterSpacing: '0.34em' }}>LISTENING</span>
+        <span className="num-mono" style={{ fontSize: 40, fontWeight: 200, color: 'var(--ink)' }}>{(recorder.durationMs / 1000).toFixed(1)}s</span>
+      </div>
+      <button onClick={handleStopRec} className="biovoice-identify-cta"
+        style={{ padding: '20px 56px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))', color: '#fff', border: '1px solid rgba(126,240,255,0.55)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 700, letterSpacing: '0.14em', display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span style={{ width: 14, height: 14, borderRadius: 3, background: '#fff' }}/> STOP
+      </button>
+    </div>
+  );
+
+  const renderAnalyzing = () => (
+    <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 30, height: '100%' }}>
+      <VoiceOrb size={220} level={0.5} samples={recorder.samples} hue="cyan" intensity={1.7}/>
+      <div className="biovoice-identify-hero" style={{ fontSize: 42, fontWeight: 200 }}>Comparing…</div>
+      <div className="label-mono" style={{ fontSize: 12, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>
+        RANKING ACROSS {profiles.length} ENROLLED VOICE{profiles.length === 1 ? '' : 'S'} · 3 MODELS
+      </div>
+      <div style={{ width: 'min(860px, 88vw)' }}>
+        <PipelineFlow stages={[
+          { icon: '🎙', title: 'Capture', subtitle: 'PCM 16k' },
+          { icon: '▦', title: 'Mel-Spec', subtitle: '80 ch' },
+          { icon: '◈', title: 'ReDimNet', subtitle: '192-d' },
+          { icon: '◇', title: 'ECAPA', subtitle: '192-d' },
+          { icon: '◆', title: 'WeSpeaker', subtitle: '256-d' },
+          { icon: '⚖', title: 'Fuse', subtitle: 'vote' },
+        ]} activeIdx={analyzeStep}/>
+      </div>
+    </div>
+  );
+
   return (
     <div className="screen fade-enter">
       <Chrome status="OPEN-SET IDENTIFICATION" statusKind="info" subtitle="Most similar across all enrolled profiles" screenName="IDENTIFY"/>
       <AmbientField count={40}/>
+      <input ref={fileInputRef} type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" onChange={handleFilePicked} style={{ display: 'none' }}/>
 
-      <div className="biovoice-page-content biovoice-split-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
-
-        {/* LEFT — capture */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
-          <div>
-            <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>WHO IS THIS VOICE?</div>
-            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>Most similar match</div>
-            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
-              Capture or upload a voice sample. The system ranks all <strong>{profiles.length}</strong> enrolled profile{profiles.length === 1 ? '' : 's'} by cosine similarity and returns the top three matches.
-            </div>
+      <div className="biovoice-page-content" style={{ position: 'absolute', inset: 0, padding: '118px 48px 78px 120px', zIndex: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {(error || (recorder.lastError && stage !== 'results')) && (
+          <div style={{ padding: '10px 16px', borderRadius: 10, marginBottom: 14, background: 'rgba(255,128,128,0.08)', border: '1px solid rgba(255,128,128,0.35)', color: '#ffadad', fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>
+            {error || recorder.lastError}
           </div>
-
-          <div className="panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <Field label="MICROPHONE">
-              <div className="biovoice-input-row" style={{ display: 'flex', gap: 8 }}>
-                <select
-                  value={deviceId}
-                  onChange={(e) => setDeviceId(e.target.value)}
-                  disabled={recorder.state === "recording"}
-                  style={{
-                    flex: 1, padding: '10px 12px', borderRadius: 10,
-                    background: 'rgba(0,0,0,0.35)', color: 'var(--ink)',
-                    border: '1px solid rgba(125,200,255,0.18)',
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
-                  }}>
-                  <option value="">Browser default</option>
-                  {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
-                </select>
-                {devices.every((d) => !d.label || d.label === "Microphone") && (
-                  <button onClick={handleEnableMicLabels} style={{
-                    padding: '8px 12px', fontSize: 11,
-                    background: 'transparent', color: 'var(--teal-2)',
-                    border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer',
-                  }}>Enable labels</button>
-                )}
-              </div>
-            </Field>
-
-            <div className="biovoice-identify-actions" style={{ display: 'flex', gap: 12 }}>
-              {recorder.state !== 'recording' ? (
-                <button onClick={handleStartRec} disabled={!!sample || busy} style={{
-                  flex: 1, padding: '14px 20px', borderRadius: 10,
-                  background: sample ? 'rgba(125,200,255,0.05)' : 'linear-gradient(180deg, #ff5577, #c8194a)',
-                  color: sample ? 'var(--ink-mute)' : '#fff',
-                  border: 'none', cursor: sample ? 'not-allowed' : 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                }}>
-                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: sample ? 'var(--ink-mute)' : '#fff' }}/>
-                  START RECORDING
-                </button>
-              ) : (
-                <button onClick={handleStopRec} style={{
-                  flex: 1, padding: '14px 20px', borderRadius: 10,
-                  background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))',
-                  color: '#fff', border: '1px solid rgba(126,240,255,0.5)', cursor: 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
-                }}>STOP — {(recorder.durationMs / 1000).toFixed(1)}s</button>
-              )}
-              <button onClick={handleUploadClick} disabled={recorder.state === 'recording' || busy} style={{
-                padding: '14px 22px', borderRadius: 10,
-                background: 'transparent', color: 'var(--teal-2)',
-                border: '1px solid rgba(126,240,255,0.35)', cursor: recorder.state === 'recording' || busy ? 'not-allowed' : 'pointer',
-                fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
-              }}>⤴ UPLOAD AUDIO</button>
-              <input ref={fileInputRef} type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
-                onChange={handleFilePicked} style={{ display: 'none' }}/>
-            </div>
-
-            {sample && (
-              <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>
-                READY · {sample.source.toUpperCase()} · {sample.durationSec.toFixed(1)}s
-              </div>
-            )}
-
-            {recorder.lastError && (
-              <div style={{
-                padding: '10px 14px', borderRadius: 8,
-                background: 'rgba(255,128,128,0.08)',
-                border: '1px solid rgba(255,128,128,0.35)',
-                color: '#ffadad', fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
-              }}>{recorder.lastError}</div>
-            )}
-
-            <div className="biovoice-identify-submit" style={{ display: 'flex', gap: 12 }}>
-              <button onClick={handleSubmit} disabled={!sample || busy || profiles.length === 0} style={{
-                flex: 1, padding: '16px 24px', borderRadius: 10,
-                background: sample && !busy && profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.05)',
-                color: sample && !busy && profiles.length > 0 ? '#04070d' : 'var(--ink-mute)',
-                border: 'none', cursor: sample && !busy && profiles.length > 0 ? 'pointer' : 'not-allowed',
-                fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 700, letterSpacing: '0.12em',
-              }}>
-                {busy ? 'COMPARING…' :
-                 profiles.length === 0 ? 'ENROL A PROFILE FIRST' :
-                 sample ? 'FIND TOP 3 MATCHES' : 'CAPTURE A SAMPLE FIRST'}
-              </button>
-              {(sample || result) && (
-                <button onClick={handleReset} disabled={busy} style={{
-                  padding: '16px 22px', borderRadius: 10,
-                  background: 'transparent', color: 'var(--ink-mute)',
-                  border: '1px solid rgba(125,200,255,0.18)', cursor: busy ? 'wait' : 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
-                }}>RESET</button>
-              )}
-            </div>
-
-            {error && (
-              <div style={{
-                padding: '10px 14px', borderRadius: 8,
-                background: 'rgba(255,128,128,0.08)',
-                border: '1px solid rgba(255,128,128,0.35)',
-                color: '#ffadad', fontSize: 12,
-              }}>{error}</div>
-            )}
-          </div>
-        </div>
-
-        {/* RIGHT — results */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
-          <div>
-            <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>RANKED MATCHES</div>
-            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>
-              {result ? `Top ${result.matches.length}` : 'Awaiting sample'}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--ink-mute)', marginTop: 6 }}>
-              {result
-                ? `Compared against ${result.nEnrolledTotal} enrolled profile${result.nEnrolledTotal === 1 ? '' : 's'}.`
-                : 'Submit a sample to see the ranked list.'}
-            </div>
-          </div>
-
-          {result && <IdentifyResults result={result} profiles={profiles} wavFile={sample?.wavFile ?? null}/>}
-          {!result && (
-            <div className="panel" style={{
-              padding: '32px 24px', textAlign: 'center',
-              color: 'var(--ink-mute)', fontSize: 13, lineHeight: 1.6,
-            }}>
-              The result panel will show similarity percentages and the deepfake verdict here once you submit.
-            </div>
-          )}
+        )}
+        <div key={stage} style={{ flex: 1, minHeight: 0, animation: 'fadeIn 520ms cubic-bezier(0.2,0.8,0.2,1) both' }}>
+          {stage === 'recording' ? renderRecording()
+            : stage === 'analyzing' ? renderAnalyzing()
+            : stage === 'results' ? (
+                <IdentifyResults result={result} profiles={profiles} wavFile={sample?.wavFile ?? null} onReset={handleReset}/>
+              )
+            : renderCapture()}
         </div>
       </div>
     </div>
   );
 }
 
-function IdentifyResults({ result, profiles, wavFile }) {
+function IdentifyResults({ result, profiles, wavFile, onReset }) {
+  const scrollRef = useRef(null);
+  const scrollByCard = (dir) => {
+    const el = scrollRef.current;
+    if (el) el.scrollBy({ left: dir * Math.min(760, el.clientWidth * 0.82), behavior: 'smooth' });
+  };
+  const modelLabel = (k) =>
+    k === 'redimnet_b5' ? 'ReDimNet B5' :
+    k === 'ecapa_voxceleb' ? 'ECAPA VoxCeleb' :
+    k === 'wespeaker_resnet293_lm' ? 'WeSpeaker ResNet293' : k;
+
+  const top = result.matches[0];
+  const combined = result.speakerFusion?.combinedSimilarityScore ?? top?.similarityScore ?? 0;
+  const cardBase = {
+    flex: '0 0 auto', scrollSnapAlign: 'start', minHeight: 0,
+    borderRadius: 18, padding: '20px 22px',
+    background: 'linear-gradient(180deg, rgba(10,20,34,0.72), rgba(8,13,22,0.6))',
+    border: '1px solid var(--line-2)', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+  };
+  const arrowStyle = {
+    width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center',
+    background: 'rgba(8,14,24,0.6)', border: '1px solid var(--line-2)', color: 'var(--ink)',
+    cursor: 'pointer', fontSize: 20, fontFamily: 'JetBrains Mono, monospace',
+  };
+
   return (
-    <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-      <ExplainTab wavFile={wavFile ?? null} open={!!wavFile} matchUserId={result.matches[0]?.userId ?? null}/>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-      <DegradedBanner provenance={result.modelProvenance} variant="full"/>
-      {result.matches.map((m, i) => {
-        const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
-        const pct = (m.similarityScore * 100).toFixed(1);
-        const above = m.similarityScore >= result.similarityThreshold;
-        const accent = i === 0 ? (above ? '#7ef0ff' : '#ffb24a') : 'var(--ink-mute)';
-        return (
-          <div key={m.userId} className="panel" style={{
-            padding: '16px 20px',
-            background: i === 0 ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))' : 'rgba(125,200,255,0.02)',
-            border: `1px solid ${i === 0 ? 'rgba(126,240,255,0.35)' : 'rgba(125,200,255,0.15)'}`,
-          }}>
-            <div className="biovoice-identify-match-header" style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
-              <span className="label-mono" style={{ fontSize: 18, color: accent, minWidth: 28 }}>#{i + 1}</span>
-              {profile && (
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`,
-                  display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 12, fontWeight: 600,
-                }}>{profile.initials}</div>
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 16, fontWeight: 500 }}>{m.userId}</div>
-                <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)', marginTop: 2 }}>
-                  {m.sampleCount} enrol sample{m.sampleCount === 1 ? '' : 's'}
-                </div>
-              </div>
-              <div className="num-mono" style={{ fontSize: 28, color: accent, letterSpacing: '-0.02em', fontWeight: 600 }}>
-                {pct}%
-              </div>
-            </div>
-            <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,0,0,0.4)', overflow: 'hidden', position: 'relative' }}>
-              <div style={{
-                width: `${pct}%`, height: '100%',
-                background: i === 0
-                  ? `linear-gradient(90deg, ${accent}88, ${accent})`
-                  : 'linear-gradient(90deg, rgba(125,200,255,0.4), rgba(125,200,255,0.7))',
-                transition: 'width 600ms cubic-bezier(.2,.8,.2,1)',
-              }}/>
-              {!result.speakerFusion && (
-                <div title={`accept threshold ${(result.similarityThreshold * 100).toFixed(0)}%`} style={{
-                  position: 'absolute', top: -3, bottom: -3,
-                  left: `${result.similarityThreshold * 100}%`,
-                  width: 1.5, background: 'rgba(255,178,74,0.55)',
-                }}/>
-              )}
-            </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%', minHeight: 0 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>RANKED MATCHES</div>
+          <div className="biovoice-identify-hero" style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>
+            {top ? top.userId : 'No match'}
+            <span style={{ color: 'var(--ink-soft)', fontSize: 22, marginLeft: 12 }}>{(combined * 100).toFixed(1)}%</span>
           </div>
-        );
-      })}
-
-      {result.speakerModelMatches?.length > 0 && (
-        <div className="panel" style={{ padding: '16px 20px', display: 'grid', gap: 12 }}>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
-            PER-MODEL RANKINGS
-          </div>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {result.speakerModelMatches.map((group) => {
-              const modelLabel =
-                group.modelKey === 'redimnet_b5' ? 'ReDimNet B5' :
-                group.modelKey === 'ecapa_voxceleb' ? 'ECAPA VoxCeleb' :
-                group.modelKey === 'wespeaker_resnet293_lm' ? 'WeSpeaker ResNet293' :
-                group.modelKey;
-              return (
-                <div
-                  key={group.modelKey}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 12,
-                    background: group.drivesDecision
-                      ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))'
-                      : 'rgba(125,200,255,0.03)',
-                    border: `1px solid ${group.drivesDecision ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.14)'}`,
-                    display: 'grid',
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{modelLabel}</div>
-                      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
-                        {group.drivesDecision ? 'ACTIVE IDENTIFY MODEL' : 'COMPARISON ONLY'}
-                      </div>
-                    </div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
-                      TOP {group.matches.length}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {group.matches.map((match, index) => {
-                      const profile = profiles.find((p) => (p.id ?? p.userId) === match.userId);
-                      const accent = index === 0 ? (group.drivesDecision ? '#7ef0ff' : '#bff4ff') : 'var(--ink-soft)';
-                      return (
-                        <div
-                          key={`${group.modelKey}-${match.userId}`}
-                          className="biovoice-identify-model-row"
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
-                            gap: 10,
-                            alignItems: 'center',
-                            padding: '8px 10px',
-                            borderRadius: 10,
-                            background: 'rgba(0,0,0,0.16)',
-                          }}
-                        >
-                          <div className="label-mono" style={{ fontSize: 10, color: accent, minWidth: 24 }}>
-                            #{index + 1}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {match.userId}
-                            </div>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
-                              {profile?.initials ? `${profile.initials} · ` : ''}{match.sampleCount} sample{match.sampleCount === 1 ? '' : 's'}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>MATCH</div>
-                            <div className="num-mono" style={{ fontSize: 18, color: accent }}>
-                              {(match.similarityScore * 100).toFixed(1)}%
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
-                            <div className="num-mono" style={{ fontSize: 18 }}>
-                              {match.centroidSimilarity.toFixed(3)}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)', marginTop: 4 }}>
+            compared against {result.nEnrolledTotal} profile{result.nEnrolledTotal === 1 ? '' : 's'} · scroll →
           </div>
         </div>
-      )}
-
-      {result.speakerFusion && (
-        <div className="panel" style={{ padding: '14px 20px', display: 'grid', gap: 10 }}>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
-            FUSION DECISION
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 15 }}>
-              {result.speakerFusion.strategy === 'majority_vote'
-                ? 'Majority vote across ReDimNet, ECAPA, and ResNet293'
-                : result.speakerFusion.strategy}
-            </div>
-            <div className="label-mono" style={{ fontSize: 9, color: result.speakerFusion.combinedMatch ? 'var(--good)' : 'var(--warn)' }}>
-              {result.speakerFusion.matchedModels}/{result.speakerFusion.totalModels} MATCHED · NEED {result.speakerFusion.majorityRequired}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Deepfake verdict + verdict summary */}
-      <div className="panel biovoice-identify-summary" style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>DEEPFAKE SCORE</div>
-          <div className="num-mono" style={{
-            fontSize: 22, marginTop: 4,
-            color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)',
-          }}>
-            {result.deepfakeScore.toFixed(3)}
-          </div>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>
-            threshold {result.deepfakeThreshold.toFixed(2)} · {result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'}
-          </div>
-        </div>
-        <div>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>WOULD /VERIFY ACCEPT?</div>
-          <div style={{
-            fontSize: 22, marginTop: 4, fontWeight: 600,
-            color: result.wouldAcceptTop1 ? 'var(--good)' : 'var(--bad)',
-          }}>
-            {result.wouldAcceptTop1 ? 'YES' : 'NO'}
-          </div>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>
-            {result.speakerFusion
-              ? `speaker vote ${result.speakerFusion.matchedModels}/${result.speakerFusion.totalModels} + df ≥ ${result.deepfakeThreshold.toFixed(2)}`
-              : `top match vs sim ≥ ${(result.similarityThreshold * 100).toFixed(0)}% + df ≥ ${result.deepfakeThreshold.toFixed(2)}`}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={() => scrollByCard(-1)} aria-label="Scroll results left" style={arrowStyle}>‹</button>
+          <button onClick={() => scrollByCard(1)} aria-label="Scroll results right" style={arrowStyle}>›</button>
+          <button onClick={onReset} aria-label="Identify another voice"
+            style={{ ...arrowStyle, width: 'auto', padding: '0 18px', fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.1em' }}>↺ IDENTIFY ANOTHER</button>
         </div>
       </div>
 
-      {result.speakerModelMatches?.length > 0 && (
-        <div className="panel" style={{ padding: '16px 20px', display: 'grid', gap: 12 }}>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>
-            PER-MODEL RANKINGS
-          </div>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {result.speakerModelMatches.map((group) => {
-              const modelLabel =
-                group.modelKey === 'redimnet_b5' ? 'ReDimNet B5' :
-                group.modelKey === 'ecapa_voxceleb' ? 'ECAPA VoxCeleb' :
-                group.modelKey === 'wespeaker_resnet293_lm' ? 'WeSpeaker ResNet293' :
-                group.modelKey;
-              return (
-                <div
-                  key={group.modelKey}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 12,
-                    background: group.drivesDecision
-                      ? 'linear-gradient(180deg, rgba(126,240,255,0.08), rgba(126,240,255,0.02))'
-                      : 'rgba(125,200,255,0.03)',
-                    border: `1px solid ${group.drivesDecision ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.14)'}`,
-                    display: 'grid',
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{modelLabel}</div>
-                      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
-                        {group.drivesDecision ? 'ACTIVE IDENTIFY MODEL' : 'COMPARISON ONLY'}
-                      </div>
-                    </div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>
-                      TOP {group.matches.length}
-                    </div>
-                  </div>
+      <DegradedBanner provenance={result.modelProvenance} variant="compact"/>
 
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {group.matches.map((match, index) => {
-                      const profile = profiles.find((p) => (p.id ?? p.userId) === match.userId);
-                      const accent = index === 0 ? (group.drivesDecision ? '#7ef0ff' : '#bff4ff') : 'var(--ink-soft)';
-                      return (
-                        <div
-                          key={`${group.modelKey}-${match.userId}`}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'auto minmax(0, 1fr) auto auto',
-                            gap: 10,
-                            alignItems: 'center',
-                            padding: '8px 10px',
-                            borderRadius: 10,
-                            background: 'rgba(0,0,0,0.16)',
-                          }}
-                        >
-                          <div className="label-mono" style={{ fontSize: 10, color: accent, minWidth: 24 }}>
-                            #{index + 1}
-                          </div>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {match.userId}
-                            </div>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>
-                              {profile?.initials ? `${profile.initials} · ` : ''}{match.sampleCount} sample{match.sampleCount === 1 ? '' : 's'}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>MATCH</div>
-                            <div className="num-mono" style={{ fontSize: 18, color: accent }}>
-                              {(match.similarityScore * 100).toFixed(1)}%
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
-                            <div className="num-mono" style={{ fontSize: 18 }}>
-                              {match.centroidSimilarity.toFixed(3)}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+      {/* Horizontal filmstrip of large result cards */}
+      <div
+        ref={scrollRef}
+        className="biovoice-identify-filmstrip"
+        role="region"
+        aria-label="Identification results"
+        tabIndex={0}
+        style={{ flex: 1, minHeight: 0, display: 'flex', gap: 20, overflowX: 'auto', overflowY: 'hidden', scrollSnapType: 'x mandatory', padding: '2px 2px 12px' }}
+      >
+        {/* CARD 1 — Spectrogram hero */}
+        <div className="biovoice-rise" style={{ ...cardBase, width: 'min(820px, 88vw)', animationDelay: '0ms' }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>SPECTROGRAM · GRAD-CAM</div>
+          <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 0 }}>
+            <ExplainTab wavFile={wavFile ?? null} open={!!wavFile} matchUserId={top?.userId ?? null} panelWidth={764} specWidth={720} specHeight={300}/>
+          </div>
+        </div>
+
+        {/* CARD 2 — Top 3 + gauge */}
+        <div className="biovoice-rise" style={{ ...cardBase, width: 'min(460px, 88vw)', animationDelay: '90ms' }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 6, letterSpacing: '0.2em' }}>TOP 3 · FUSED SCORE</div>
+          <div style={{ display: 'grid', placeItems: 'center' }}>
+            <SimilarityGauge value={combined} threshold={result.similarityThreshold} size={250} label={top?.userId ?? '—'}/>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4, overflowY: 'auto', minHeight: 0 }}>
+            {result.matches.map((m, i) => {
+              const profile = profiles.find((p) => (p.id ?? p.userId) === m.userId);
+              const pct = (m.similarityScore * 100).toFixed(1);
+              const above = m.similarityScore >= result.similarityThreshold;
+              const accent = i === 0 ? (above ? '#7ef0ff' : '#ffb24a') : 'var(--ink-mute)';
+              return (
+                <div key={m.userId} style={{ padding: '12px 14px', borderRadius: 12, background: i === 0 ? 'rgba(126,240,255,0.06)' : 'rgba(125,200,255,0.02)', border: `1px solid ${i === 0 ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.12)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span className="label-mono" style={{ fontSize: 16, color: accent, minWidth: 24 }}>#{i + 1}</span>
+                    {profile && <div style={{ width: 30, height: 30, borderRadius: '50%', background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`, display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 11, fontWeight: 600 }}>{profile.initials}</div>}
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.userId}</div>
+                    <div className="num-mono" style={{ fontSize: 20, color: accent, fontWeight: 600 }}>{pct}%</div>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'rgba(0,0,0,0.4)', overflow: 'hidden', marginTop: 8 }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: i === 0 ? `linear-gradient(90deg, ${accent}88, ${accent})` : 'rgba(125,200,255,0.5)', transition: 'width 600ms cubic-bezier(.2,.8,.2,1)' }}/>
                   </div>
                 </div>
               );
             })}
           </div>
         </div>
-      )}
+
+        {/* CARD 3 — Per-model rankings */}
+        {result.speakerModelMatches?.length > 0 && (
+          <div className="biovoice-rise" style={{ ...cardBase, width: 'min(540px, 88vw)', animationDelay: '180ms' }}>
+            <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL RANKINGS</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
+              {result.speakerModelMatches.map((group) => (
+                <div key={group.modelKey} style={{ padding: '12px 14px', borderRadius: 12, background: group.drivesDecision ? 'rgba(126,240,255,0.06)' : 'rgba(125,200,255,0.03)', border: `1px solid ${group.drivesDecision ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.14)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{modelLabel(group.modelKey)}</div>
+                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>{group.drivesDecision ? 'ACTIVE' : 'COMPARISON'}</div>
+                  </div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {group.matches.slice(0, 3).map((match, index) => {
+                      const accent = index === 0 ? (group.drivesDecision ? '#7ef0ff' : '#bff4ff') : 'var(--ink-soft)';
+                      return (
+                        <div key={`${group.modelKey}-${match.userId}`} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '6px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.16)' }}>
+                          <span className="label-mono" style={{ fontSize: 10, color: accent, minWidth: 20 }}>#{index + 1}</span>
+                          <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.userId}</span>
+                          <span className="num-mono" style={{ fontSize: 16, color: accent }}>{(match.similarityScore * 100).toFixed(1)}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* CARD 4 — Verdict */}
+        <div className="biovoice-rise" style={{ ...cardBase, width: 'min(420px, 88vw)', animationDelay: '270ms', justifyContent: 'center', gap: 22 }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.2em' }}>VERDICT</div>
+          <div>
+            <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>WOULD /VERIFY ACCEPT?</div>
+            <div style={{ fontSize: 56, fontWeight: 700, lineHeight: 1, marginTop: 6, color: result.wouldAcceptTop1 ? 'var(--good)' : 'var(--bad)' }}>{result.wouldAcceptTop1 ? 'YES' : 'NO'}</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>DEEPFAKE</div>
+              <div className="num-mono" style={{ fontSize: 26, marginTop: 4, color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)' }}>{result.deepfakeScore.toFixed(3)}</div>
+              <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>{result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'} · thr {result.deepfakeThreshold.toFixed(2)}</div>
+            </div>
+            {result.speakerFusion && (
+              <div>
+                <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>FUSION VOTE</div>
+                <div className="num-mono" style={{ fontSize: 26, marginTop: 4, color: result.speakerFusion.combinedMatch ? 'var(--good)' : 'var(--warn)' }}>{result.speakerFusion.matchedModels}/{result.speakerFusion.totalModels}</div>
+                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>need {result.speakerFusion.majorityRequired} · majority</div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

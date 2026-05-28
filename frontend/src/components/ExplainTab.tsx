@@ -7,6 +7,9 @@ interface ExplainTabProps {
   wavFile: File | Blob | null;
   open: boolean;
   matchUserId?: string | null;
+  panelWidth?: number;
+  specWidth?: number;
+  specHeight?: number;
 }
 
 const MODEL_LABELS: Record<string, string> = {
@@ -18,7 +21,7 @@ const MODEL_LABELS: Record<string, string> = {
 const SPEC_W = 600;
 const SPEC_H = 180;
 
-export function ExplainTab({ wavFile, open, matchUserId }: ExplainTabProps) {
+export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specWidth = SPEC_W, specHeight = SPEC_H }: ExplainTabProps) {
   const [result, setResult] = useState<ExplainResult | null>(null);
   const [activeModel, setActiveModel] = useState<ExplainModelKey | null>(null);
   const [loading, setLoading] = useState(false);
@@ -106,7 +109,7 @@ export function ExplainTab({ wavFile, open, matchUserId }: ExplainTabProps) {
   const pctOf = (ms: number) => (durationMs > 0 ? (100 * ms) / durationMs : 0);
 
   return (
-    <aside style={panelStyle}>
+    <aside style={{ ...panelStyle, width: panelWidth }}>
       <header style={headerStyle}>
         <span>Grad-CAM{matchUserId ? ` · vs ${matchUserId}` : ""}</span>
         {bufferRef.current && (
@@ -146,6 +149,8 @@ export function ExplainTab({ wavFile, open, matchUserId }: ExplainTabProps) {
             activePlayKey={playingKey}
             onPlaySegment={handlePlaySegment}
             pctOf={pctOf}
+            specWidth={specWidth}
+            specHeight={specHeight}
           />
 
           <div style={rowFooterStyle}>
@@ -201,24 +206,26 @@ interface OverlayProps {
   activePlayKey: string | null;
   onPlaySegment: (startMs: number, endMs: number, key: string) => void;
   pctOf: (ms: number) => number;
+  specWidth: number;
+  specHeight: number;
 }
 
-function SpectrogramOverlay({ spectrogram, cam, durationMs, playheadMs, activePlayKey, onPlaySegment, pctOf }: OverlayProps) {
+function SpectrogramOverlay({ spectrogram, cam, durationMs, playheadMs, activePlayKey, onPlaySegment, pctOf, specWidth, specHeight }: OverlayProps) {
   const specRef = useRef<HTMLCanvasElement | null>(null);
   const heatRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (specRef.current) drawSpectrogram(specRef.current, spectrogram);
-  }, [spectrogram]);
+  }, [spectrogram, specWidth, specHeight]);
 
   useEffect(() => {
     if (heatRef.current) drawHeatmap(heatRef.current, cam);
-  }, [cam]);
+  }, [cam, specWidth, specHeight]);
 
   return (
-    <div style={specWrapStyle}>
-      <canvas ref={specRef} width={SPEC_W} height={SPEC_H} style={layerStyle} />
-      <canvas ref={heatRef} width={SPEC_W} height={SPEC_H} style={layerStyle} />
+    <div style={{ ...specWrapStyle, height: specHeight }}>
+      <canvas ref={specRef} width={specWidth} height={specHeight} style={layerStyle} />
+      <canvas ref={heatRef} width={specWidth} height={specHeight} style={layerStyle} />
       {/* Clickable salient bands over the time axis. */}
       {cam.salientSegments.map((s, i) => {
         const key = `seg:${cam.modelKey}:${i}`;

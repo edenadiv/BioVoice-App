@@ -366,6 +366,22 @@ body {
   }
 }
 
+/* Identify tab — horizontal results filmstrip + cinematic capture stage. */
+.biovoice-identify-filmstrip {
+  scroll-behavior: smooth;
+  scroll-padding: 0 2px;
+  align-items: stretch;
+}
+.biovoice-identify-cta { transition: transform 160ms cubic-bezier(0.2,0.8,0.2,1), filter 160ms; }
+.biovoice-identify-cta:hover { transform: translateY(-2px); filter: brightness(1.08); }
+
+@media (max-width: 1280px) {
+  .biovoice-identify-hero { font-size: 44px !important; }
+}
+@media (max-width: 960px) {
+  .biovoice-identify-hero { font-size: 34px !important; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
