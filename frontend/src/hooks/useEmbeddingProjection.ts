@@ -8,6 +8,9 @@ export type ProjectedProfile = {
   userId: string;
   modelKey: SpeakerModelKey;
   centroid: [number, number, number];
+  // Raw (un-projected) 192-d centroid — kept so callers can match query
+  // embeddings to speakers by true cosine similarity, not PCA proximity.
+  centroidRaw: number[];
   samples: Array<[number, number, number]>;
   color1: string;
   color2: string;
@@ -90,6 +93,7 @@ export function useEmbeddingProjection(
         userId: emb.userId,
         modelKey: emb.modelKey,
         centroid: projectPCA3(emb.centroid, fitted),
+        centroidRaw: emb.centroid,
         samples: emb.samples.map((s) => projectPCA3(s, fitted)),
         color1: visual.color1,
         color2: visual.color2,

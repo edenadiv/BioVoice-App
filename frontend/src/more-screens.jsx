@@ -985,7 +985,6 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
               matchUserId={top?.userId ?? null}
               layout="grid"
               panelWidth={800}
-              wespeakerTile={result.speakerModelMatches?.some((g) => g.modelKey === 'wespeaker_resnet293_lm') ?? false}
             />
           </div>
         </div>

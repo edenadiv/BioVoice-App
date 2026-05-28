@@ -4,6 +4,7 @@ import { embedAudio, explainAudio, type ExplainResult, type ModelCAM, type Expla
 import { decodeFileToBuffer, playSalient, playSegment, sliceBufferToFloat32, type SalientPlayback } from "../lib/explainAudio";
 import { useEmbeddingProjection } from "../hooks/useEmbeddingProjection";
 import { projectPCA3 } from "../lib/pca";
+import { nearestByCosine, type CosineMatch } from "../lib/embeddingMatch";
 // EmbeddingConstellation is the Dashboard's voice-space visual (untyped .jsx);
 // its props infer as `null` from JS defaults, so type it loosely here.
 import { EmbeddingConstellation as EmbeddingConstellationImpl } from "../console-ext.jsx";
@@ -21,9 +22,6 @@ interface ExplainTabProps {
   /** "tabs" = one heatmap at a time (compact). "grid" = every model's
    *  Grad-CAM spectrogram side by side for comparison. */
   layout?: "tabs" | "grid";
-  /** Show a WeSpeaker "N/A — ONNX" tile in grid mode (it ran in fusion
-   *  but can't produce a Grad-CAM). */
-  wespeakerTile?: boolean;
 }
 
 const MODEL_LABELS: Record<string, string> = {
@@ -38,7 +36,7 @@ const SPEC_H = 180;
 const GRID_SPEC_W = 440;
 const GRID_SPEC_H = 150;
 
-export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specWidth = SPEC_W, specHeight = SPEC_H, layout = "tabs", wespeakerTile = false }: ExplainTabProps) {
+export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specWidth = SPEC_W, specHeight = SPEC_H, layout = "tabs" }: ExplainTabProps) {
   const [result, setResult] = useState<ExplainResult | null>(null);
   const [activeModel, setActiveModel] = useState<ExplainModelKey | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,6 +46,9 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [heatZones, setHeatZones] = useState<HeatZonePoint[]>([]);
+  // The enrolled speaker the Grad-CAM region embedding sits closest to, by
+  // true cosine similarity over the raw 192-d space (not PCA proximity).
+  const [nearest, setNearest] = useState<CosineMatch | null>(null);
   // Same enrolled embeddings + deterministic PCA basis the Console
   // constellation uses, so heat-zone points share its coordinate system.
   const projection = useEmbeddingProjection("redimnet_b5", matchUserId ?? "");
@@ -87,42 +88,63 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
     };
   }, []);
 
-  // Slice the active model's salient segments out of the decoded clip,
-  // embed each via /embed, and project into the constellation's PCA basis.
+  // Embed the active model's salient regions and place the result in the
+  // voice-space orb, so you can see which enrolled speaker the Grad-CAM
+  // evidence sits closest to. The encoder needs ≥1s of speech but single
+  // salient segments are shorter, so concatenate the model's salient regions
+  // — the exact audio it attended to — into one waveform and embed that once.
+  // Fall back to the whole clip when the salient total is too short.
   useEffect(() => {
     const basis = projection.basis;
     const buffer = bufferRef.current;
     if (!open || !result || !basis || !buffer) {
       setHeatZones([]);
+      setNearest(null);
       return;
     }
     const cam = result.cams.find((c) => c.modelKey === activeModel) ?? result.cams[0] ?? null;
-    if (!cam || cam.salientSegments.length === 0) {
+    if (!cam) {
       setHeatZones([]);
+      setNearest(null);
       return;
     }
     let cancelled = false;
     (async () => {
-      // Cap the round-trips; skip slices too short for the encoder's VAD.
-      const segs = cam.salientSegments.filter((s) => s.endMs - s.startMs >= 250).slice(0, 8);
-      const zones: HeatZonePoint[] = [];
-      for (const s of segs) {
-        try {
-          const samples = sliceBufferToFloat32(buffer, s.startMs, s.endMs);
-          if (samples.length < 1) continue;
-          const res = await embedAudio(samples, buffer.sampleRate, "redimnet_b5");
-          if (cancelled) return;
-          zones.push({ point: projectPCA3(res.embedding, basis), label: `${(s.startMs / 1000).toFixed(1)}s`, peak: s.peak });
-        } catch {
-          // Short / silent slice → /embed 400. Skip it rather than fail the overlay.
+      const sr = buffer.sampleRate;
+      const parts = cam.salientSegments.map((s) => sliceBufferToFloat32(buffer, s.startMs, s.endMs));
+      const total = parts.reduce((n, p) => n + p.length, 0);
+      let waveform: Float32Array;
+      if (total >= sr) {
+        waveform = new Float32Array(total);
+        let off = 0;
+        for (const p of parts) {
+          waveform.set(p, off);
+          off += p.length;
         }
+      } else {
+        waveform = buffer.getChannelData(0).slice();
       }
-      if (!cancelled) setHeatZones(zones);
+      let embedding: number[];
+      try {
+        const res = await embedAudio(waveform, sr, "redimnet_b5");
+        embedding = res.embedding;
+      } catch {
+        if (!cancelled) {
+          setHeatZones([]);
+          setNearest(null);
+        }
+        return;
+      }
+      if (cancelled) return;
+      const peak = cam.salientSegments.reduce((m, s) => Math.max(m, s.peak), 0) || 1;
+      setHeatZones([{ point: projectPCA3(embedding, basis), label: "Grad-CAM", peak }]);
+      const candidates = projection.profiles.map((p) => ({ userId: p.userId, vector: p.centroidRaw }));
+      setNearest(nearestByCosine(embedding, candidates));
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, result, activeModel, projection.basis, matchUserId]);
+  }, [open, result, activeModel, projection.basis, projection.profiles]);
 
   const startPlayback = useCallback((key: string, pb: SalientPlayback) => {
     playbackRef.current?.stop();
@@ -196,20 +218,6 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
               pctOf={pctOf}
             />
           ))}
-          {wespeakerTile && (
-            <div style={tileStyle}>
-              <div style={tileHeaderStyle}>
-                <span>WeSpeaker · speaker</span>
-              </div>
-              <div style={{ ...naBoxStyle, height: GRID_SPEC_H }}>
-                <div style={{ fontSize: 18, color: "#6f8aa3", letterSpacing: "0.14em" }}>N/A</div>
-                <div style={{ ...mutedStyle, textAlign: "center", maxWidth: 280 }}>
-                  ResNet293 runs as an ONNX graph — no PyTorch autograd, so a
-                  Grad-CAM heatmap can't be computed for this encoder.
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -288,19 +296,23 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
       {result && (projection.profiles.length > 0 || heatZones.length > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
-            Voice space · heat zones{matchUserId ? ` vs ${matchUserId}` : ""}
+            Voice space · heat zones{nearest ? ` · closest ${nearest.userId}` : ""}
           </div>
           <EmbeddingConstellation
             width={Math.max(280, panelWidth - 28)}
             height={260}
             projectedProfiles={projection.profiles}
             heatZonePoints={heatZones}
-            heatZoneTargetId={matchUserId ?? null}
-            matchId={matchUserId ?? null}
+            heatZoneTargetId={nearest?.userId ?? matchUserId ?? null}
+            matchId={nearest?.userId ?? matchUserId ?? null}
             loading={projection.loading}
           />
           <div style={mutedStyle}>
-            {heatZones.length} heat-zone embedding{heatZones.length === 1 ? "" : "s"} · magenta = salient region · dashed link → {matchUserId ?? "match"}
+            {nearest ? (
+              <>closest enrolled speaker: <span style={{ color: "#d67cff" }}>{nearest.userId}</span> · {(nearest.similarity * 100).toFixed(1)}% cosine · magenta = Grad-CAM embedding, dashed link → nearest</>
+            ) : (
+              <>magenta = Grad-CAM embedding · enroll a speaker to compare</>
+            )}
           </div>
         </div>
       )}
@@ -568,17 +580,6 @@ const tileFooterStyle: CSSProperties = {
   fontSize: 9.5,
   color: "#6f8aa3",
   letterSpacing: "0.02em",
-};
-
-const naBoxStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
-  alignItems: "center",
-  justifyContent: "center",
-  borderRadius: 8,
-  border: "1px dashed rgba(126, 240, 255, 0.18)",
-  background: "rgba(125, 200, 255, 0.03)",
 };
 
 const tabsStyle: CSSProperties = {
