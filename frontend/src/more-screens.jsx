@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from "react"
 import { LivePulse, VoiceOrb, Waveform, SimilarityGauge, PipelineFlow } from "./visuals.jsx";
 import { AmbientField } from "./console-ext.jsx";
 import { Chrome } from "./screens.jsx";
-import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker } from "./lib/api";
+import { generateSpoof, getSpoofEngines, spoofTest, deleteUser, identifySpeaker, listLogs, getLogDetail, fetchLogAudio, getConfig, patchConfig } from "./lib/api";
 import { usePerProfileVerifyCounts, daysSince, useRefreshSpeakers, useAppDispatch } from "./lib/session";
 import { EnrollModal } from "./components/EnrollModal.tsx";
 import { DegradedBanner } from "./components/DegradedBanner";
@@ -23,8 +23,10 @@ function Sidebar({ page, setPage }) {
   const items = [
     { id: 'console',  label: 'Console',      icon: <path d="M2 4h16M2 9h16M2 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/> },
     { id: 'identify', label: 'Identify',     icon: <><circle cx="9" cy="9" r="5" stroke="currentColor" strokeWidth="1.5"/><path d="M13 13l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
+    { id: 'logs',     label: 'Logs',         icon: <><path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M7 9h6M7 12h6M7 15h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></> },
     { id: 'lab',      label: 'Deepfake Lab', icon: <><circle cx="10" cy="10" r="6" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6v8" stroke="currentColor" strokeWidth="1.5"/></> },
     { id: 'profiles', label: 'Profiles',     icon: <><circle cx="10" cy="7" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></> },
+    { id: 'settings', label: 'Settings',     icon: <><circle cx="10" cy="10" r="2.6" stroke="currentColor" strokeWidth="1.5"/><path d="M10 2.5v2M10 15.5v2M17.5 10h-2M4.5 10h-2M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4M15.3 15.3l-1.4-1.4M6.1 6.1L4.7 4.7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></> },
   ];
   return (
     <div className="biovoice-sidebar" style={{
@@ -773,7 +775,7 @@ function IdentifyScreen({ profiles }) {
   );
 }
 
-function IdentifyResults({ result, profiles, wavFile, onReset }) {
+function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺ IDENTIFY ANOTHER', eyebrow = 'RANKED MATCHES' }) {
   const scrollRef = useRef(null);
   const scrollByCard = (dir) => {
     const el = scrollRef.current;
@@ -803,7 +805,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>RANKED MATCHES</div>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>{eyebrow}</div>
           <div className="biovoice-identify-hero" style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>
             {top ? top.userId : 'No match'}
             <span style={{ color: 'var(--ink-soft)', fontSize: 22, marginLeft: 12 }}>{(combined * 100).toFixed(1)}%</span>
@@ -815,8 +817,8 @@ function IdentifyResults({ result, profiles, wavFile, onReset }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => scrollByCard(-1)} aria-label="Scroll results left" style={arrowStyle}>‹</button>
           <button onClick={() => scrollByCard(1)} aria-label="Scroll results right" style={arrowStyle}>›</button>
-          <button onClick={onReset} aria-label="Identify another voice"
-            style={{ ...arrowStyle, width: 'auto', padding: '0 18px', fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.1em' }}>↺ IDENTIFY ANOTHER</button>
+          <button onClick={onReset} aria-label="Reset results"
+            style={{ ...arrowStyle, width: 'auto', padding: '0 18px', fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.1em' }}>{resetLabel}</button>
         </div>
       </div>
 
@@ -831,11 +833,18 @@ function IdentifyResults({ result, profiles, wavFile, onReset }) {
         tabIndex={0}
         style={{ flex: 1, minHeight: 0, display: 'flex', gap: 20, overflowX: 'auto', overflowY: 'hidden', scrollSnapType: 'x mandatory', padding: '2px 2px 12px' }}
       >
-        {/* CARD 1 — Spectrogram hero */}
-        <div className="biovoice-rise" style={{ ...cardBase, width: 'min(820px, 88vw)', animationDelay: '0ms' }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>SPECTROGRAM · GRAD-CAM</div>
-          <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 0 }}>
-            <ExplainTab wavFile={wavFile ?? null} open={!!wavFile} matchUserId={top?.userId ?? null} panelWidth={764} specWidth={720} specHeight={300}/>
+        {/* CARD 1 — Per-model Grad-CAM spectrograms, side by side */}
+        <div className="biovoice-rise" style={{ ...cardBase, width: 'min(860px, 90vw)', animationDelay: '0ms' }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL GRAD-CAM · vs {top?.userId ?? '—'}</div>
+          <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 0, overflowY: 'auto' }}>
+            <ExplainTab
+              wavFile={wavFile ?? null}
+              open={!!wavFile}
+              matchUserId={top?.userId ?? null}
+              layout="grid"
+              panelWidth={800}
+              wespeakerTile={result.speakerModelMatches?.some((g) => g.modelKey === 'wespeaker_resnet293_lm') ?? false}
+            />
           </div>
         </div>
 
@@ -976,77 +985,322 @@ function Field({ label, children }) {
 }
 
 // ============================================================================
-// UserSettingsPage — comprehensive in-app settings (not the demo-mode panel).
+// LogsScreen — unified verify + identify run history. Click a row to reopen
+// the full result in the same filmstrip the Identify tab renders.
 // ============================================================================
-function UserSettingsPage({ settings, setSettings }) {
-  const update = (k, v) => setSettings(s => ({ ...s, [k]: v }));
+const MODEL_SHORT = {
+  redimnet_b5: 'ReDimNet',
+  ecapa_voxceleb: 'ECAPA',
+  wespeaker_resnet293_lm: 'WeSpeaker',
+};
+
+const DECISION_TONE = {
+  ACCEPT: 'var(--good)',
+  REJECT: 'var(--warn)',
+  DEEPFAKE: 'var(--bad)',
+  'NO MATCH': 'var(--ink-mute)',
+};
+
+// Adapt a stored verify run into the IdentificationResult shape so the Logs
+// detail reuses the exact same results view as a fresh identify run.
+function verifyToIdentification(v, config) {
+  const redimnet = v.speakerModelScores.find((s) => s.modelKey === 'redimnet_b5');
+  const simThr = redimnet?.threshold ?? config?.similarityThreshold ?? 0.75;
+  const dfThr = config?.deepfakeThreshold ?? 0.5;
+  const mkMatch = (score, centroid) => ({
+    userId: v.userId, similarityScore: score, centroidSimilarity: centroid, sampleCount: 0, enrolledAt: v.createdAt,
+  });
+  return {
+    matches: [mkMatch(v.similarityScore, v.centroidSimilarity)],
+    speakerModelMatches: v.speakerModelScores.map((s) => ({
+      modelKey: s.modelKey,
+      matches: [mkMatch(s.similarityScore, s.centroidSimilarity)],
+      drivesDecision: s.drivesDecision,
+    })),
+    speakerFusion: v.speakerFusion,
+    deepfakeScore: v.deepfakeScore,
+    analysisDetails: v.analysisDetails,
+    wouldAcceptTop1: v.decision === 'ACCEPT',
+    similarityThreshold: simThr,
+    deepfakeThreshold: dfThr,
+    nEnrolledTotal: 1,
+    modelProvenance: v.modelProvenance,
+    queryEmbeddings: v.queryEmbeddings,
+  };
+}
+
+function LogsScreen({ profiles }) {
+  const [logs, setLogs] = useState(null);
+  const [error, setError] = useState(null);
+  const [config, setConfig] = useState(null);
+  const [selected, setSelected] = useState(null); // { entry, result, wavFile }
+  const [opening, setOpening] = useState(false);
+
+  const loadLogs = useCallback(async () => {
+    setError(null);
+    try {
+      const [entries, cfg] = await Promise.all([listLogs(), getConfig().catch(() => null)]);
+      setLogs(entries);
+      setConfig(cfg);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setLogs([]);
+    }
+  }, []);
+
+  useEffect(() => { loadLogs(); }, [loadLogs]);
+
+  const openEntry = useCallback(async (entry) => {
+    setOpening(true);
+    try {
+      const detail = await getLogDetail(entry.id);
+      const result = detail.kind === 'verify'
+        ? verifyToIdentification(detail.verify, config)
+        : detail.identify;
+      let wavFile = null;
+      if (detail.hasAudio) {
+        wavFile = await fetchLogAudio(entry.id).catch(() => null);
+      }
+      setSelected({ entry, result, wavFile });
+    } catch (err) {
+      window.alert(`Could not open run: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setOpening(false);
+    }
+  }, [config]);
+
+  if (selected) {
+    const k = selected.entry.kind;
+    return (
+      <div className="screen fade-enter">
+        <Chrome status={`${k === 'verify' ? 'VERIFICATION' : 'IDENTIFICATION'} RUN`} subtitle={fmtTime(selected.entry.createdAt)} screenName="LOGS"/>
+        <AmbientField count={30}/>
+        <div style={{ position: 'absolute', inset: 0, padding: '128px 40px 40px 116px', overflow: 'hidden', zIndex: 2 }}>
+          <IdentifyResults
+            result={selected.result}
+            profiles={profiles}
+            wavFile={selected.wavFile}
+            onReset={() => setSelected(null)}
+            resetLabel="← BACK TO LOGS"
+            eyebrow={k === 'verify' ? `VERIFY · ${selected.entry.label}` : 'RANKED MATCHES'}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="screen fade-enter">
-      <Chrome status="OPERATIONAL · ALL MODELS HEALTHY" statusKind="good" subtitle="Application preferences" screenName="SETTINGS"/>
+      <Chrome status="RUN HISTORY" subtitle={logs ? `${logs.length} recorded run${logs.length === 1 ? '' : 's'}` : 'loading…'} screenName="LOGS"/>
+      <AmbientField count={36}/>
+      <div className="biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
+        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+          <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
+            <div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VERIFY · IDENTIFY</div>
+              <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Run logs</div>
+              <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>Every verification and identification, newest first. Click a run to reopen its full result.</div>
+            </div>
+            <button onClick={loadLogs} className="btn" style={{ padding: '10px 18px', fontSize: 12, border: '1px solid var(--line-2)', borderRadius: 10, background: 'rgba(125,200,255,0.04)', color: 'var(--ink)', cursor: 'pointer' }}>↻ REFRESH</button>
+          </div>
+
+          {error && <div className="panel" style={{ padding: 20, color: '#ff7aa8', marginBottom: 16 }}>Failed to load logs: {error}</div>}
+
+          {logs && logs.length === 0 && !error && (
+            <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-mute)' }}>
+              <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: 'var(--teal-2)' }}>NO RUNS YET</div>
+              <div style={{ fontSize: 16 }}>Run a verification (Console) or identification (Identify) to populate the log.</div>
+            </div>
+          )}
+
+          {logs && logs.length > 0 && (
+            <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
+              {/* Header row */}
+              <div className="label-mono biovoice-log-row" style={{ display: 'grid', gridTemplateColumns: '96px 86px minmax(0,1fr) 110px 86px minmax(0,160px)', gap: 12, padding: '12px 18px', fontSize: 9, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line-2)', letterSpacing: '0.12em' }}>
+                <span>WHEN</span><span>TYPE</span><span>SUBJECT</span><span>DECISION</span><span>SCORE</span><span>MODELS</span>
+              </div>
+              {logs.map((e, i) => {
+                const tone = DECISION_TONE[e.decision] ?? 'var(--ink)';
+                return (
+                  <button
+                    key={e.id}
+                    onClick={() => openEntry(e)}
+                    disabled={opening}
+                    className="biovoice-log-row"
+                    style={{
+                      width: '100%', textAlign: 'left', display: 'grid',
+                      gridTemplateColumns: '96px 86px minmax(0,1fr) 110px 86px minmax(0,160px)', gap: 12,
+                      alignItems: 'center', padding: '13px 18px', cursor: opening ? 'wait' : 'pointer',
+                      background: i % 2 ? 'rgba(125,200,255,0.02)' : 'transparent',
+                      border: 'none', borderBottom: '1px solid var(--line)', color: 'var(--ink)',
+                      fontFamily: 'inherit',
+                    }}
+                    onMouseEnter={(ev) => (ev.currentTarget.style.background = 'rgba(126,240,255,0.06)')}
+                    onMouseLeave={(ev) => (ev.currentTarget.style.background = i % 2 ? 'rgba(125,200,255,0.02)' : 'transparent')}
+                  >
+                    <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>{fmtTime(e.createdAt)}</span>
+                    <span className="label-mono" style={{ fontSize: 9, color: e.kind === 'verify' ? '#7ef0ff' : '#b27bff', border: `1px solid ${e.kind === 'verify' ? 'rgba(126,240,255,0.4)' : 'rgba(178,123,255,0.4)'}`, borderRadius: 6, padding: '3px 7px', textAlign: 'center', letterSpacing: '0.08em' }}>{e.kind === 'verify' ? 'VERIFY' : 'IDENTIFY'}</span>
+                    <span style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.label}</span>
+                    <span className="label-mono" style={{ fontSize: 10, color: tone, letterSpacing: '0.06em' }}>{e.decision}</span>
+                    <span className="num-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>{(e.score * 100).toFixed(1)}%</span>
+                    <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {e.models.map((m) => MODEL_SHORT[m] ?? m).join(' · ')}{e.hasAudio ? '' : ' · no audio'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function fmtTime(iso) {
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    return sameDay
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
+// ============================================================================
+// UserSettingsPage — comprehensive in-app settings (not the demo-mode panel).
+// ============================================================================
+const MODEL_FULL = {
+  redimnet_b5: 'ReDimNet B5',
+  ecapa_voxceleb: 'ECAPA-TDNN',
+  wespeaker_resnet293_lm: 'WeSpeaker ResNet293',
+};
+
+function UserSettingsPage() {
+  const [cfg, setCfg] = useState(null);
+  const [err, setErr] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const flashRef = useRef(null);
+
+  useEffect(() => {
+    getConfig().then(setCfg).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const apply = useCallback(async (partial) => {
+    setErr(null);
+    // Optimistic local update for instant feedback.
+    setCfg((c) => (c ? { ...c, ...partial } : c));
+    try {
+      const next = await patchConfig(partial);
+      setCfg(next);
+      setSavedFlash(true);
+      clearTimeout(flashRef.current);
+      flashRef.current = setTimeout(() => setSavedFlash(false), 1400);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      getConfig().then(setCfg).catch(() => {}); // resync truth after a rejected patch
+    }
+  }, []);
+
+  const setLocal = (partial) => setCfg((c) => (c ? { ...c, ...partial } : c));
+
+  if (err && !cfg) {
+    return (
+      <div className="screen fade-enter">
+        <Chrome status="CONFIG UNAVAILABLE" statusKind="bad" subtitle="settings" screenName="SETTINGS"/>
+        <AmbientField count={30}/>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', zIndex: 2 }}>
+          <div className="panel" style={{ padding: 28, color: '#ff7aa8', maxWidth: 480 }}>Couldn’t load config: {err}</div>
+        </div>
+      </div>
+    );
+  }
+  if (!cfg) {
+    return (
+      <div className="screen fade-enter">
+        <Chrome status="LOADING" subtitle="settings" screenName="SETTINGS"/>
+        <AmbientField count={30}/>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', zIndex: 2, color: 'var(--ink-mute)' }}>Loading config…</div>
+      </div>
+    );
+  }
+
+  const matchHint = cfg.similarityThreshold < 0.7 ? 'Permissive · more false accepts' : cfg.similarityThreshold > 0.85 ? 'Strict · more false rejects' : 'Balanced';
+  const toggleable = Object.fromEntries(cfg.models.map((m) => [m.key, m]));
+
+  return (
+    <div className="screen fade-enter">
+      <Chrome
+        status={cfg.provenance?.isDegraded ? 'DEGRADED · HEURISTIC FALLBACK' : 'OPERATIONAL · MODELS HEALTHY'}
+        statusKind={cfg.provenance?.isDegraded ? 'warn' : 'good'}
+        subtitle={savedFlash ? 'saved ✓' : 'live engine config'}
+        screenName="SETTINGS"
+      />
       <AmbientField count={40}/>
 
-      <div style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
+      <div className="biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', paddingBottom: 40 }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>OPERATOR · OP-104</div>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>ENGINE · LIVE</div>
           <div style={{ fontSize: 40, fontWeight: 200, marginTop: 6, marginBottom: 4 }}>Settings</div>
-          <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginBottom: 32 }}>Tune detection thresholds, security policies, and notifications.</div>
+          <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginBottom: 8 }}>
+            Decision thresholds and model participation apply to the running backend immediately and persist across restarts.
+          </div>
+          {err && <div className="label-mono" style={{ fontSize: 11, color: '#ff7aa8', marginBottom: 18 }}>⚠ {err}</div>}
+          <div style={{ marginBottom: 24 }}><DegradedBanner provenance={cfg.provenance} variant="compact"/></div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 32 }}>
-            {/* Section nav */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {['Detection', 'Security', 'Audio', 'Notifications', 'About'].map((s, i) => (
+              {['Detection', 'Per-model', 'Models', 'Engine'].map((s, i) => (
                 <a key={s} href={`#sec-${i}`}
-                  style={{
-                    padding: '10px 14px', borderRadius: 10,
-                    color: 'var(--ink-mute)', textDecoration: 'none',
-                    fontSize: 13,
-                    background: 'transparent', cursor: 'pointer',
-                    transition: 'background 180ms, color 180ms',
-                  }}
+                  style={{ padding: '10px 14px', borderRadius: 10, color: 'var(--ink-mute)', textDecoration: 'none', fontSize: 13, background: 'transparent', cursor: 'pointer', transition: 'background 180ms, color 180ms' }}
                   onMouseEnter={e => { e.target.style.background = 'rgba(125,200,255,0.06)'; e.target.style.color = '#7ef0ff'; }}
                   onMouseLeave={e => { e.target.style.background = 'transparent'; e.target.style.color = 'var(--ink-mute)'; }}
                 >{s}</a>
               ))}
             </div>
 
-            {/* Sections */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <SectionCard id="sec-0" title="Detection thresholds" desc="When does the system call something a match — or a fake?">
-                <SliderRow label="Voice match threshold" value={settings.matchThr} min={0.5} max={0.95} step={0.01}
-                  onChange={v => update('matchThr', v)} hint={settings.matchThr < 0.7 ? 'Permissive · more false accepts' : settings.matchThr > 0.85 ? 'Strict · more false rejects' : 'Balanced'}/>
-                <SliderRow label="Anti-spoof threshold" value={settings.antiSpoofThr} min={0.3} max={0.8} step={0.01}
-                  onChange={v => update('antiSpoofThr', v)} hint="Below = considered synthetic"/>
-                <ToggleRow label="Aggressive deepfake mode" sub="Adds 5ms latency · catches more attacks"
-                  value={settings.aggressive} onChange={v => update('aggressive', v)}/>
+              <SectionCard id="sec-0" title="Detection thresholds" desc="When does the system call something a match — or a fake? These gate ACCEPT / REJECT / DEEPFAKE.">
+                <SliderRow label="Voice match threshold" value={cfg.similarityThreshold} min={0.5} max={0.95} step={0.01}
+                  onChange={(v) => setLocal({ similarityThreshold: v })} onCommit={(v) => apply({ similarityThreshold: v })} hint={matchHint}/>
+                <SliderRow label="Anti-spoof threshold" value={cfg.deepfakeThreshold} min={0.3} max={0.8} step={0.01}
+                  onChange={(v) => setLocal({ deepfakeThreshold: v })} onCommit={(v) => apply({ deepfakeThreshold: v })} hint="Below = audio considered synthetic (DEEPFAKE)"/>
+                <NumberRow label="Identify · top-N matches" value={cfg.identifyTopN} min={1} max={20} step={1}
+                  onChange={(v) => apply({ identifyTopN: v })}/>
+                <NumberRow label="Min enrollment samples" value={cfg.minEnrollmentSamples} min={1} max={10} step={1}
+                  onChange={(v) => apply({ minEnrollmentSamples: v })}/>
               </SectionCard>
 
-              <SectionCard id="sec-1" title="Security policy" desc="Lockouts and challenge response.">
-                <NumberRow label="Failed attempts before lock" value={settings.maxAttempts} min={1} max={10} step={1}
-                  onChange={v => update('maxAttempts', v)}/>
-                <ToggleRow label="Random phrase challenge" sub="Operator must repeat a generated phrase"
-                  value={settings.challenge} onChange={v => update('challenge', v)}/>
-                <ToggleRow label="Two-factor on critical actions" sub="Voice + hardware key" value={settings.twoFactor} onChange={v => update('twoFactor', v)}/>
+              <SectionCard id="sec-1" title="Per-model thresholds" desc="Each speaker model votes against its own cutoff; fusion takes the majority.">
+                <SliderRow label="ReDimNet B5 (primary)" value={cfg.redimnetSimilarityThreshold} min={0.5} max={0.95} step={0.01}
+                  onChange={(v) => setLocal({ redimnetSimilarityThreshold: v })} onCommit={(v) => apply({ redimnetSimilarityThreshold: v })}/>
+                <SliderRow label="ECAPA-TDNN" value={cfg.ecapaSimilarityThreshold} min={0.5} max={0.95} step={0.01}
+                  onChange={(v) => setLocal({ ecapaSimilarityThreshold: v })} onCommit={(v) => apply({ ecapaSimilarityThreshold: v })}/>
+                <SliderRow label="WeSpeaker ResNet293" value={cfg.wespeakerSimilarityThreshold} min={0.5} max={0.95} step={0.01}
+                  onChange={(v) => setLocal({ wespeakerSimilarityThreshold: v })} onCommit={(v) => apply({ wespeakerSimilarityThreshold: v })}/>
               </SectionCard>
 
-              <SectionCard id="sec-2" title="Audio capture" desc="How we listen.">
-                <SelectRow label="Input device" value={settings.input} onChange={v => update('input', v)}
-                  options={['Booth mic · Shure MV7', 'USB headset', 'Phone over SIP']}/>
-                <SliderRow label="Capture gain" value={settings.gain} min={0} max={1} step={0.05}
-                  onChange={v => update('gain', v)} unit="x" hint=""/>
-                <ToggleRow label="Noise suppression" sub="RNNoise · denoise booth ambient" value={settings.denoise} onChange={v => update('denoise', v)}/>
+              <SectionCard id="sec-2" title="Comparison models" desc="Toggle which encoders join the fusion vote. A model that didn’t load can’t be enabled.">
+                <ToggleRow
+                  label="ECAPA-TDNN" sub={toggleable.ecapa_voxceleb?.loaded ? 'SpeechBrain · 192-d' : 'not loaded on this server'}
+                  value={cfg.enableEcapaComparison} disabled={!toggleable.ecapa_voxceleb?.canToggle}
+                  onChange={(v) => apply({ enableEcapaComparison: v })}/>
+                <ToggleRow
+                  label="WeSpeaker ResNet293" sub={toggleable.wespeaker_resnet293_lm?.loaded ? 'ONNX · 256-d' : 'not loaded on this server'}
+                  value={cfg.enableWespeakerComparison} disabled={!toggleable.wespeaker_resnet293_lm?.canToggle}
+                  onChange={(v) => apply({ enableWespeakerComparison: v })}/>
               </SectionCard>
 
-              <SectionCard id="sec-3" title="Notifications" desc="When to ping the operator.">
-                <ToggleRow label="Sound on deepfake block" value={settings.notifySound} onChange={v => update('notifySound', v)}/>
-                <ToggleRow label="Desktop alerts" value={settings.notifyDesktop} onChange={v => update('notifyDesktop', v)}/>
-                <ToggleRow label="Daily threat brief email" sub="08:00 local · classified channel" value={settings.notifyEmail} onChange={v => update('notifyEmail', v)}/>
-              </SectionCard>
-
-              <SectionCard id="sec-4" title="About" desc="">
-                <KV k="Build" v="BioVoice v3.7.2 · TLV-PROD"/>
-                <KV k="Models" v="ReDimNet-B5 · AASIST-L · v2025.04"/>
-                <KV k="License" v="INCD-RIVA · expires 2027-12-31"/>
-                <KV k="Sovereignty" v="Air-gapped · on-prem only"/>
+              <SectionCard id="sec-3" title="Engine" desc="Read-only runtime status.">
+                <KV k="Sample rate" v={`${cfg.sampleRate} Hz`}/>
+                <KV k="Active speaker models" v={cfg.models.filter((m) => m.participating).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
+                <KV k="Loaded encoders" v={cfg.models.filter((m) => m.loaded).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
+                <KV k="Detector" v={cfg.provenance?.detector === 'aasist' ? 'AASIST' : (cfg.provenance?.detector ?? '—')}/>
+                <KV k="Encoder provenance" v={cfg.provenance?.encoder ?? '—'}/>
+                <KV k="Status" v={cfg.provenance?.isDegraded ? 'Degraded (heuristic fallback)' : 'Healthy'}/>
               </SectionCard>
             </div>
           </div>
@@ -1066,7 +1320,8 @@ function SectionCard({ id, title, desc, children }) {
   );
 }
 
-function SliderRow({ label, value, min, max, step, onChange, unit = '', hint }) {
+function SliderRow({ label, value, min, max, step, onChange, onCommit, unit = '', hint }) {
+  const commit = (e) => onCommit && onCommit(parseFloat(e.target.value));
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px 70px', alignItems: 'center', gap: 14, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
       <div>
@@ -1075,6 +1330,7 @@ function SliderRow({ label, value, min, max, step, onChange, unit = '', hint }) 
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
+        onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit}
         style={{ accentColor: '#7ef0ff', width: '100%' }}/>
       <span className="num-mono" style={{ fontSize: 16, color: '#7ef0ff', textAlign: 'right' }}>
         {value.toFixed(2)}{unit}
@@ -1083,16 +1339,17 @@ function SliderRow({ label, value, min, max, step, onChange, unit = '', hint }) 
   );
 }
 
-function ToggleRow({ label, sub, value, onChange }) {
+function ToggleRow({ label, sub, value, onChange, disabled = false }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', gap: 14 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', gap: 14, opacity: disabled ? 0.5 : 1 }}>
       <div>
         <div style={{ fontSize: 13 }}>{label}</div>
         {sub && <div className="label-mono" style={{ fontSize: 9, marginTop: 2 }}>{sub}</div>}
       </div>
-      <button onClick={() => onChange(!value)}
+      <button onClick={() => !disabled && onChange(!value)} disabled={disabled}
+        title={disabled ? 'Model not loaded on this server' : undefined}
         style={{
-          width: 46, height: 26, borderRadius: 999, position: 'relative', cursor: 'pointer',
+          width: 46, height: 26, borderRadius: 999, position: 'relative', cursor: disabled ? 'not-allowed' : 'pointer',
           background: value ? 'linear-gradient(135deg, #3da9fc, #7ef0ff)' : 'rgba(125,200,255,0.10)',
           border: value ? '1px solid rgba(126,240,255,0.7)' : '1px solid var(--line-2)',
           transition: 'all 240ms cubic-bezier(.2,.8,.2,1)',
@@ -1304,5 +1561,5 @@ function MiniWave({ color, idx = 0 }) {
 }
 
 export {
-  Sidebar, DeepfakeLab, IdentifyScreen, UserSettingsPage, ProfilesPage,
+  Sidebar, DeepfakeLab, IdentifyScreen, LogsScreen, UserSettingsPage, ProfilesPage,
 };

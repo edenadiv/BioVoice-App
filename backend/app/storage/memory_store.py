@@ -4,15 +4,23 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.models import ReferenceSampleRecord, SpeakerRecord, VerificationRecord
+from app.models import (
+    IdentificationRecord,
+    ReferenceSampleRecord,
+    SpeakerRecord,
+    VerificationRecord,
+)
 
 
 class MemoryStore:
     def __init__(self):
         self._speakers: dict[str, SpeakerRecord] = {}
         self._results: list[VerificationRecord] = []
+        self._identifications: list[IdentificationRecord] = []
         self._reference_samples: list[ReferenceSampleRecord] = []
         self._verification_seq: dict[str, int] = {}
+        self._run_audio: dict[str, bytes] = {}
+        self._config_overrides: dict = {}
         # Soft-deleted profiles (op-driven, surfaced via DELETE /users/{id})
         self._deleted_users: list[dict] = []
 
@@ -63,6 +71,36 @@ class MemoryStore:
         next_value = self._verification_seq.get(day, 0) + 1
         self._verification_seq[day] = next_value
         return next_value
+
+    # Identification runs + run audio + config overrides -------------------
+
+    def add_identification(self, record: IdentificationRecord) -> None:
+        self._identifications.append(record)
+
+    def list_identifications(self) -> list[IdentificationRecord]:
+        return sorted(self._identifications, key=lambda item: item.created_at, reverse=True)
+
+    def get_identification(self, result_id: str) -> IdentificationRecord | None:
+        for record in self._identifications:
+            if record.result_id == result_id:
+                return record
+        return None
+
+    def save_run_audio(self, result_id: str, audio_bytes: bytes) -> None:
+        if audio_bytes:
+            self._run_audio[result_id] = audio_bytes
+
+    def get_run_audio(self, result_id: str) -> bytes | None:
+        return self._run_audio.get(result_id)
+
+    def has_run_audio(self, result_id: str) -> bool:
+        return result_id in self._run_audio
+
+    def get_config_overrides(self) -> dict:
+        return dict(self._config_overrides)
+
+    def set_config_overrides(self, overrides: dict) -> None:
+        self._config_overrides = dict(overrides or {})
 
     # Profile soft-delete (backs DELETE /users/{user_id}) ------------------
 

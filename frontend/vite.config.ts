@@ -16,6 +16,8 @@ const API_ROUTES_DENYLIST = [
   /^\/embed$/,
   /^\/spoof(\/|$)/,
   /^\/results$/,
+  /^\/logs(\/|$)/,
+  /^\/config$/,
 ];
 
 // Dev + preview serve the SPA on :5173 while the FastAPI backend runs on
@@ -25,7 +27,7 @@ const API_ROUTES_DENYLIST = [
 // prefixes through to :8000 (no CORS, no VITE_API_BASE_URL needed).
 const BACKEND_TARGET = process.env.VITE_DEV_BACKEND ?? "http://127.0.0.1:8000";
 const API_PROXY = Object.fromEntries(
-  ["/health", "/readyz", "/metrics", "/users", "/enroll", "/verify", "/identify", "/embed", "/explain", "/spoof", "/results"]
+  ["/health", "/readyz", "/metrics", "/users", "/enroll", "/verify", "/identify", "/embed", "/explain", "/spoof", "/results", "/logs", "/config"]
     .map((path) => [path, { target: BACKEND_TARGET, changeOrigin: true }]),
 );
 

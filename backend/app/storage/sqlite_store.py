@@ -12,15 +12,24 @@ import sqlite3
 from threading import Lock
 from uuid import uuid4
 
-from app.models import ReferenceSampleRecord, SpeakerRecord, VerificationRecord
+from app.models import (
+    IdentificationRecord,
+    ReferenceSampleRecord,
+    SpeakerRecord,
+    VerificationRecord,
+)
 
 
 class SQLiteStore:
     def __init__(self, database_path: Path, reference_samples_path: Path):
         self.database_path = Path(database_path)
         self.reference_samples_path = Path(reference_samples_path)
+        # Captured audio for verify/identify runs, keyed by result_id, so the
+        # Logs detail view can re-run /explain and reproduce the Grad-CAM.
+        self.run_audio_path = self.database_path.parent / "run_audio"
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.reference_samples_path.mkdir(parents=True, exist_ok=True)
+        self.run_audio_path.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
         self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -58,6 +67,26 @@ class SQLiteStore:
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     metadata_json TEXT
+                );
+
+                -- Open-set /identify runs (Logs tab). The full
+                -- IdentificationResponse lives in metadata_json; scalar
+                -- columns drive the log-list summary.
+                CREATE TABLE IF NOT EXISTS identification_results (
+                    result_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    top_user_id TEXT,
+                    top_score REAL NOT NULL,
+                    deepfake_score REAL NOT NULL,
+                    would_accept INTEGER NOT NULL DEFAULT 0,
+                    metadata_json TEXT
+                );
+
+                -- Single-row runtime config overrides (PATCH /config). Values
+                -- overlay the env/code defaults and survive restarts.
+                CREATE TABLE IF NOT EXISTS runtime_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    overrides_json TEXT NOT NULL DEFAULT '{}'
                 );
 
                 CREATE TABLE IF NOT EXISTS reference_samples (
@@ -411,6 +440,101 @@ class SQLiteStore:
             )
             for row in cursor.fetchall()
         ]
+
+    # Identification runs (Logs tab) ---------------------------------------
+
+    def add_identification(self, record: IdentificationRecord) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO identification_results (
+                    result_id, created_at, top_user_id, top_score,
+                    deepfake_score, would_accept, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.result_id,
+                    record.created_at.isoformat(),
+                    record.top_user_id,
+                    record.top_score,
+                    record.deepfake_score,
+                    1 if record.would_accept else 0,
+                    json.dumps(record.metadata or {}),
+                ),
+            )
+
+    def _row_to_identification(self, row: sqlite3.Row) -> IdentificationRecord:
+        return IdentificationRecord(
+            result_id=row["result_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            top_user_id=row["top_user_id"],
+            top_score=float(row["top_score"]),
+            deepfake_score=float(row["deepfake_score"]),
+            would_accept=bool(row["would_accept"]),
+            metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+        )
+
+    def list_identifications(self) -> list[IdentificationRecord]:
+        cursor = self._connection.execute(
+            """
+            SELECT result_id, created_at, top_user_id, top_score,
+                   deepfake_score, would_accept, metadata_json
+            FROM identification_results
+            ORDER BY created_at DESC
+            """
+        )
+        return [self._row_to_identification(row) for row in cursor.fetchall()]
+
+    def get_identification(self, result_id: str) -> IdentificationRecord | None:
+        row = self._connection.execute(
+            """
+            SELECT result_id, created_at, top_user_id, top_score,
+                   deepfake_score, would_accept, metadata_json
+            FROM identification_results
+            WHERE result_id = ?
+            """,
+            (result_id,),
+        ).fetchone()
+        return self._row_to_identification(row) if row is not None else None
+
+    # Captured run audio (for Logs Grad-CAM replay) ------------------------
+
+    def save_run_audio(self, result_id: str, audio_bytes: bytes) -> None:
+        if not audio_bytes:
+            return
+        (self.run_audio_path / f"{result_id}.wav").write_bytes(audio_bytes)
+
+    def get_run_audio(self, result_id: str) -> bytes | None:
+        path = self.run_audio_path / f"{result_id}.wav"
+        return path.read_bytes() if path.exists() else None
+
+    def has_run_audio(self, result_id: str) -> bool:
+        return (self.run_audio_path / f"{result_id}.wav").exists()
+
+    # Runtime config overrides (PATCH /config) -----------------------------
+
+    def get_config_overrides(self) -> dict:
+        row = self._connection.execute(
+            "SELECT overrides_json FROM runtime_config WHERE id = 1"
+        ).fetchone()
+        if row is None or not row["overrides_json"]:
+            return {}
+        try:
+            return json.loads(row["overrides_json"])
+        except (ValueError, TypeError):
+            return {}
+
+    def set_config_overrides(self, overrides: dict) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO runtime_config (id, overrides_json)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET overrides_json = excluded.overrides_json
+                """,
+                (json.dumps(overrides or {}),),
+            )
 
     # Profile soft-delete (backs DELETE /users/{user_id}) ------------------
 

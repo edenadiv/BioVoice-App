@@ -290,6 +290,10 @@ class IdentificationResponse(BaseModel):
     top-1 match: similarity ≥ similarity_threshold AND deepfake_score
     ≥ deepfake_threshold."""
 
+    # Persisted-run identity (Logs tab). Empty/None on legacy in-flight
+    # responses; populated once the run is recorded.
+    result_id: str = ""
+    created_at: datetime | None = None
     matches: list[IdentificationMatch]
     speaker_model_matches: list[SpeakerModelMatches] = Field(default_factory=list)
     speaker_fusion: SpeakerFusionDecision | None = None
@@ -302,3 +306,76 @@ class IdentificationResponse(BaseModel):
     model_provenance: ModelProvenance | None = None
     # Raw query embedding per speaker model (see VerificationResponse).
     query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
+
+
+# -----------------------------------------------------------------------------
+# Logs tab — unified verify + identify run history
+# -----------------------------------------------------------------------------
+
+
+class LogEntry(BaseModel):
+    """One row in the Logs list. `kind` selects which detail shape
+    GET /logs/{id} returns; `models` are the speaker models that ran."""
+
+    id: str
+    kind: Literal["verify", "identify"]
+    created_at: datetime
+    label: str
+    decision: str
+    score: float = Field(ge=0.0, le=1.0)
+    deepfake_score: float = Field(ge=0.0, le=1.0)
+    models: list[SpeakerModelKey] = Field(default_factory=list)
+    has_audio: bool = False
+
+
+class LogDetailResponse(BaseModel):
+    kind: Literal["verify", "identify"]
+    verify: VerificationResponse | None = None
+    identify: IdentificationResponse | None = None
+    has_audio: bool = False
+
+
+# -----------------------------------------------------------------------------
+# Runtime config (GET / PATCH /config)
+# -----------------------------------------------------------------------------
+
+
+class ConfigModelInfo(BaseModel):
+    """Read-only per-model status for the Settings tab."""
+
+    key: SpeakerModelKey
+    label: str
+    loaded: bool
+    participating: bool
+    can_toggle: bool
+
+
+class ConfigResponse(BaseModel):
+    similarity_threshold: float = Field(ge=0.0, le=1.0)
+    deepfake_threshold: float = Field(ge=0.0, le=1.0)
+    redimnet_similarity_threshold: float = Field(ge=0.0, le=1.0)
+    ecapa_similarity_threshold: float = Field(ge=0.0, le=1.0)
+    wespeaker_similarity_threshold: float = Field(ge=0.0, le=1.0)
+    min_enrollment_samples: int = Field(ge=1, le=10)
+    identify_top_n: int = Field(ge=1, le=20)
+    enable_ecapa_comparison: bool
+    enable_wespeaker_comparison: bool
+    # Read-only context for the Settings tab.
+    sample_rate: int
+    models: list[ConfigModelInfo] = Field(default_factory=list)
+    provenance: ModelProvenance | None = None
+
+
+class ConfigPatch(BaseModel):
+    """Partial update. Unset fields are left unchanged; bounds are
+    enforced here so a bad value 422s before touching the live service."""
+
+    similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    deepfake_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    redimnet_similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    ecapa_similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    wespeaker_similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_enrollment_samples: int | None = Field(default=None, ge=1, le=10)
+    identify_top_n: int | None = Field(default=None, ge=1, le=20)
+    enable_ecapa_comparison: bool | None = None
+    enable_wespeaker_comparison: bool | None = None

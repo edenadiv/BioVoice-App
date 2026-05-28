@@ -197,3 +197,63 @@ export type SpoofEngines = {
   engines: SpoofEngineInfo[];
   defaultEngine: string | null;
 };
+
+// -- Logs (unified verify + identify history) --------------------------------
+
+export type LogKind = "verify" | "identify";
+
+export type LogEntry = {
+  id: string;
+  kind: LogKind;
+  createdAt: string;
+  label: string;
+  decision: string;
+  score: number;
+  deepfakeScore: number;
+  models: SpeakerModelKey[];
+  hasAudio: boolean;
+};
+
+export type LogDetail = {
+  kind: LogKind;
+  verify: VerificationResult | null;
+  identify: IdentificationResult | null;
+  hasAudio: boolean;
+};
+
+// -- Runtime config (Settings tab) -------------------------------------------
+
+export type ConfigModelInfo = {
+  key: SpeakerModelKey;
+  label: string;
+  loaded: boolean;
+  participating: boolean;
+  canToggle: boolean;
+};
+
+export type AppConfig = {
+  similarityThreshold: number;
+  deepfakeThreshold: number;
+  redimnetSimilarityThreshold: number;
+  ecapaSimilarityThreshold: number;
+  wespeakerSimilarityThreshold: number;
+  minEnrollmentSamples: number;
+  identifyTopN: number;
+  enableEcapaComparison: boolean;
+  enableWespeakerComparison: boolean;
+  sampleRate: number;
+  models: ConfigModelInfo[];
+  provenance: ModelProvenance | null;
+};
+
+export type ConfigPatch = Partial<{
+  similarityThreshold: number;
+  deepfakeThreshold: number;
+  redimnetSimilarityThreshold: number;
+  ecapaSimilarityThreshold: number;
+  wespeakerSimilarityThreshold: number;
+  minEnrollmentSamples: number;
+  identifyTopN: number;
+  enableEcapaComparison: boolean;
+  enableWespeakerComparison: boolean;
+}>;

@@ -37,3 +37,18 @@ class VerificationRecord:
     message: str
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class IdentificationRecord:
+    """A persisted open-set /identify run, for the Logs tab. The full
+    IdentificationResponse is stashed in `metadata` so the detail view can
+    re-render it exactly; the scalar columns drive the log list summary."""
+
+    result_id: str
+    created_at: datetime
+    top_user_id: str | None
+    top_score: float
+    deepfake_score: float
+    would_accept: bool
+    metadata: dict[str, Any] | None = None

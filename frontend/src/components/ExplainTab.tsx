@@ -10,6 +10,12 @@ interface ExplainTabProps {
   panelWidth?: number;
   specWidth?: number;
   specHeight?: number;
+  /** "tabs" = one heatmap at a time (compact). "grid" = every model's
+   *  Grad-CAM spectrogram side by side for comparison. */
+  layout?: "tabs" | "grid";
+  /** Show a WeSpeaker "N/A — ONNX" tile in grid mode (it ran in fusion
+   *  but can't produce a Grad-CAM). */
+  wespeakerTile?: boolean;
 }
 
 const MODEL_LABELS: Record<string, string> = {
@@ -20,8 +26,11 @@ const MODEL_LABELS: Record<string, string> = {
 
 const SPEC_W = 600;
 const SPEC_H = 180;
+// Compact per-model tile dimensions used in grid layout.
+const GRID_SPEC_W = 440;
+const GRID_SPEC_H = 150;
 
-export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specWidth = SPEC_W, specHeight = SPEC_H }: ExplainTabProps) {
+export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specWidth = SPEC_W, specHeight = SPEC_H, layout = "tabs", wespeakerTile = false }: ExplainTabProps) {
   const [result, setResult] = useState<ExplainResult | null>(null);
   const [activeModel, setActiveModel] = useState<ExplainModelKey | null>(null);
   const [loading, setLoading] = useState(false);
@@ -122,7 +131,41 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
       {loading && <div style={mutedStyle}>Computing attribution…</div>}
       {error && <div style={errorStyle}>{error}</div>}
 
-      {activeCam && result && (
+      {/* Grid layout — every model's Grad-CAM spectrogram side by side. */}
+      {layout === "grid" && result && cams.length > 0 && (
+        <div style={gridStyle}>
+          {cams.map((cam) => (
+            <ModelCAMTile
+              key={cam.modelKey}
+              cam={cam}
+              spectrogram={result.spectrogram}
+              durationMs={durationMs}
+              playheadMs={playheadMs}
+              playingKey={playingKey}
+              onPlaySegment={handlePlaySegment}
+              onPlaySalient={handlePlaySalient}
+              pctOf={pctOf}
+            />
+          ))}
+          {wespeakerTile && (
+            <div style={tileStyle}>
+              <div style={tileHeaderStyle}>
+                <span>WeSpeaker · speaker</span>
+              </div>
+              <div style={{ ...naBoxStyle, height: GRID_SPEC_H }}>
+                <div style={{ fontSize: 18, color: "#6f8aa3", letterSpacing: "0.14em" }}>N/A</div>
+                <div style={{ ...mutedStyle, textAlign: "center", maxWidth: 280 }}>
+                  ResNet293 runs as an ONNX graph — no PyTorch autograd, so a
+                  Grad-CAM heatmap can't be computed for this encoder.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tabs layout — one heatmap at a time (compact). */}
+      {layout === "tabs" && activeCam && result && (
         <>
           <div style={tabsStyle}>
             {cams.map((cam) => {
@@ -195,6 +238,53 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
 
       {result && cams.length === 0 && <div style={mutedStyle}>No explainable models loaded.</div>}
     </aside>
+  );
+}
+
+interface TileProps {
+  cam: ModelCAM;
+  spectrogram: number[][];
+  durationMs: number;
+  playheadMs: number | null;
+  playingKey: string | null;
+  onPlaySegment: (startMs: number, endMs: number, key: string) => void;
+  onPlaySalient: (cam: ModelCAM) => void;
+  pctOf: (ms: number) => number;
+}
+
+// One model's Grad-CAM spectrogram as a uniform tile, so every model in
+// the grid reads the same way and is easy to compare side by side.
+function ModelCAMTile({ cam, spectrogram, durationMs, playheadMs, playingKey, onPlaySegment, onPlaySalient, pctOf }: TileProps) {
+  const coverPct = Math.round(cam.salientSegments.reduce((a, s) => a + pctOf(s.endMs - s.startMs), 0));
+  const hasSegments = cam.salientSegments.length > 0;
+  return (
+    <div style={tileStyle}>
+      <div style={tileHeaderStyle}>
+        <span>{MODEL_LABELS[cam.modelKey] ?? cam.modelKey}</span>
+        <button
+          type="button"
+          style={hasSegments ? tileSalientBtnStyle : { ...tileSalientBtnStyle, opacity: 0.4, cursor: "not-allowed" }}
+          onClick={() => onPlaySalient(cam)}
+          disabled={!hasSegments}
+        >
+          {playingKey === `salient:${cam.modelKey}` ? "■ stop" : "▶ salient"}
+        </button>
+      </div>
+      <SpectrogramOverlay
+        spectrogram={spectrogram}
+        cam={cam}
+        durationMs={durationMs}
+        playheadMs={playheadMs}
+        activePlayKey={playingKey}
+        onPlaySegment={onPlaySegment}
+        pctOf={pctOf}
+        specWidth={GRID_SPEC_W}
+        specHeight={GRID_SPEC_H}
+      />
+      <div style={tileFooterStyle}>
+        {cam.salientSegments.length} seg · {coverPct}% of clip · thr {cam.threshold.toFixed(2)}
+      </div>
+    </div>
   );
 }
 
@@ -360,6 +450,66 @@ const origBtnStyle: CSSProperties = {
   letterSpacing: "0.06em",
   cursor: "pointer",
   textTransform: "none",
+};
+
+const gridStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 14,
+  justifyContent: "center",
+};
+
+const tileStyle: CSSProperties = {
+  flex: "1 1 340px",
+  minWidth: 0,
+  maxWidth: 480,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  padding: 12,
+  background: "rgba(8, 14, 24, 0.55)",
+  border: "1px solid rgba(126, 240, 255, 0.16)",
+  borderRadius: 10,
+};
+
+const tileHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  fontSize: 11,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+  color: "#7ef0ff",
+};
+
+const tileSalientBtnStyle: CSSProperties = {
+  background: "rgba(126, 240, 255, 0.12)",
+  border: "1px solid rgba(126, 240, 255, 0.4)",
+  color: "#7ef0ff",
+  padding: "3px 9px",
+  borderRadius: 6,
+  fontFamily: "inherit",
+  fontSize: 9,
+  letterSpacing: "0.04em",
+  cursor: "pointer",
+  textTransform: "none",
+};
+
+const tileFooterStyle: CSSProperties = {
+  fontSize: 9.5,
+  color: "#6f8aa3",
+  letterSpacing: "0.02em",
+};
+
+const naBoxStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: 8,
+  border: "1px dashed rgba(126, 240, 255, 0.18)",
+  background: "rgba(125, 200, 255, 0.03)",
 };
 
 const tabsStyle: CSSProperties = {
