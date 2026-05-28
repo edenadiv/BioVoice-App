@@ -245,9 +245,9 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
         {/* Header */}
         <div style={headerStyle}>
           <div>
-            <div className="label-mono" style={{ fontSize: 11, color: "var(--teal-2)" }}>NEW PROFILE</div>
-            <div style={{ fontSize: 28, fontWeight: 200, marginTop: 6 }}>Enrol a voice</div>
-            <div style={{ fontSize: 13, color: "var(--ink-mute)", marginTop: 6, maxWidth: 520 }}>
+            <div className="label-mono" style={{ fontSize: 14, color: "var(--teal-2)" }}>NEW PROFILE</div>
+            <div style={{ fontSize: 35, fontWeight: 200, marginTop: 6 }}>Enrol a voice</div>
+            <div style={{ fontSize: 16, color: "var(--ink-mute)", marginTop: 6, maxWidth: 520 }}>
               Capture or upload as many samples as you like. The backend
               gates each one on SNR, clipping, and speech ratio. Done
               enables once {MIN_ACCEPTED_FOR_DONE} samples are accepted.
@@ -323,9 +323,9 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
         {/* Recorder state badge — visible debug aid so the operator can see
             exactly where the recorder is in its state machine. */}
         <div style={stateBadgeStyle}>
-          <span className="label-mono" style={{ fontSize: 9, color: "var(--ink-mute)" }}>RECORDER</span>
+          <span className="label-mono" style={{ fontSize: 11, color: "var(--ink-mute)" }}>RECORDER</span>
           <span className="label-mono" style={{
-            fontSize: 10, padding: "3px 10px", borderRadius: 4,
+            fontSize: 13, padding: "3px 10px", borderRadius: 4,
             background: stateColor(recorder.state).bg,
             color: stateColor(recorder.state).fg,
             border: `1px solid ${stateColor(recorder.state).fg}33`,
@@ -333,7 +333,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
           }}>{recorder.state}</span>
           {recorder.captureMode && (
             <span className="label-mono" style={{
-              fontSize: 9, padding: "3px 8px", borderRadius: 4,
+              fontSize: 11, padding: "3px 8px", borderRadius: 4,
               background: "rgba(126,240,255,0.08)",
               color: "var(--ink-mute)",
               border: "1px solid rgba(126,240,255,0.18)",
@@ -341,13 +341,13 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
             }} title={recorder.captureMode}>{shortMime(recorder.captureMode)}</span>
           )}
           {recorder.lastError && (
-            <span style={{ fontSize: 10, color: "#ff7aa8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            <span style={{ fontSize: 13, color: "#ff7aa8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                   title={recorder.lastError}>
               {recorder.lastError}
             </span>
           )}
           {!recorder.lastError && recorder.state === "denied" && (
-            <span style={{ fontSize: 10, color: "#ff7aa8" }}>
+            <span style={{ fontSize: 13, color: "#ff7aa8" }}>
               → check the mic icon in your browser's address bar
             </span>
           )}
@@ -385,7 +385,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
             onClick={handleUploadClick}
             style={uploadBtnStyle}
           >
-            <span style={{ fontSize: 16, marginRight: 8 }}>⤴</span>
+            <span style={{ fontSize: 20, marginRight: 8 }}>⤴</span>
             <span>UPLOAD AUDIO</span>
           </button>
           <input
@@ -404,7 +404,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
 
         {/* Captured samples list */}
         <div>
-          <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: "var(--ink-mute)" }}>
+          <div className="label-mono" style={{ fontSize: 13, marginBottom: 8, color: "var(--ink-mute)" }}>
             CAPTURED SAMPLES · {acceptedCount} accepted / {samples.length} total · {MIN_ACCEPTED_FOR_DONE} required
           </div>
           {provenance && (
@@ -431,7 +431,7 @@ export function EnrollModal({ onClose }: EnrollModalProps) {
             disabled={!canFinish || busy}
             onClick={handleDone}
             style={{
-              flex: 1, justifyContent: "center", padding: "14px", fontSize: 13,
+              flex: 1, justifyContent: "center", padding: "14px", fontSize: 16,
               opacity: canFinish ? 1 : 0.5,
             }}
           >
@@ -514,21 +514,21 @@ function LivePanel({
   return (
     <div style={livePanelStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div className="label-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>
+        <div className="label-mono" style={{ fontSize: 13, color: "var(--ink-mute)" }}>
           LIVE FEEDBACK · 16 kHz mono
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {captureMode === "live" && (
             <span style={{ ...dotStyle("#ff5577"), animation: "pulse 0.9s infinite" }}/>
           )}
-          <span className="num-mono biovoice-numerals" style={{ fontSize: 18, color: "var(--teal-2)" }}>
+          <span className="num-mono biovoice-numerals" style={{ fontSize: 23, color: "var(--teal-2)" }}>
             {elapsed}
           </span>
         </div>
       </div>
       <canvas ref={canvasRef} style={{ width: "100%", height: 88, display: "block", borderRadius: 8 }}/>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-        <span className="label-mono" style={{ fontSize: 9, color: "var(--ink-mute)", minWidth: 36 }}>LEVEL</span>
+        <span className="label-mono" style={{ fontSize: 11, color: "var(--ink-mute)", minWidth: 36 }}>LEVEL</span>
         <div style={levelBarTrackStyle}>
           <div style={{
             ...levelBarFillStyle,
@@ -540,7 +540,7 @@ function LivePanel({
                 : "linear-gradient(90deg, #4a8cb8, #6affc8)",
           }}/>
         </div>
-        <span className="num-mono" style={{ fontSize: 11, color: "var(--ink-mute)", minWidth: 30, textAlign: "right" }}>
+        <span className="num-mono" style={{ fontSize: 14, color: "var(--ink-mute)", minWidth: 30, textAlign: "right" }}>
           {levelPct.toFixed(0)}
         </span>
       </div>
@@ -556,19 +556,19 @@ function SampleRow({ index, sample }: { index: number; sample: Sample }) {
       padding: "10px 14px", borderRadius: 8,
       background: sample.accepted ? "rgba(106,255,200,0.06)" : "rgba(255,122,168,0.06)",
       border: `1px solid ${sample.accepted ? "rgba(106,255,200,0.22)" : "rgba(255,122,168,0.22)"}`,
-      fontSize: 12,
+      fontSize: 15,
     }}>
       <span style={{
         width: 24, height: 24, borderRadius: "50%", border: `1.5px solid ${colour}`,
-        display: "grid", placeItems: "center", color: colour, fontSize: 12, flexShrink: 0,
+        display: "grid", placeItems: "center", color: colour, fontSize: 15, flexShrink: 0,
       }}>
         {sample.accepted ? "✓" : "✗"}
       </span>
-      <span className="label-mono" style={{ color: "var(--ink-mute)", minWidth: 28, fontSize: 10 }}>#{index}</span>
-      <span style={{ color: "var(--ink-mute)", fontSize: 10, textTransform: "uppercase", minWidth: 50 }}>
+      <span className="label-mono" style={{ color: "var(--ink-mute)", minWidth: 28, fontSize: 13 }}>#{index}</span>
+      <span style={{ color: "var(--ink-mute)", fontSize: 13, textTransform: "uppercase", minWidth: 50 }}>
         {sample.source}
       </span>
-      <span className="num-mono" style={{ minWidth: 50, color: "var(--ink-mute)", fontSize: 11 }}>
+      <span className="num-mono" style={{ minWidth: 50, color: "var(--ink-mute)", fontSize: 14 }}>
         {sample.durationSec.toFixed(1)}s
       </span>
       {sample.quality ? (
@@ -578,7 +578,7 @@ function SampleRow({ index, sample }: { index: number; sample: Sample }) {
           <QStat label="SCORE" value={sample.quality.score.toFixed(0)} pass={sample.accepted}/>
         </>
       ) : (
-        <span style={{ color: "#ff7aa8", flex: 1, fontSize: 11 }}>{sample.message}</span>
+        <span style={{ color: "#ff7aa8", flex: 1, fontSize: 14 }}>{sample.message}</span>
       )}
     </div>
   );
@@ -587,7 +587,7 @@ function SampleRow({ index, sample }: { index: number; sample: Sample }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="label-mono" style={{ fontSize: 10, marginBottom: 6, color: "var(--ink-mute)" }}>{label}</div>
+      <div className="label-mono" style={{ fontSize: 13, marginBottom: 6, color: "var(--ink-mute)" }}>{label}</div>
       {children}
     </div>
   );
@@ -596,7 +596,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Hint({ ok, okText, badText }: { ok: boolean; okText: string; badText: string }) {
   return (
     <div className="label-mono" style={{
-      fontSize: 9, marginTop: 6,
+      fontSize: 11, marginTop: 6,
       color: ok ? "var(--ink-mute)" : "var(--bad)",
     }}>
       {ok ? okText : badText}
@@ -607,8 +607,8 @@ function Hint({ ok, okText, badText }: { ok: boolean; okText: string; badText: s
 function QStat({ label, value, pass }: { label: string; value: string; pass: boolean }) {
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 64 }}>
-      <span className="label-mono" style={{ fontSize: 8, color: "var(--ink-mute)" }}>{label}</span>
-      <span className="num-mono biovoice-numerals" style={{ fontSize: 12, color: pass ? "var(--good)" : "var(--bad)" }}>{value}</span>
+      <span className="label-mono" style={{ fontSize: 10, color: "var(--ink-mute)" }}>{label}</span>
+      <span className="num-mono biovoice-numerals" style={{ fontSize: 15, color: pass ? "var(--good)" : "var(--bad)" }}>{value}</span>
     </span>
   );
 }
@@ -651,19 +651,19 @@ const closeBtnStyle: CSSProperties = {
   width: 36, height: 36, borderRadius: "50%",
   background: "transparent", color: "var(--ink-mute)",
   border: "1px solid rgba(125,200,255,0.18)",
-  cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0,
+  cursor: "pointer", fontSize: 23, lineHeight: 1, padding: 0,
 };
 
 const inputStyle: CSSProperties = {
   width: "100%", padding: "11px 14px", borderRadius: 10,
   background: "rgba(0,0,0,0.35)", color: "var(--ink)",
   border: "1px solid rgba(125,200,255,0.18)",
-  fontFamily: "JetBrains Mono, monospace", fontSize: 13,
+  fontFamily: "JetBrains Mono, monospace", fontSize: 16,
   minHeight: 42,
 };
 
 const smallBtnStyle: CSSProperties = {
-  padding: "8px 12px", fontSize: 11,
+  padding: "8px 12px", fontSize: 14,
   background: "transparent", color: "var(--teal-2)",
   border: "1px solid rgba(126,240,255,0.3)",
   borderRadius: 8, cursor: "pointer",
@@ -679,7 +679,7 @@ const livePanelStyle: CSSProperties = {
 };
 
 const recordBtnStyle: CSSProperties = {
-  flex: 1, padding: "16px 20px", fontSize: 13,
+  flex: 1, padding: "16px 20px", fontSize: 16,
   display: "flex", alignItems: "center", justifyContent: "center",
   gap: 10, color: "#fff", border: "none", borderRadius: 10,
   cursor: "pointer", minHeight: 52, fontWeight: 600,
@@ -687,7 +687,7 @@ const recordBtnStyle: CSSProperties = {
 };
 
 const uploadBtnStyle: CSSProperties = {
-  padding: "16px 22px", fontSize: 12,
+  padding: "16px 22px", fontSize: 15,
   background: "transparent", color: "var(--teal-2)",
   border: "1px solid rgba(126,240,255,0.35)",
   borderRadius: 10, cursor: "pointer", minHeight: 52,
@@ -696,7 +696,7 @@ const uploadBtnStyle: CSSProperties = {
 };
 
 const cancelBtnStyle: CSSProperties = {
-  padding: "14px 22px", fontSize: 12,
+  padding: "14px 22px", fontSize: 15,
   background: "transparent", color: "var(--ink-mute)",
   border: "1px solid rgba(125,200,255,0.18)", borderRadius: 10,
   cursor: "pointer", minHeight: 44,
@@ -706,20 +706,20 @@ const errorStyle: CSSProperties = {
   padding: "10px 14px", borderRadius: 10,
   background: "rgba(255,128,128,0.08)",
   border: "1px solid rgba(255,128,128,0.35)",
-  color: "#ffadad", fontSize: 12, marginBottom: 12,
+  color: "#ffadad", fontSize: 15, marginBottom: 12,
 };
 
 const busyStyle: CSSProperties = {
   padding: "10px 14px", borderRadius: 10,
   background: "rgba(126,240,255,0.05)",
   border: "1px solid rgba(126,240,255,0.25)",
-  color: "var(--teal-2)", fontSize: 12, marginBottom: 12,
+  color: "var(--teal-2)", fontSize: 15, marginBottom: 12,
 };
 
 const emptyListStyle: CSSProperties = {
   padding: "16px 18px", borderRadius: 10,
   border: "1px dashed rgba(125,200,255,0.2)",
-  color: "var(--ink-mute)", fontSize: 12, textAlign: "center",
+  color: "var(--ink-mute)", fontSize: 15, textAlign: "center",
 };
 
 const levelBarTrackStyle: CSSProperties = {

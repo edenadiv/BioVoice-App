@@ -197,8 +197,8 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
           padding: '110px 36px 40px',
           overflowY: 'auto',
         }}>
-        <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 6 }}>SETTINGS</div>
-        <div style={{ fontSize: 32, fontWeight: 200, marginBottom: 36 }}>System preferences</div>
+        <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 6 }}>SETTINGS</div>
+        <div style={{ fontSize: 40, fontWeight: 200, marginBottom: 36 }}>System preferences</div>
 
         <Section label="Display Mode" sub="Controls how the demo reveals itself.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -217,10 +217,10 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
                 transition: 'all 180ms',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 15, fontWeight: 400 }}>{m.label}</span>
-                  {mode === m.id && <span style={{ color: 'var(--teal-2)', fontSize: 14 }}>●</span>}
+                  <span style={{ fontSize: 19, fontWeight: 400 }}>{m.label}</span>
+                  {mode === m.id && <span style={{ color: 'var(--teal-2)', fontSize: 18 }}>●</span>}
                 </div>
-                <div className="label-mono" style={{ fontSize: 9, marginTop: 4, color: 'var(--ink-soft)' }}>{m.sub}</div>
+                <div className="label-mono" style={{ fontSize: 11, marginTop: 4, color: 'var(--ink-soft)' }}>{m.sub}</div>
               </button>
             ))}
           </div>
@@ -248,8 +248,8 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
             return rows.map(([n, s, k]) => (
               <div key={n} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderTop: '1px solid var(--line)' }}>
                 <div>
-                  <div style={{ fontSize: 13 }}>{n}</div>
-                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', marginTop: 2 }}>{s}</div>
+                  <div style={{ fontSize: 16 }}>{n}</div>
+                  <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 2 }}>{s}</div>
                 </div>
                 <span className={`pill ${k}`}><span className="dot"></span>{k === 'good' ? 'READY' : 'STANDBY'}</span>
               </div>
@@ -258,10 +258,10 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
         </Section>
 
         <Section label="About">
-          <div style={{ fontSize: 12, color: 'var(--ink-mute)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 15, color: 'var(--ink-mute)', lineHeight: 1.6 }}>
             BioVoice v0.6 — Software Design Document SDD-6<br/>
             Built for the Israel National Cyber Directorate.<br/>
-            <span className="label-mono" style={{ display: 'block', marginTop: 8, fontSize: 9 }}>
+            <span className="label-mono" style={{ display: 'block', marginTop: 8, fontSize: 11 }}>
               ML · Eden Adiv · Idan Shavit · Yoav Zucker
             </span>
           </div>
@@ -278,8 +278,8 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
 function Section({ label, sub, children }) {
   return (
     <div style={{ marginBottom: 28 }}>
-      <div className="label-mono" style={{ fontSize: 10, marginBottom: 4 }}>{label}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 12 }}>{sub}</div>}
+      <div className="label-mono" style={{ fontSize: 13, marginBottom: 4 }}>{label}</div>
+      {sub && <div style={{ fontSize: 15, color: 'var(--ink-soft)', marginBottom: 12 }}>{sub}</div>}
       {children}
     </div>
   );
@@ -291,7 +291,7 @@ function Toggle({ label, value, onChange }) {
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       padding: '10px 0', cursor: 'pointer',
     }}>
-      <span style={{ fontSize: 13 }}>{label}</span>
+      <span style={{ fontSize: 16 }}>{label}</span>
       <div style={{
         width: 38, height: 22, borderRadius: 999,
         background: value ? 'linear-gradient(135deg, #3da9fc, #7ef0ff)' : 'rgba(125,200,255,0.15)',
@@ -426,7 +426,7 @@ function PanelModal({ title, onClose, children }) {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 22px', borderBottom: '1px solid var(--line)' }}>
-          <span className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>{title}</span>
+          <span className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>{title}</span>
           <button
             ref={closeRef}
             type="button"
@@ -437,7 +437,7 @@ function PanelModal({ title, onClose, children }) {
               display: 'grid', placeItems: 'center',
               borderRadius: 8, border: '1px solid var(--line-2)',
               background: 'transparent', color: 'var(--ink-soft)',
-              cursor: 'pointer', fontSize: 18,
+              cursor: 'pointer', fontSize: 23,
             }}
           >
             ×
@@ -531,7 +531,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           {micState === 'live' ? 'LIVE MIC' : 'STANDBY MIC'}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>16 KHZ</span>
+          <span className="num-mono" style={{ fontSize: 14, color: 'var(--ink-soft)' }}>16 KHZ</span>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -544,9 +544,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const profilesBody = ({ onExpand } = {}) => (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span className="label-mono" style={{ fontSize: 10 }}>ENROLLED PROFILE · CHOOSE ONE</span>
+        <span className="label-mono" style={{ fontSize: 13 }}>ENROLLED PROFILE · CHOOSE ONE</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="num-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
+          <span className="num-mono" style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{profiles.length} ACTIVE</span>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -578,11 +578,11 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               width: 32, height: 32, borderRadius: '50%',
               background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
               display: 'grid', placeItems: 'center',
-              color: '#04070d', fontWeight: 600, fontSize: 13,
+              color: '#04070d', fontWeight: 600, fontSize: 16,
             }}>{p.initials}</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14 }}>{p.name}</div>
-              <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>{p.id}</div>
+              <div style={{ fontSize: 18 }}>{p.name}</div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{p.id}</div>
             </div>
             {selectedProfile === p.id && <span style={{ color: 'var(--teal-2)' }}>●</span>}
           </button>
@@ -595,11 +595,11 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
     <>
       <div className="biovoice-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
         <div>
-          <div className="label-mono" style={{ fontSize: 10 }}>MEL-SPECTROGRAM · STREAMING</div>
-          <div style={{ fontSize: 19, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
+          <div className="label-mono" style={{ fontSize: 13 }}>MEL-SPECTROGRAM · STREAMING</div>
+          <div style={{ fontSize: 24, marginTop: 4 }}>How the AI <em className="serif" style={{ color: 'var(--teal-2)' }}>sees</em> the room</div>
         </div>
         <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-          <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>80 BANDS · 0.5–8 K HZ</span>
+          <span className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>80 BANDS · 0.5–8 K HZ</span>
           <LivePulse size={8}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </div>
@@ -613,7 +613,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div style={{
           position: 'absolute', left: 8, top: 0, bottom: 0, width: 36,
           display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-          fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: 'var(--ink-soft)',
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--ink-soft)',
         }}>
           <span>8 kHz</span><span>4 kHz</span><span>2 kHz</span><span>1 kHz</span><span>500 Hz</span>
         </div>
@@ -633,9 +633,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               border: '1px solid rgba(126,240,255,0.4)',
               color: 'var(--ink)', textAlign: 'center',
             }}>
-              <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
-              <div style={{ fontSize: 14, marginTop: 8, fontWeight: 600 }}>▶ Tap to enable live mic</div>
-              <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 5 }}>grant microphone access to stream the spectrogram</div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>NO LIVE MIC SIGNAL</div>
+              <div style={{ fontSize: 18, marginTop: 8, fontWeight: 600 }}>▶ Tap to enable live mic</div>
+              <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 5 }}>grant microphone access to stream the spectrogram</div>
             </div>
           </div>
         )}
@@ -646,9 +646,9 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const pipelineBody = ({ onExpand } = {}) => (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span className="label-mono" style={{ fontSize: 10 }}>INFERENCE PIPELINE · IDLE</span>
+        <span className="label-mono" style={{ fontSize: 13 }}>INFERENCE PIPELINE · IDLE</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="num-mono" style={{ fontSize: 10, color: 'var(--good)' }}>READY</span>
+          <span className="num-mono" style={{ fontSize: 13, color: 'var(--good)' }}>READY</span>
           {onExpand && <ExpandButton onClick={onExpand}/>}
         </span>
       </div>
@@ -670,8 +670,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
               background: 'rgba(125,200,255,0.04)',
               width: 78, textAlign: 'center',
             }}>
-              <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)' }}>{s.sub.toUpperCase()}</div>
-              <div style={{ fontSize: 11, marginTop: 2 }}>{s.label}</div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>{s.sub.toUpperCase()}</div>
+              <div style={{ fontSize: 14, marginTop: 2 }}>{s.label}</div>
             </div>
             {i < arr.length - 1 && (
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -689,14 +689,14 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span
           className="label-mono"
-          style={{ fontSize: 10 }}
+          style={{ fontSize: 13 }}
           title="Selected speaker model embeddings projected to PCA(3). Live point updates from the current mic window."
         >
           VOICE EMBEDDING SPACE
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {projection.error && (
-            <span className="label-mono" style={{ fontSize: 9, color: 'var(--bad)' }}>OFFLINE</span>
+            <span className="label-mono" style={{ fontSize: 11, color: 'var(--bad)' }}>OFFLINE</span>
           )}
           <RecenterButton onClick={() => setRecenterSignal((s) => s + 1)}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
@@ -722,11 +722,11 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         <div className="biovoice-constellation-legend" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bff4ff', boxShadow: '0 0 8px #7ef0ff', opacity: live.loading || live.liveProjected ? 1 : 0.45 }}></span>
-            <span className="label-mono" style={{ fontSize: 9 }}>{live.liveProjected ? 'LIVE VOICE' : live.loading ? 'UPDATING LIVE POINT' : 'WAITING FOR MIC'}</span>
+            <span className="label-mono" style={{ fontSize: 11 }}>{live.liveProjected ? 'LIVE VOICE' : live.loading ? 'UPDATING LIVE POINT' : 'WAITING FOR MIC'}</span>
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3da9fc' }}></span>
-            <span className="label-mono" style={{ fontSize: 9 }}>{profiles.length} ENROLLED</span>
+            <span className="label-mono" style={{ fontSize: 11 }}>{profiles.length} ENROLLED</span>
           </span>
         </div>
         <div className="biovoice-constellation-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -738,7 +738,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 onClick={() => setEmbeddingModelKey(modelKey)}
                 className="label-mono"
                 style={{
-                  fontSize: 9,
+                  fontSize: 11,
                   padding: '4px 10px',
                   borderRadius: 999,
                   border: `1px solid ${active ? 'rgba(126,240,255,0.55)' : 'var(--line-2)'}`,
@@ -767,12 +767,12 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 10, color: tone }}>{r.decision}</div>
-            <div style={{ fontSize: 24, fontWeight: 300, marginTop: 2 }}>{r.userId}</div>
+            <div className="label-mono" style={{ fontSize: 13, color: tone }}>{r.decision}</div>
+            <div style={{ fontSize: 30, fontWeight: 300, marginTop: 2 }}>{r.userId}</div>
           </div>
-          <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{new Date(r.createdAt).toLocaleString()}</div>
+          <div className="label-mono" style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{new Date(r.createdAt).toLocaleString()}</div>
         </div>
-        {r.message && <div style={{ fontSize: 13, color: 'var(--ink-mute)', lineHeight: 1.5 }}>{r.message}</div>}
+        {r.message && <div style={{ fontSize: 16, color: 'var(--ink-mute)', lineHeight: 1.5 }}>{r.message}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
           <Metric label="Similarity" value={r.similarityScore.toFixed(3)} sub="cosine" trend={r.decision === 'ACCEPT' ? 'up' : 'flat'}/>
           <Metric label="Deepfake" value={r.deepfakeScore.toFixed(3)} sub="AASIST" trend={r.decision === 'DEEPFAKE' ? 'flat' : 'up'}/>
@@ -780,7 +780,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         </div>
         {scores.length > 0 && (
           <div style={{ display: 'grid', gap: 8 }}>
-            <div className="label-mono" style={{ fontSize: 10 }}>PER-MODEL SCORES</div>
+            <div className="label-mono" style={{ fontSize: 13 }}>PER-MODEL SCORES</div>
             {scores.map((score) => (
               <div key={score.modelKey} className="biovoice-model-score-row" style={{
                 display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 12, alignItems: 'center',
@@ -789,15 +789,15 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
                 border: `1px solid ${score.passedThreshold ? 'rgba(106,255,200,0.20)' : 'rgba(255,178,74,0.20)'}`,
               }}>
                 <div>
-                  <div style={{ fontSize: 13 }}>{SPEAKER_MODEL_LABELS[score.modelKey] ?? score.modelKey}</div>
-                  <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                  <div style={{ fontSize: 16 }}>{SPEAKER_MODEL_LABELS[score.modelKey] ?? score.modelKey}</div>
+                  <div className="label-mono" style={{ fontSize: 10, marginTop: 2, color: 'var(--ink-soft)' }}>
                     {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
                   </div>
                 </div>
-                <div className="num-mono" style={{ fontSize: 16, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
+                <div className="num-mono" style={{ fontSize: 20, color: score.passedThreshold ? 'var(--good)' : 'var(--warn)' }}>
                   {score.similarityScore.toFixed(3)}
                 </div>
-                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>THR {score.threshold.toFixed(2)}</div>
+                <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>THR {score.threshold.toFixed(2)}</div>
               </div>
             ))}
           </div>
@@ -808,7 +808,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             <Metric label="Decision rule" value={`${fusion.majorityRequired}/${fusion.totalModels}`} sub={fusion.combinedMatch ? 'majority reached' : 'majority not reached'} trend={fusion.combinedMatch ? 'up' : 'flat'}/>
           </div>
         )}
-        {r.sessionId && <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>SESSION · {r.sessionId}</div>}
+        {r.sessionId && <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>SESSION · {r.sessionId}</div>}
       </div>
     );
   };
@@ -816,7 +816,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   const activityBody = ({ onExpand } = {}) => (
     <>
       <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span className="label-mono" style={{ fontSize: 10 }}>LIVE EVENT FEED</span>
+        <span className="label-mono" style={{ fontSize: 13 }}>LIVE EVENT FEED</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <LivePulse size={8}/>
           {onExpand && <ExpandButton onClick={onExpand}/>}
@@ -833,8 +833,8 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         aria-label="Live event feed"
       >
         {activity.length === 0 ? (
-          <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 12, lineHeight: 1.6 }}>
-            <div className="label-mono" style={{ fontSize: 9, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
+          <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 15, lineHeight: 1.6 }}>
+            <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
             Verifications appear here as they happen.<br/>
             Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enrol your first speaker.
           </div>
@@ -913,7 +913,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           </div>
 
           <button className="btn btn-primary" onClick={() => onVerify(profiles.find(p => p.id === selectedProfile))}
-            style={{ width: '100%', justifyContent: 'center', padding: '18px', fontSize: 15 }}>
+            style={{ width: '100%', justifyContent: 'center', padding: '18px', fontSize: 19 }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="8" r="3" fill="#04070d"/>
               <circle cx="8" cy="8" r="6.5" stroke="#04070d" strokeWidth="1.4" opacity="0.4"/>
@@ -959,7 +959,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             padding: '14px 18px', borderRadius: 12,
             background: 'rgba(126,240,255,0.05)',
             border: '1px solid rgba(126,240,255,0.18)',
-            fontSize: 12, color: 'var(--ink-mute)',
+            fontSize: 15, color: 'var(--ink-mute)',
             display: 'flex', alignItems: 'center', gap: 12,
           }}>
             <kbd style={kbdStyle}>V</kbd>
@@ -988,7 +988,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 }
 
 const kbdStyle = {
-  fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
+  fontFamily: 'JetBrains Mono, monospace', fontSize: 13,
   padding: '3px 8px', borderRadius: 4,
   background: 'rgba(125,200,255,0.10)',
   border: '1px solid rgba(125,200,255,0.25)',
@@ -998,8 +998,8 @@ const kbdStyle = {
 function PanelTitle({ eyebrow, title }) {
   return (
     <div>
-      <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>{eyebrow}</div>
-      <div style={{ fontSize: 22, fontWeight: 300, marginTop: 4 }}>{title}</div>
+      <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>{eyebrow}</div>
+      <div style={{ fontSize: 28, fontWeight: 300, marginTop: 4 }}>{title}</div>
     </div>
   );
 }
@@ -1007,14 +1007,14 @@ function PanelTitle({ eyebrow, title }) {
 function Metric({ label, value, sub, trend }) {
   return (
     <div className="panel" style={{ padding: '12px 14px', minWidth: 0, overflow: 'hidden' }}>
-      <div className="label-mono" style={{ fontSize: 9, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+      <div className="label-mono" style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 4, gap: 4 }}>
-        <span className="num-mono" style={{ fontSize: 18, color: 'var(--ink)', whiteSpace: 'nowrap' }}>{value}</span>
-        <span style={{ fontSize: 10, color: trend === 'up' ? 'var(--good)' : 'var(--ink-soft)' }}>
+        <span className="num-mono" style={{ fontSize: 23, color: 'var(--ink)', whiteSpace: 'nowrap' }}>{value}</span>
+        <span style={{ fontSize: 13, color: trend === 'up' ? 'var(--good)' : 'var(--ink-soft)' }}>
           {trend === 'up' ? '▲' : '◆'}
         </span>
       </div>
-      <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2, whiteSpace: 'nowrap' }}>{sub}</div>
+      <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2, whiteSpace: 'nowrap' }}>{sub}</div>
     </div>
   );
 }
@@ -1054,14 +1054,14 @@ function ActivityRow({ id, kind, name, score, ago, fresh, now, ts, onSelect }) {
         boxShadow: fresh ? `0 0 12px ${palette.tag}` : 'none',
       }}></div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="label-mono" style={{ fontSize: 9, color: palette.tag }}>{labels[kind]}</div>
-        <div style={{ fontSize: 14, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div className="label-mono" style={{ fontSize: 11, color: palette.tag }}>{labels[kind]}</div>
+        <div style={{ fontSize: 18, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {name}
         </div>
       </div>
       <div style={{ textAlign: 'right' }}>
-        <div className="num-mono" style={{ fontSize: 13, color: palette.tag }}>{score}</div>
-        <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>{elapsed < 60 ? `${elapsed}s ago` : `${Math.floor(elapsed/60)}m ago`}</div>
+        <div className="num-mono" style={{ fontSize: 16, color: palette.tag }}>{score}</div>
+        <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>{elapsed < 60 ? `${elapsed}s ago` : `${Math.floor(elapsed/60)}m ago`}</div>
       </div>
     </div>
   );

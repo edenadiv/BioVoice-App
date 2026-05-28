@@ -40,12 +40,12 @@ function Chrome({ status = "SYSTEM ONLINE", statusKind = "good", subtitle, scree
       <div className="chrome-bottom">
         <div className="left biovoice-chrome-bottom-left" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
           <span className={`pill ${statusKind}`}><span className="dot"></span>{status}</span>
-          {subtitle && <span className="label-mono" style={{ fontSize: 10 }}>{subtitle}</span>}
+          {subtitle && <span className="label-mono" style={{ fontSize: 13 }}>{subtitle}</span>}
         </div>
         <div className="right biovoice-chrome-bottom-right" style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-          {screenName && <span className="label-mono" style={{ fontSize: 10 }}>SCREEN · {screenName}</span>}
-          <span className="label-mono" style={{ fontSize: 10 }}>NODE · TLV-01</span>
-          <span className="num-mono" style={{ fontSize: 12, color: 'var(--ink)', letterSpacing: '0.18em' }}>
+          {screenName && <span className="label-mono" style={{ fontSize: 13 }}>SCREEN · {screenName}</span>}
+          <span className="label-mono" style={{ fontSize: 13 }}>NODE · TLV-01</span>
+          <span className="num-mono" style={{ fontSize: 15, color: 'var(--ink)', letterSpacing: '0.18em' }}>
             {time}
           </span>
         </div>

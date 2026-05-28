@@ -65,13 +65,13 @@ const bannerStyle = (variant: "compact" | "full"): CSSProperties => ({
   background: "rgba(255, 85, 119, 0.08)",
   border: "1px solid rgba(255, 85, 119, 0.45)",
   color: "#ff7aa8",
-  fontSize: variant === "full" ? 12 : 11,
+  fontSize: variant === "full" ? 15 : 14,
   fontFamily: "JetBrains Mono, monospace",
   letterSpacing: "0.02em",
 });
 
 const iconStyle: CSSProperties = {
-  fontSize: 14,
+  fontSize: 18,
   lineHeight: 1,
   color: "#ff5577",
   marginTop: 1,
@@ -81,7 +81,7 @@ const titleStyle: CSSProperties = {
   fontWeight: 600,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
-  fontSize: 9,
+  fontSize: 11,
   marginBottom: 3,
 };
 
@@ -94,5 +94,5 @@ const codeStyle: CSSProperties = {
   background: "rgba(0,0,0,0.3)",
   padding: "1px 5px",
   borderRadius: 3,
-  fontSize: 10,
+  fontSize: 13,
 };

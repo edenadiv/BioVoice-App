@@ -295,7 +295,7 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
 
       {result && (projection.profiles.length > 0 || heatZones.length > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
+          <div style={{ fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
             Voice space · heat zones{nearest ? ` · closest ${nearest.userId}` : ""}
           </div>
           <EmbeddingConstellation
@@ -511,7 +511,7 @@ const panelStyle: CSSProperties = {
 };
 
 const headerStyle: CSSProperties = {
-  fontSize: 11,
+  fontSize: 14,
   letterSpacing: "0.14em",
   textTransform: "uppercase",
   color: "#7ef0ff",
@@ -527,7 +527,7 @@ const origBtnStyle: CSSProperties = {
   padding: "3px 8px",
   borderRadius: 5,
   fontFamily: "inherit",
-  fontSize: 9,
+  fontSize: 11,
   letterSpacing: "0.06em",
   cursor: "pointer",
   textTransform: "none",
@@ -557,7 +557,7 @@ const tileHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  fontSize: 11,
+  fontSize: 14,
   letterSpacing: "0.1em",
   textTransform: "uppercase",
   color: "#7ef0ff",
@@ -570,14 +570,14 @@ const tileSalientBtnStyle: CSSProperties = {
   padding: "3px 9px",
   borderRadius: 6,
   fontFamily: "inherit",
-  fontSize: 9,
+  fontSize: 11,
   letterSpacing: "0.04em",
   cursor: "pointer",
   textTransform: "none",
 };
 
 const tileFooterStyle: CSSProperties = {
-  fontSize: 9.5,
+  fontSize: 12,
   color: "#6f8aa3",
   letterSpacing: "0.02em",
 };
@@ -595,7 +595,7 @@ const tabStyle: CSSProperties = {
   padding: "4px 10px",
   borderRadius: 999,
   fontFamily: "inherit",
-  fontSize: 10,
+  fontSize: 13,
   cursor: "pointer",
 };
 
@@ -656,7 +656,7 @@ const axisStyle: CSSProperties = {
   bottom: 1,
   display: "flex",
   justifyContent: "space-between",
-  fontSize: 8,
+  fontSize: 10,
   color: "#6f8aa3",
   pointerEvents: "none",
 };
@@ -665,7 +665,7 @@ const rowFooterStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  fontSize: 10,
+  fontSize: 13,
   gap: 8,
 };
 
@@ -676,7 +676,7 @@ const playBtnStyle: CSSProperties = {
   padding: "4px 10px",
   borderRadius: 6,
   fontFamily: "inherit",
-  fontSize: 10,
+  fontSize: 13,
   cursor: "pointer",
   flexShrink: 0,
 };
@@ -691,7 +691,7 @@ const segListStyle: CSSProperties = {
   listStyle: "none",
   padding: 0,
   margin: 0,
-  fontSize: 10,
+  fontSize: 13,
   display: "flex",
   flexDirection: "column",
   gap: 3,
@@ -708,7 +708,7 @@ const segBtnStyle: CSSProperties = {
   padding: "4px 8px",
   borderRadius: 5,
   fontFamily: "inherit",
-  fontSize: 10,
+  fontSize: 13,
   cursor: "pointer",
 };
 
@@ -721,10 +721,10 @@ const segBtnActiveStyle: CSSProperties = {
 
 const mutedStyle: CSSProperties = {
   color: "#6f8aa3",
-  fontSize: 10,
+  fontSize: 13,
 };
 
 const errorStyle: CSSProperties = {
   color: "#ff7aa8",
-  fontSize: 11,
+  fontSize: 14,
 };

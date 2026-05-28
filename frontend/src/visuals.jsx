@@ -347,13 +347,13 @@ function SimilarityGauge({ value = 0.91, threshold = 0.75, size = 320, label = "
         position: 'absolute', left: 0, right: 0, bottom: 0,
         textAlign: 'center',
       }}>
-        <div className="num-mono" style={{ fontSize: 56, fontWeight: 300, color: accent, lineHeight: 1, letterSpacing: '-0.02em' }}>
+        <div className="num-mono" style={{ fontSize: 64, fontWeight: 300, color: accent, lineHeight: 1, letterSpacing: '-0.02em' }}>
           {value.toFixed(3)}
         </div>
         <div className="label-mono" style={{ marginTop: 6 }}>{label}</div>
         <div style={{
           marginTop: 8,
-          fontFamily: 'JetBrains Mono, monospace', fontSize: 10,
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 13,
           color: '#ffb24a', letterSpacing: '0.18em',
         }}>
           THRESHOLD · {threshold.toFixed(2)}
@@ -376,8 +376,8 @@ function ConceptBars({ concepts, max = 0.6 }) {
         return (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '230px 1fr 80px', alignItems: 'center', gap: 18 }}>
             <div>
-              <div style={{ fontSize: 16, color: 'var(--ink)', fontWeight: 400 }}>{c.label}</div>
-              <div className="label-mono" style={{ fontSize: 10, marginTop: 2 }}>{c.tech}</div>
+              <div style={{ fontSize: 20, color: 'var(--ink)', fontWeight: 400 }}>{c.label}</div>
+              <div className="label-mono" style={{ fontSize: 13, marginTop: 2 }}>{c.tech}</div>
             </div>
             <div style={{
               position: 'relative',
@@ -399,7 +399,7 @@ function ConceptBars({ concepts, max = 0.6 }) {
                 transition: 'width 800ms cubic-bezier(0.2, 0.8, 0.2, 1)',
               }}></div>
             </div>
-            <div className="num-mono" style={{ textAlign: 'right', color: positive ? '#7ef0ff' : '#ff7aa8', fontSize: 18 }}>
+            <div className="num-mono" style={{ textAlign: 'right', color: positive ? '#7ef0ff' : '#ff7aa8', fontSize: 23 }}>
               {c.score >= 0 ? '+' : ''}{(c.score * 100).toFixed(0)}%
             </div>
           </div>
@@ -441,23 +441,23 @@ function PipelineFlow({ stages, activeIdx, complete = false }) {
                 animation: active ? 'breathe 1.2s ease-in-out infinite' : 'none',
                 position: 'relative',
               }}>
-                <div style={{ color, fontSize: 22 }}>{s.icon}</div>
+                <div style={{ color, fontSize: 28 }}>{s.icon}</div>
                 {done && (
                   <div style={{
                     position: 'absolute', top: -4, right: -4,
                     width: 18, height: 18, borderRadius: '50%',
                     background: '#7ef0ff', color: '#04070d',
                     display: 'grid', placeItems: 'center',
-                    fontSize: 10, fontWeight: 700,
+                    fontSize: 13, fontWeight: 700,
                   }}>✓</div>
                 )}
               </div>
               <div>
-                <div className="label-mono" style={{ color, fontSize: 9 }}>{`STEP ${i + 1}`}</div>
-                <div style={{ fontSize: 14, color: pending ? 'var(--ink-soft)' : 'var(--ink)', marginTop: 4, fontWeight: 400 }}>
+                <div className="label-mono" style={{ color, fontSize: 11 }}>{`STEP ${i + 1}`}</div>
+                <div style={{ fontSize: 18, color: pending ? 'var(--ink-soft)' : 'var(--ink)', marginTop: 4, fontWeight: 400 }}>
                   {s.title}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 2 }}>
+                <div style={{ fontSize: 14, color: 'var(--ink-soft)', marginTop: 2 }}>
                   {s.sub}
                 </div>
               </div>

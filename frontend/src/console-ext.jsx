@@ -297,7 +297,7 @@ function EmbeddingConstellation({
         ctx.shadowBlur = 0;
         if (pp.depth <= 0.15) {
           ctx.fillStyle = isMatch ? '#7ef0ff' : 'rgba(231,243,255,0.7)';
-          ctx.font = `${isMatch ? 600 : 400} 9.5px "JetBrains Mono", monospace`;
+          ctx.font = `${isMatch ? 600 : 400} 12px "JetBrains Mono", monospace`;
           ctx.fillText(c.initials, pp.x + 6, pp.y - 6);
         }
         if (isMatch) {
@@ -370,7 +370,7 @@ function EmbeddingConstellation({
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.arc(qp.x, qp.y, 12, 0, Math.PI * 2); ctx.stroke();
         ctx.fillStyle = '#ffcf7a';
-        ctx.font = '600 9px "JetBrains Mono", monospace';
+        ctx.font = '600 11px "JetBrains Mono", monospace';
         ctx.fillText('QUERY', qp.x + 9, qp.y - 8);
       }
 
@@ -406,7 +406,7 @@ function EmbeddingConstellation({
       // Empty / loading state.
       if (centers.length === 0) {
         ctx.fillStyle = 'rgba(125,200,255,0.45)';
-        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.font = '14px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
         ctx.fillText(loading ? 'LOADING EMBEDDINGS…' : 'NO PROFILES ENROLLED', cx, cy);
         ctx.textAlign = 'start';
@@ -440,7 +440,7 @@ function LiveClock({ sessionStart }) {
   }, []);
   const utc = new Date(now).toISOString().slice(11, 19);
   return (
-    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.18em', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
+    <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 14, color: 'var(--teal-2)', letterSpacing: '0.18em', fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0 }}>
       {utc}<span style={{ color: 'var(--ink-soft)', marginLeft: 6 }}>UTC</span>
     </span>
   );
@@ -463,7 +463,7 @@ function ThreatLevel({ level = 'green' }) {
       background: `linear-gradient(135deg, ${config.color}15, transparent)`,
     }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: config.color, boxShadow: `0 0 8px ${config.color}` }}></span>
-      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 9, color: config.color, letterSpacing: '0.18em', fontWeight: 600, whiteSpace: 'nowrap' }}>
+      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: config.color, letterSpacing: '0.18em', fontWeight: 600, whiteSpace: 'nowrap' }}>
         {config.label}
       </span>
     </div>
@@ -641,10 +641,10 @@ function VerificationOverlay({ profile, onClose }) {
 
       <div className="biovoice-overlay-inner" style={{ display: 'grid', placeItems: 'center', padding: 80 }}>
         <div className="biovoice-overlay-shell" style={{ width: 1100, textAlign: 'center', position: 'relative' }}>
-          <div className="label-mono" style={{ fontSize: 11, color: accent, letterSpacing: '0.32em' }}>
+          <div className="label-mono" style={{ fontSize: 14, color: accent, letterSpacing: '0.32em' }}>
             VERIFYING · {profile?.id || 'UNKNOWN'}
           </div>
-          <div style={{ fontSize: 56, fontWeight: 200, marginTop: 14, letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: 64, fontWeight: 200, marginTop: 14, letterSpacing: '-0.02em' }}>
             {phase === 0 && (
               recorder.state === 'denied'
                 ? <>Microphone <em className="serif" style={{ color: accent }}>blocked</em></>
@@ -677,7 +677,7 @@ function VerificationOverlay({ profile, onClose }) {
                     border: active ? `1px solid ${accent}` : 'none',
                     animation: active ? 'pulse 1.2s ease-in-out infinite' : 'none',
                   }}/>
-                  <span className="label-mono" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{p}</span>
+                  <span className="label-mono" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{p}</span>
                 </div>
               );
             })}
@@ -705,7 +705,7 @@ function VerificationOverlay({ profile, onClose }) {
 
                 {/* Mic device picker */}
                 <div className="biovoice-overlay-device-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)', minWidth: 44 }}>MIC</span>
+                  <span className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)', minWidth: 44 }}>MIC</span>
                   <select
                     value={deviceId}
                     onChange={(e) => setDeviceId(e.target.value)}
@@ -714,14 +714,14 @@ function VerificationOverlay({ profile, onClose }) {
                       flex: 1, padding: '8px 12px', borderRadius: 8,
                       background: 'rgba(0,0,0,0.35)', color: 'var(--ink)',
                       border: '1px solid rgba(125,200,255,0.18)',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 14,
                     }}>
                     <option value="">Browser default</option>
                     {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
                   </select>
                   {devices.every((d) => !d.label || d.label === "Microphone") && (
                     <button onClick={handleEnableMicLabels} style={{
-                      padding: '8px 12px', fontSize: 10,
+                      padding: '8px 12px', fontSize: 13,
                       background: 'transparent', color: accent,
                       border: `1px solid ${accent}55`, borderRadius: 6, cursor: 'pointer',
                     }}>Enable labels</button>
@@ -736,7 +736,7 @@ function VerificationOverlay({ profile, onClose }) {
                       background: sample ? 'rgba(125,200,255,0.05)' : 'linear-gradient(180deg, #ff5577, #c8194a)',
                       color: sample ? 'var(--ink-mute)' : '#fff',
                       border: 'none', cursor: sample ? 'not-allowed' : 'pointer',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 600, letterSpacing: '0.08em',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
                     }}>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', background: sample ? 'var(--ink-mute)' : '#fff' }}/>
@@ -747,7 +747,7 @@ function VerificationOverlay({ profile, onClose }) {
                       flex: 1, padding: '14px 20px', borderRadius: 10,
                       background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))',
                       color: '#fff', border: '1px solid rgba(126,240,255,0.5)', cursor: 'pointer',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 600, letterSpacing: '0.08em',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
                     }}>
                       <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#7eF0FF', animation: 'pulse 0.9s infinite' }}/>
@@ -758,7 +758,7 @@ function VerificationOverlay({ profile, onClose }) {
                     padding: '14px 22px', borderRadius: 10,
                     background: 'transparent', color: accent,
                     border: `1px solid ${accent}55`, cursor: recorder.state === 'recording' ? 'not-allowed' : 'pointer',
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em',
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 600, letterSpacing: '0.08em',
                   }}>⤴ UPLOAD AUDIO</button>
                   <input ref={fileInputRef} type="file"
                     accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac" onChange={handleFilePicked}
@@ -770,7 +770,7 @@ function VerificationOverlay({ profile, onClose }) {
                     padding: '10px 14px', borderRadius: 8,
                     background: 'rgba(255,128,128,0.08)',
                     border: '1px solid rgba(255,128,128,0.35)',
-                    color: '#ffadad', fontSize: 11,
+                    color: '#ffadad', fontSize: 14,
                   }}>{uploadError}</div>
                 )}
 
@@ -779,7 +779,7 @@ function VerificationOverlay({ profile, onClose }) {
                     padding: '10px 14px', borderRadius: 8,
                     background: 'rgba(255,128,128,0.08)',
                     border: '1px solid rgba(255,128,128,0.35)',
-                    color: '#ffadad', fontSize: 10, fontFamily: 'JetBrains Mono, monospace',
+                    color: '#ffadad', fontSize: 13, fontFamily: 'JetBrains Mono, monospace',
                   }}>{recorder.lastError}</div>
                 )}
 
@@ -793,7 +793,7 @@ function VerificationOverlay({ profile, onClose }) {
                       background: sample ? `linear-gradient(180deg, ${accent}, #3da9fc)` : 'rgba(125,200,255,0.05)',
                       color: sample ? '#04070d' : 'var(--ink-mute)',
                       border: 'none', cursor: sample ? 'pointer' : 'not-allowed',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 700, letterSpacing: '0.12em',
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 16, fontWeight: 700, letterSpacing: '0.12em',
                     }}>
                     {sample ? `SUBMIT VERIFICATION · ${profile?.id || ''}` : 'CAPTURE A SAMPLE FIRST'}
                   </button>
@@ -802,7 +802,7 @@ function VerificationOverlay({ profile, onClose }) {
                       padding: '16px 22px', borderRadius: 10,
                       background: 'transparent', color: 'var(--ink-mute)',
                       border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer',
-                      fontFamily: 'JetBrains Mono, monospace', fontSize: 11,
+                      fontFamily: 'JetBrains Mono, monospace', fontSize: 14,
                     }}>RESET</button>
                   )}
                 </div>
@@ -811,7 +811,7 @@ function VerificationOverlay({ profile, onClose }) {
             {phase === 1 && (
               <div style={{ position: 'relative', display: 'grid', placeItems: 'center', gap: 18 }}>
                 <EmbeddingCloud cols={24} rows={8} size={20} gap={6}/>
-                <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>192 DIMENSIONS · L2-NORMALIZED</div>
+                <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>192 DIMENSIONS · L2-NORMALIZED</div>
               </div>
             )}
             {phase === 2 && (
@@ -841,7 +841,7 @@ function VerificationOverlay({ profile, onClose }) {
         </div>
       </div>
 
-      <button onClick={onClose} className="btn btn-ghost biovoice-overlay-close" style={{ position: 'absolute', top: 32, right: 32, padding: '10px 20px', fontSize: 11 }}>
+      <button onClick={onClose} className="btn btn-ghost biovoice-overlay-close" style={{ position: 'absolute', top: 32, right: 32, padding: '10px 20px', fontSize: 14 }}>
         ✕ &nbsp;CLOSE
       </button>
     </div>
@@ -881,10 +881,10 @@ function CosineMatchViz({ similarity }) {
           </>;
         })()}
       </svg>
-      <div className="num-mono" style={{ fontSize: 36, color: '#7ef0ff', letterSpacing: '-0.02em' }}>
+      <div className="num-mono" style={{ fontSize: 44, color: '#7ef0ff', letterSpacing: '-0.02em' }}>
         cos θ = {similarity.toFixed(3)}
       </div>
-      <div className="label-mono" style={{ fontSize: 10 }}>HIGHER = MORE SIMILAR · THRESHOLD 0.75</div>
+      <div className="label-mono" style={{ fontSize: 13 }}>HIGHER = MORE SIMILAR · THRESHOLD 0.75</div>
     </div>
   );
 }
@@ -915,11 +915,11 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
           <div style={{
             width: 56, height: 56, borderRadius: '50%',
             background: `linear-gradient(135deg, ${profile?.color1 || '#7ef0ff'}, ${profile?.color2 || '#3da9fc'})`,
-            display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 20, fontWeight: 600,
+            display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 25, fontWeight: 600,
           }}>{profile?.initials}</div>
           <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 26 }}>{profile?.name}</div>
-            <div className="label-mono" style={{ fontSize: 10 }}>{profile?.id} · {result?.sessionId || '—'}</div>
+            <div style={{ fontSize: 33 }}>{profile?.name}</div>
+            <div className="label-mono" style={{ fontSize: 13 }}>{profile?.id} · {result?.sessionId || '—'}</div>
           </div>
         </div>
         <div style={{
@@ -927,13 +927,13 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
           background: passing ? 'rgba(126,240,255,0.15)' : 'rgba(255,85,119,0.15)',
           border: `1px solid ${accent}`,
           color: accent,
-          fontFamily: 'JetBrains Mono, monospace', fontSize: 12, letterSpacing: '0.2em', fontWeight: 600,
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 15, letterSpacing: '0.2em', fontWeight: 600,
         }}>
           {passing ? 'ACCESS GRANTED' : 'ACCESS DENIED'}
         </div>
       </div>
       {reasonBlurb && (
-        <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)', letterSpacing: '0.06em' }}>
+        <div className="label-mono" style={{ fontSize: 14, color: 'var(--ink-mute)', letterSpacing: '0.06em' }}>
           {reasonBlurb}
         </div>
       )}
@@ -960,14 +960,14 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
           display: 'grid',
           gap: 8,
         }}>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>
             FUSION DECISION
           </div>
           <div className="biovoice-result-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 15, color: 'var(--ink)' }}>
+            <div style={{ fontSize: 19, color: 'var(--ink)' }}>
               {fusion.strategy === 'majority_vote' ? 'Majority vote across speaker models' : fusion.strategy}
             </div>
-            <div className="label-mono" style={{ fontSize: 9, color: passing ? '#7ef0ff' : '#ffb24a' }}>
+            <div className="label-mono" style={{ fontSize: 11, color: passing ? '#7ef0ff' : '#ffb24a' }}>
               {fusion.matchedModels}/{fusion.totalModels} MATCHED · NEED {fusion.majorityRequired}
             </div>
           </div>
@@ -982,7 +982,7 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
           display: 'grid',
           gap: 10,
         }}>
-          <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)' }}>
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>
             MODEL MATCH SCORES
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
@@ -1009,30 +1009,30 @@ function ResultPanel({ passing, similarity, dfScore, profile, result }) {
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, color: 'var(--ink)' }}>{modelLabel}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>
+                    <div style={{ fontSize: 18, color: 'var(--ink)' }}>{modelLabel}</div>
+                    <div className="label-mono" style={{ fontSize: 10, marginTop: 2, color: 'var(--ink-soft)' }}>
                       {score.passedThreshold ? 'MATCHED PROFILE' : 'BELOW THRESHOLD'}
                     </div>
                   </div>
                   <div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>MATCH</div>
-                    <div className="num-mono" style={{ fontSize: 20, color: scoreAccent }}>
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>MATCH</div>
+                    <div className="num-mono" style={{ fontSize: 25, color: scoreAccent }}>
                       {score.similarityScore.toFixed(3)}
                     </div>
                   </div>
                   <div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>CENTROID</div>
-                    <div className="num-mono" style={{ fontSize: 20, color: 'var(--ink)' }}>
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>CENTROID</div>
+                    <div className="num-mono" style={{ fontSize: 25, color: 'var(--ink)' }}>
                       {score.centroidSimilarity.toFixed(3)}
                     </div>
                   </div>
                   <div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>THRESHOLD</div>
-                    <div className="num-mono" style={{ fontSize: 16, color: 'var(--ink)' }}>
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>THRESHOLD</div>
+                    <div className="num-mono" style={{ fontSize: 20, color: 'var(--ink)' }}>
                       {score.threshold.toFixed(2)}
                     </div>
                   </div>
-                  <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', whiteSpace: 'nowrap' }}>
+                  <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', whiteSpace: 'nowrap' }}>
                     {score.sampleSimilarities.length} sample{score.sampleSimilarities.length === 1 ? '' : 's'}
                   </div>
                 </div>
@@ -1060,11 +1060,11 @@ function ErrorPanel({ message, profile }) {
           <div style={{
             width: 56, height: 56, borderRadius: '50%',
             background: `linear-gradient(135deg, ${profile?.color1 || '#ff5577'}, ${profile?.color2 || '#9450d8'})`,
-            display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 20, fontWeight: 600,
+            display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 25, fontWeight: 600,
           }}>{profile?.initials || '!'}</div>
           <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: 26 }}>Verification failed</div>
-            <div className="label-mono" style={{ fontSize: 10 }}>{profile?.id || ''}</div>
+            <div style={{ fontSize: 33 }}>Verification failed</div>
+            <div className="label-mono" style={{ fontSize: 13 }}>{profile?.id || ''}</div>
           </div>
         </div>
         <div style={{
@@ -1072,12 +1072,12 @@ function ErrorPanel({ message, profile }) {
           background: 'rgba(255,85,119,0.15)',
           border: `1px solid ${accent}`,
           color: accent,
-          fontFamily: 'JetBrains Mono, monospace', fontSize: 12, letterSpacing: '0.2em', fontWeight: 600,
+          fontFamily: 'JetBrains Mono, monospace', fontSize: 15, letterSpacing: '0.2em', fontWeight: 600,
         }}>
           ERROR
         </div>
       </div>
-      <div style={{ fontSize: 14, color: 'var(--ink-mute)', lineHeight: 1.55 }}>{message}</div>
+      <div style={{ fontSize: 18, color: 'var(--ink-mute)', lineHeight: 1.55 }}>{message}</div>
     </div>
   );
 }
@@ -1093,9 +1093,9 @@ function overlayProgress(phase, _recordingMs, timeline) {
 function Stat({ label, value, sub, accent }) {
   return (
     <div style={{ padding: '14px 18px', borderRadius: 12, background: 'rgba(125,200,255,0.04)', border: '1px solid var(--line)' }}>
-      <div className="label-mono" style={{ fontSize: 9 }}>{label}</div>
-      <div className="num-mono" style={{ fontSize: 28, color: accent, marginTop: 6, letterSpacing: '-0.02em' }}>{value}</div>
-      <div className="label-mono" style={{ fontSize: 8, marginTop: 2, color: 'var(--ink-soft)' }}>{sub}</div>
+      <div className="label-mono" style={{ fontSize: 11 }}>{label}</div>
+      <div className="num-mono" style={{ fontSize: 35, color: accent, marginTop: 6, letterSpacing: '-0.02em' }}>{value}</div>
+      <div className="label-mono" style={{ fontSize: 10, marginTop: 2, color: 'var(--ink-soft)' }}>{sub}</div>
     </div>
   );
 }

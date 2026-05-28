@@ -57,7 +57,7 @@ function Sidebar({ page, setPage }) {
           >
             {active && <span style={{ position: 'absolute', left: -16, top: 12, bottom: 12, width: 2, background: '#7ef0ff', boxShadow: '0 0 10px #7ef0ff', borderRadius: 2 }}></span>}
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">{it.icon}</svg>
-            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 8, letterSpacing: '0.16em', textTransform: 'uppercase' }}>{it.label}</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase' }}>{it.label}</span>
           </button>
         );
       })}
@@ -67,7 +67,7 @@ function Sidebar({ page, setPage }) {
         width: 44, height: 44, borderRadius: '50%',
         background: 'linear-gradient(135deg, #7ef0ff, #3da9fc)',
         display: 'grid', placeItems: 'center', color: '#04070d',
-        fontWeight: 600, fontSize: 14, cursor: 'pointer',
+        fontWeight: 600, fontSize: 18, cursor: 'pointer',
         boxShadow: '0 0 0 2px rgba(126,240,255,0.3), 0 0 16px rgba(126,240,255,0.25)',
       }}>OP</div>
     </div>
@@ -264,9 +264,9 @@ function DeepfakeLab({ audio, profiles }) {
         {/* LEFT: Forge */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>RED-TEAM · FORGE</div>
-            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>Create a deepfake</div>
-            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
+            <div className="label-mono" style={{ fontSize: 13, color: 'var(--warn)' }}>RED-TEAM · FORGE</div>
+            <div style={{ fontSize: 38, fontWeight: 200, marginTop: 4 }}>Create a deepfake</div>
+            <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6, maxWidth: 540 }}>
               Try to clone an enrolled voice and use it to authenticate. BioVoice catches the fakes — even ones a human ear can't distinguish.
             </div>
           </div>
@@ -287,11 +287,11 @@ function DeepfakeLab({ audio, profiles }) {
                     <div style={{
                       width: 26, height: 26, borderRadius: '50%',
                       background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
-                      display: 'grid', placeItems: 'center', color: '#04070d', fontWeight: 600, fontSize: 10,
+                      display: 'grid', placeItems: 'center', color: '#04070d', fontWeight: 600, fontSize: 13,
                     }}>{p.initials}</div>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
-                      <div className="label-mono" style={{ fontSize: 8 }}>{p.id}</div>
+                      <div style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                      <div className="label-mono" style={{ fontSize: 10 }}>{p.id}</div>
                     </div>
                   </button>
                 ))}
@@ -306,18 +306,18 @@ function DeepfakeLab({ audio, profiles }) {
                   border: '1px solid var(--line-2)',
                   borderRadius: 10, color: 'var(--ink)',
                   padding: '12px 14px',
-                  fontFamily: 'Sora, sans-serif', fontSize: 14,
+                  fontFamily: 'Sora, sans-serif', fontSize: 18,
                   outline: 'none',
                 }}/>
             </Field>
 
             <Field label="TTS ENGINE  ·  PICK ONE">
               {enginesPayload === null ? (
-                <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>
+                <div className="label-mono" style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
                   LOADING ENGINES…
                 </div>
               ) : enginesPayload.engines.filter((e) => e.available).length === 0 ? (
-                <div className="label-mono" style={{ fontSize: 10, color: 'var(--warn)' }}>
+                <div className="label-mono" style={{ fontSize: 13, color: 'var(--warn)' }}>
                   No TTS engines available on the backend. Install macOS `say` / espeak-ng, or expose internet for edge-tts / gTTS.
                 </div>
               ) : (
@@ -345,11 +345,11 @@ function DeepfakeLab({ audio, profiles }) {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                          <span style={{ fontSize: 12, fontWeight: 500 }}>{e.label}</span>
+                          <span style={{ fontSize: 15, fontWeight: 500 }}>{e.label}</span>
                           <span
                             className="label-mono"
                             style={{
-                              fontSize: 8, padding: '2px 7px', borderRadius: 999,
+                              fontSize: 10, padding: '2px 7px', borderRadius: 999,
                               letterSpacing: '0.18em', flexShrink: 0,
                               color: isCloud ? '#7ef0ff' : '#6affc8',
                               border: isCloud ? '1px solid rgba(126,240,255,0.45)' : '1px solid rgba(106,255,200,0.45)',
@@ -359,7 +359,7 @@ function DeepfakeLab({ audio, profiles }) {
                             {isCloud ? 'CLOUD' : 'LOCAL'}
                           </span>
                         </div>
-                        <div className="label-mono" style={{ fontSize: 8, marginTop: 6, color: 'var(--ink-soft)' }}>
+                        <div className="label-mono" style={{ fontSize: 10, marginTop: 6, color: 'var(--ink-soft)' }}>
                           {disabled
                             ? 'UNAVAILABLE ON THIS BACKEND'
                             : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}${e.id === 'xtts' ? ' · USES REFERENCE WAV' : ''}`}
@@ -382,7 +382,7 @@ function DeepfakeLab({ audio, profiles }) {
                     background: 'rgba(125,200,255,0.04)',
                     border: '1px solid var(--line-2)',
                     borderRadius: 10, color: 'var(--ink)',
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12,
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 15,
                     outline: 'none', cursor: 'pointer',
                   }}
                 >
@@ -408,7 +408,7 @@ function DeepfakeLab({ audio, profiles }) {
                     ));
                   })()}
                 </select>
-                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 6 }}>
+                <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 6 }}>
                   TYPE A LETTER TO JUMP · GROUPED BY LANGUAGE
                 </div>
               </Field>
@@ -422,7 +422,7 @@ function DeepfakeLab({ audio, profiles }) {
                     style={{ flex: 1, padding: '8px', borderRadius: 8, cursor: 'pointer',
                       background: active ? 'rgba(255,178,74,0.10)' : 'rgba(125,200,255,0.03)',
                       border: active ? '1px solid rgba(255,178,74,0.55)' : '1px solid var(--line)',
-                      color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: '0.18em' }}>
+                      color: 'var(--ink)', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, letterSpacing: '0.18em' }}>
                     {label}
                   </button>
                 );
@@ -435,9 +435,9 @@ function DeepfakeLab({ audio, profiles }) {
                   onChange={(e) => setCandidatesPerText(Math.max(1, Math.min(32, Number(e.target.value) || 1)))}
                   style={{ width: '100%', padding: '10px 14px', background: 'rgba(125,200,255,0.04)',
                     border: '1px solid var(--line-2)', borderRadius: 10, color: 'var(--ink)',
-                    fontFamily: 'JetBrains Mono, monospace', fontSize: 12, outline: 'none' }}/>
+                    fontFamily: 'JetBrains Mono, monospace', fontSize: 15, outline: 'none' }}/>
                 {!selectedEngineClones && (
-                  <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 6 }}>
+                  <div className="label-mono" style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
                     {`"${selectedEngine?.label ?? engineId}" speaks in its own voice — pick XTTS so clones can match the target.`}
                   </div>
                 )}
@@ -446,7 +446,7 @@ function DeepfakeLab({ audio, profiles }) {
 
             <button onClick={batchMode ? generateBatch : generate}
               disabled={batchMode ? batchRunning : generating} className="btn btn-primary"
-              style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 14,
+              style={{ width: '100%', justifyContent: 'center', padding: '16px', fontSize: 18,
                 opacity: (batchMode ? batchRunning : generating) ? 0.7 : 1,
                 cursor: (batchMode ? batchRunning : generating) ? 'wait' : 'pointer' }}>
               {batchMode
@@ -456,7 +456,7 @@ function DeepfakeLab({ audio, profiles }) {
                     : <>⚡  Forge &amp; test attack</>)}
             </button>
             {!target && (
-              <div className="label-mono" style={{ fontSize: 9, color: 'var(--warn)', marginTop: 4 }}>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
                 Enrol at least one profile in Profiles before forging.
               </div>
             )}
@@ -466,8 +466,8 @@ function DeepfakeLab({ audio, profiles }) {
         {/* RIGHT: Outcome */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 10, color: 'var(--teal-2)' }}>BLUE-TEAM · DETECTOR</div>
-            <div style={{ fontSize: 30, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
+            <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>BLUE-TEAM · DETECTOR</div>
+            <div style={{ fontSize: 38, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
           </div>
 
           {batchMode && (
@@ -476,25 +476,25 @@ function DeepfakeLab({ audio, profiles }) {
                 <div style={{ display: 'grid', placeItems: 'center', flex: 1, padding: 30 }}><ScanRings/></div>
               )}
               {batchError && !batchRunning && (
-                <div style={{ color: '#ff8080', textAlign: 'center', padding: 20, fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}>{batchError}</div>
+                <div style={{ color: '#ff8080', textAlign: 'center', padding: 20, fontFamily: 'JetBrains Mono, monospace', fontSize: 16 }}>{batchError}</div>
               )}
               {!batchRunning && !batchError && !batchResult && (
                 <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                   <div>
-                    <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>◍</div>
-                    <div style={{ fontSize: 14 }}>Forge a batch to keep only the clones that match the target.</div>
-                    <div className="label-mono" style={{ fontSize: 9, marginTop: 6 }}>ONE UTTERANCE PER LINE</div>
+                    <div style={{ fontSize: 56, opacity: 0.3, marginBottom: 12 }}>◍</div>
+                    <div style={{ fontSize: 18 }}>Forge a batch to keep only the clones that match the target.</div>
+                    <div className="label-mono" style={{ fontSize: 11, marginTop: 6 }}>ONE UTTERANCE PER LINE</div>
                   </div>
                 </div>
               )}
               {batchResult && !batchRunning && (
                 <>
                   <DegradedBanner provenance={batchResult.modelProvenance} variant="full"/>
-                  <div className="label-mono" style={{ fontSize: 10 }}>
+                  <div className="label-mono" style={{ fontSize: 13 }}>
                     KEPT {batchResult.kept} / {batchResult.generated} GENERATED · THRESHOLD {batchResult.keepThreshold.toFixed(2)}
                   </div>
                   {batchResult.candidates.length === 0 && (
-                    <div style={{ color: 'var(--ink-soft)', fontSize: 13 }}>No candidates generated.</div>
+                    <div style={{ color: 'var(--ink-soft)', fontSize: 16 }}>No candidates generated.</div>
                   )}
                   {batchResult.candidates.map((c) => (
                     <div key={c.index} style={{ padding: 12, borderRadius: 10,
@@ -502,16 +502,16 @@ function DeepfakeLab({ audio, profiles }) {
                       border: c.kept ? '1px solid rgba(106,255,200,0.3)' : '1px solid var(--line)',
                       opacity: c.kept ? 1 : 0.6 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                        <span className="label-mono" style={{ fontSize: 9, color: c.kept ? '#6affc8' : 'var(--ink-soft)' }}>
+                        <span className="label-mono" style={{ fontSize: 11, color: c.kept ? '#6affc8' : 'var(--ink-soft)' }}>
                           #{c.index} · {c.kept ? 'KEPT' : 'DISCARDED'}
                         </span>
-                        <span className="num-mono" style={{ fontSize: 16, color: c.kept ? '#6affc8' : 'var(--ink-mute)' }}>
+                        <span className="num-mono" style={{ fontSize: 20, color: c.kept ? '#6affc8' : 'var(--ink-mute)' }}>
                           {(c.similarityToTarget * 100).toFixed(1)}%
                         </span>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--ink-mute)', margin: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.text}</div>
+                      <div style={{ fontSize: 15, color: 'var(--ink-mute)', margin: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.text}</div>
                       {c.decision && (
-                        <div className="label-mono" style={{ fontSize: 8, color: c.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)' }}>
+                        <div className="label-mono" style={{ fontSize: 10, color: c.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)' }}>
                           AASIST {c.decision} · {c.deepfakeScore != null ? c.deepfakeScore.toFixed(3) : '—'}
                         </div>
                       )}
@@ -527,7 +527,7 @@ function DeepfakeLab({ audio, profiles }) {
           {!batchMode && (<>
           {/* Pipeline */}
           <div className="panel" style={{ padding: 20 }}>
-            <div className="label-mono" style={{ fontSize: 10, marginBottom: 14 }}>ATTACK PIPELINE</div>
+            <div className="label-mono" style={{ fontSize: 13, marginBottom: 14 }}>ATTACK PIPELINE</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {stages.map((s, i) => {
                 const active = stage === i + 1;
@@ -548,12 +548,12 @@ function DeepfakeLab({ audio, profiles }) {
                       border: `1.5px solid ${color}`,
                       display: 'grid', placeItems: 'center', flexShrink: 0,
                       background: done ? `radial-gradient(circle, rgba(106,255,200,0.4), transparent)` : 'transparent',
-                      color, fontSize: 11, fontWeight: 700,
+                      color, fontSize: 14, fontWeight: 700,
                       animation: active ? 'breathe 1.2s ease-in-out infinite' : 'none',
                     }}>{done ? '✓' : i + 1}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, color: pending ? 'var(--ink-soft)' : 'var(--ink)' }}>{s.label}</div>
-                      <div className="label-mono" style={{ fontSize: 9 }}>{s.sub}</div>
+                      <div style={{ fontSize: 16, color: pending ? 'var(--ink-soft)' : 'var(--ink)' }}>{s.label}</div>
+                      <div className="label-mono" style={{ fontSize: 11 }}>{s.sub}</div>
                     </div>
                     {active && <LivePulse size={6} color="#ffb24a"/>}
                   </div>
@@ -567,9 +567,9 @@ function DeepfakeLab({ audio, profiles }) {
             {!result && !generating && !error && (
               <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                 <div>
-                  <div style={{ fontSize: 48, opacity: 0.3, marginBottom: 12 }}>◌</div>
-                  <div style={{ fontSize: 14 }}>Run an attack to see how BioVoice catches it.</div>
-                  <div className="label-mono" style={{ fontSize: 9, marginTop: 6 }}>WAITING</div>
+                  <div style={{ fontSize: 56, opacity: 0.3, marginBottom: 12 }}>◌</div>
+                  <div style={{ fontSize: 18 }}>Run an attack to see how BioVoice catches it.</div>
+                  <div className="label-mono" style={{ fontSize: 11, marginTop: 6 }}>WAITING</div>
                 </div>
               </div>
             )}
@@ -584,8 +584,8 @@ function DeepfakeLab({ audio, profiles }) {
                 color: '#ff8080', textAlign: 'center',
               }}>
                 <div>
-                  <div className="label-mono" style={{ fontSize: 10, marginBottom: 10, color: '#ff8080' }}>FORGE FAILED</div>
-                  <div style={{ fontSize: 13, fontFamily: 'JetBrains Mono, monospace', maxWidth: 380, lineHeight: 1.5 }}>
+                  <div className="label-mono" style={{ fontSize: 13, marginBottom: 10, color: '#ff8080' }}>FORGE FAILED</div>
+                  <div style={{ fontSize: 16, fontFamily: 'JetBrains Mono, monospace', maxWidth: 380, lineHeight: 1.5 }}>
                     {error}
                   </div>
                 </div>
@@ -605,7 +605,7 @@ function DeepfakeLab({ audio, profiles }) {
                       border: '1px solid rgba(255,85,119,0.5)',
                       background: 'rgba(255,85,119,0.10)',
                       color: '#ff5577', fontFamily: 'JetBrains Mono, monospace',
-                      fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
+                      fontSize: 14, letterSpacing: '0.2em', fontWeight: 600,
                     }}>⚠  DEEPFAKE DETECTED</div>
                   ) : (
                     <div style={{
@@ -613,10 +613,10 @@ function DeepfakeLab({ audio, profiles }) {
                       border: '1px solid rgba(255,178,74,0.55)',
                       background: 'rgba(255,178,74,0.10)',
                       color: '#ffb24a', fontFamily: 'JetBrains Mono, monospace',
-                      fontSize: 11, letterSpacing: '0.2em', fontWeight: 600,
+                      fontSize: 14, letterSpacing: '0.2em', fontWeight: 600,
                     }}>⚠  CLONE PASSED THE GATE</div>
                   )}
-                  <div className="label-mono" style={{ fontSize: 9 }}>
+                  <div className="label-mono" style={{ fontSize: 11 }}>
                     ROUND-TRIP {result.time}s · {result.sourceDescription}
                   </div>
                 </div>
@@ -634,26 +634,26 @@ function DeepfakeLab({ audio, profiles }) {
                     background: result.decision === 'FAKE' ? 'rgba(255,85,119,0.06)' : 'rgba(255,178,74,0.06)',
                     border: '1px solid ' + (result.decision === 'FAKE' ? 'rgba(255,85,119,0.2)' : 'rgba(255,178,74,0.25)'),
                   }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>AASIST AUTHENTICITY</div>
+                    <div className="label-mono" style={{ fontSize: 11 }}>AASIST AUTHENTICITY</div>
                     <div className="num-mono biovoice-numerals" style={{
-                      fontSize: 30, marginTop: 4, fontWeight: 200,
+                      fontSize: 38, marginTop: 4, fontWeight: 200,
                       color: result.decision === 'FAKE' ? '#ff5577' : '#ffb24a',
                     }}>{result.dfScore.toFixed(3)}</div>
                     <div className="label-mono" style={{
-                      fontSize: 8, marginTop: 2,
+                      fontSize: 10, marginTop: 2,
                       color: result.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)',
                     }}>
                       {result.decision === 'FAKE' ? 'BELOW 0.50 · SYNTHETIC' : 'ABOVE 0.50 · GATE FAILED TO CATCH'}
                     </div>
                   </div>
                   <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 9 }}>ATTACK MODEL</div>
-                    <div style={{ fontSize: 18, marginTop: 6, fontWeight: 300 }}>{result.model}</div>
-                    <div className="label-mono" style={{ fontSize: 8, marginTop: 2 }}>VIA /me/spoof + /me/spoof/test</div>
+                    <div className="label-mono" style={{ fontSize: 11 }}>ATTACK MODEL</div>
+                    <div style={{ fontSize: 23, marginTop: 6, fontWeight: 300 }}>{result.model}</div>
+                    <div className="label-mono" style={{ fontSize: 10, marginTop: 2 }}>VIA /me/spoof + /me/spoof/test</div>
                   </div>
                 </div>
 
-                <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>
+                <div className="label-mono" style={{ fontSize: 11, marginBottom: 8 }}>
                   {result.analysisDetails.mode === "trained_heads"
                     ? "ACOUSTIC SUB-AXES · TRAINED PROBE"
                     : "ACOUSTIC FEATURES (heuristic v1.0 · not from AASIST)"}
@@ -798,12 +798,12 @@ function IdentifyScreen({ profiles }) {
     <div className="biovoice-input-row" style={{ display: 'flex', gap: 8, width: '100%', maxWidth: 520 }}>
       <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={recorder.state === 'recording'}
         aria-label="Microphone"
-        style={{ flex: 1, padding: '13px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.35)', color: 'var(--ink)', border: '1px solid rgba(125,200,255,0.18)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+        style={{ flex: 1, padding: '13px 14px', borderRadius: 12, background: 'rgba(0,0,0,0.35)', color: 'var(--ink)', border: '1px solid rgba(125,200,255,0.18)', fontFamily: 'JetBrains Mono, monospace', fontSize: 15 }}>
         <option value="">Browser default mic</option>
         {devices.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
       </select>
       {devices.every((d) => !d.label || d.label === 'Microphone') && (
-        <button onClick={handleEnableMicLabels} style={{ padding: '8px 12px', fontSize: 11, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer' }}>Enable labels</button>
+        <button onClick={handleEnableMicLabels} style={{ padding: '8px 12px', fontSize: 14, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.3)', borderRadius: 8, cursor: 'pointer' }}>Enable labels</button>
       )}
     </div>
   );
@@ -811,9 +811,9 @@ function IdentifyScreen({ profiles }) {
   const renderCapture = () => (
     <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, height: '100%', textAlign: 'center' }}>
       <div>
-        <div className="label-mono" style={{ fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>WHO IS THIS VOICE?</div>
-        <div className="biovoice-identify-hero" style={{ fontSize: 60, fontWeight: 200, marginTop: 10, lineHeight: 1.02 }}>Most similar match</div>
-        <div style={{ fontSize: 16, color: 'var(--ink-mute)', marginTop: 14, maxWidth: 620, marginInline: 'auto' }}>
+        <div className="label-mono" style={{ fontSize: 15, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>WHO IS THIS VOICE?</div>
+        <div className="biovoice-identify-hero" style={{ fontSize: 68, fontWeight: 200, marginTop: 10, lineHeight: 1.02 }}>Most similar match</div>
+        <div style={{ fontSize: 20, color: 'var(--ink-mute)', marginTop: 14, maxWidth: 620, marginInline: 'auto' }}>
           Record or upload a voice — it’s ranked against all <strong style={{ color: 'var(--ink)' }}>{profiles.length}</strong> enrolled profile{profiles.length === 1 ? '' : 's'} across three speaker models.
         </div>
       </div>
@@ -825,26 +825,26 @@ function IdentifyScreen({ profiles }) {
           {micPicker}
           <div style={{ display: 'flex', gap: 14, width: '100%' }}>
             <button onClick={handleStartRec} disabled={busy} className="biovoice-identify-cta"
-              style={{ flex: 2, padding: '20px', borderRadius: 14, background: 'linear-gradient(180deg, #ff5577, #c8194a)', color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 700, letterSpacing: '0.1em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              style={{ flex: 2, padding: '20px', borderRadius: 14, background: 'linear-gradient(180deg, #ff5577, #c8194a)', color: '#fff', border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 18, fontWeight: 700, letterSpacing: '0.1em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#fff' }}/> START RECORDING
             </button>
             <button onClick={handleUploadClick} disabled={busy}
-              style={{ flex: 1, padding: '20px', borderRadius: 14, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.35)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, fontWeight: 600, letterSpacing: '0.08em' }}>⤴ UPLOAD</button>
+              style={{ flex: 1, padding: '20px', borderRadius: 14, background: 'transparent', color: 'var(--teal-2)', border: '1px solid rgba(126,240,255,0.35)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 16, fontWeight: 600, letterSpacing: '0.08em' }}>⤴ UPLOAD</button>
           </div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, width: '100%', maxWidth: 660 }}>
           <div style={{ width: '100%' }}>
             <Waveform samples={recorder.samples} width={660} height={88} bars={120} mirror/>
-            <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)', marginTop: 8 }}>READY · {sample.source.toUpperCase()} · {sample.durationSec.toFixed(1)}s</div>
+            <div className="label-mono" style={{ fontSize: 13, color: 'var(--ink-mute)', marginTop: 8 }}>READY · {sample.source.toUpperCase()} · {sample.durationSec.toFixed(1)}s</div>
           </div>
           <div style={{ display: 'flex', gap: 14, width: '100%' }}>
             <button onClick={handleSubmit} disabled={profiles.length === 0} className="biovoice-identify-cta"
-              style={{ flex: 2, padding: '22px', borderRadius: 14, background: profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.06)', color: profiles.length > 0 ? '#04070d' : 'var(--ink-mute)', border: 'none', cursor: profiles.length > 0 ? 'pointer' : 'not-allowed', fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 700, letterSpacing: '0.12em' }}>
+              style={{ flex: 2, padding: '22px', borderRadius: 14, background: profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.06)', color: profiles.length > 0 ? '#04070d' : 'var(--ink-mute)', border: 'none', cursor: profiles.length > 0 ? 'pointer' : 'not-allowed', fontFamily: 'JetBrains Mono, monospace', fontSize: 19, fontWeight: 700, letterSpacing: '0.12em' }}>
               {profiles.length === 0 ? 'ENROL A PROFILE FIRST' : 'FIND TOP 3 MATCHES'}
             </button>
             <button onClick={handleReset}
-              style={{ flex: 1, padding: '22px', borderRadius: 14, background: 'transparent', color: 'var(--ink-mute)', border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>↺ REDO</button>
+              style={{ flex: 1, padding: '22px', borderRadius: 14, background: 'transparent', color: 'var(--ink-mute)', border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 15 }}>↺ REDO</button>
           </div>
         </div>
       )}
@@ -862,11 +862,11 @@ function IdentifyScreen({ profiles }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <LivePulse color="#ff5577" size={12}/>
-        <span className="label-mono" style={{ fontSize: 13, color: '#ff8aa6', letterSpacing: '0.34em' }}>LISTENING</span>
-        <span className="num-mono" style={{ fontSize: 40, fontWeight: 200, color: 'var(--ink)' }}>{(recorder.durationMs / 1000).toFixed(1)}s</span>
+        <span className="label-mono" style={{ fontSize: 16, color: '#ff8aa6', letterSpacing: '0.34em' }}>LISTENING</span>
+        <span className="num-mono" style={{ fontSize: 48, fontWeight: 200, color: 'var(--ink)' }}>{(recorder.durationMs / 1000).toFixed(1)}s</span>
       </div>
       <button onClick={handleStopRec} className="biovoice-identify-cta"
-        style={{ padding: '20px 56px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))', color: '#fff', border: '1px solid rgba(126,240,255,0.55)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 15, fontWeight: 700, letterSpacing: '0.14em', display: 'flex', alignItems: 'center', gap: 14 }}>
+        style={{ padding: '20px 56px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(126,240,255,0.25), rgba(106,255,200,0.15))', color: '#fff', border: '1px solid rgba(126,240,255,0.55)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 19, fontWeight: 700, letterSpacing: '0.14em', display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ width: 14, height: 14, borderRadius: 3, background: '#fff' }}/> STOP
       </button>
     </div>
@@ -875,8 +875,8 @@ function IdentifyScreen({ profiles }) {
   const renderAnalyzing = () => (
     <div className="biovoice-identify-center" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 30, height: '100%' }}>
       <VoiceOrb size={220} level={0.5} samples={recorder.samples} hue="cyan" intensity={1.7}/>
-      <div className="biovoice-identify-hero" style={{ fontSize: 42, fontWeight: 200 }}>Comparing…</div>
-      <div className="label-mono" style={{ fontSize: 12, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>
+      <div className="biovoice-identify-hero" style={{ fontSize: 50, fontWeight: 200 }}>Comparing…</div>
+      <div className="label-mono" style={{ fontSize: 15, color: 'var(--ink-mute)', letterSpacing: '0.2em' }}>
         RANKING ACROSS {profiles.length} ENROLLED VOICE{profiles.length === 1 ? '' : 'S'} · 3 MODELS
       </div>
       <div style={{ width: 'min(860px, 88vw)' }}>
@@ -900,7 +900,7 @@ function IdentifyScreen({ profiles }) {
 
       <div className="biovoice-page-content" style={{ position: 'absolute', inset: 0, padding: '118px 48px 78px 120px', zIndex: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {(error || (recorder.lastError && stage !== 'results')) && (
-          <div style={{ padding: '10px 16px', borderRadius: 10, marginBottom: 14, background: 'rgba(255,128,128,0.08)', border: '1px solid rgba(255,128,128,0.35)', color: '#ffadad', fontSize: 12, fontFamily: 'JetBrains Mono, monospace' }}>
+          <div style={{ padding: '10px 16px', borderRadius: 10, marginBottom: 14, background: 'rgba(255,128,128,0.08)', border: '1px solid rgba(255,128,128,0.35)', color: '#ffadad', fontSize: 15, fontFamily: 'JetBrains Mono, monospace' }}>
             {error || recorder.lastError}
           </div>
         )}
@@ -939,7 +939,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
   const arrowStyle = {
     width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center',
     background: 'rgba(8,14,24,0.6)', border: '1px solid var(--line-2)', color: 'var(--ink)',
-    cursor: 'pointer', fontSize: 20, fontFamily: 'JetBrains Mono, monospace',
+    cursor: 'pointer', fontSize: 25, fontFamily: 'JetBrains Mono, monospace',
   };
 
   return (
@@ -947,12 +947,12 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>{eyebrow}</div>
-          <div className="biovoice-identify-hero" style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', letterSpacing: '0.32em' }}>{eyebrow}</div>
+          <div className="biovoice-identify-hero" style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>
             {top ? top.userId : 'No match'}
-            <span style={{ color: 'var(--ink-soft)', fontSize: 22, marginLeft: 12 }}>{(combined * 100).toFixed(1)}%</span>
+            <span style={{ color: 'var(--ink-soft)', fontSize: 28, marginLeft: 12 }}>{(combined * 100).toFixed(1)}%</span>
           </div>
-          <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)', marginTop: 4 }}>
+          <div className="label-mono" style={{ fontSize: 13, color: 'var(--ink-mute)', marginTop: 4 }}>
             compared against {result.nEnrolledTotal} profile{result.nEnrolledTotal === 1 ? '' : 's'} · scroll →
           </div>
         </div>
@@ -960,7 +960,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
           <button onClick={() => scrollByCard(-1)} aria-label="Scroll results left" style={arrowStyle}>‹</button>
           <button onClick={() => scrollByCard(1)} aria-label="Scroll results right" style={arrowStyle}>›</button>
           <button onClick={onReset} aria-label="Reset results"
-            style={{ ...arrowStyle, width: 'auto', padding: '0 18px', fontSize: 12, color: 'var(--teal-2)', letterSpacing: '0.1em' }}>{resetLabel}</button>
+            style={{ ...arrowStyle, width: 'auto', padding: '0 18px', fontSize: 15, color: 'var(--teal-2)', letterSpacing: '0.1em' }}>{resetLabel}</button>
         </div>
       </div>
 
@@ -977,7 +977,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
       >
         {/* CARD 1 — Per-model Grad-CAM spectrograms, side by side */}
         <div className="biovoice-rise" style={{ ...cardBase, width: 'min(860px, 90vw)', animationDelay: '0ms' }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL GRAD-CAM · vs {top?.userId ?? '—'}</div>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL GRAD-CAM · vs {top?.userId ?? '—'}</div>
           <div style={{ flex: 1, display: 'grid', placeItems: 'center', minHeight: 0, overflowY: 'auto' }}>
             <ExplainTab
               wavFile={wavFile ?? null}
@@ -991,7 +991,7 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
 
         {/* CARD 2 — Top 3 + gauge */}
         <div className="biovoice-rise" style={{ ...cardBase, width: 'min(460px, 88vw)', animationDelay: '90ms' }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 6, letterSpacing: '0.2em' }}>TOP 3 · FUSED SCORE</div>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 6, letterSpacing: '0.2em' }}>TOP 3 · FUSED SCORE</div>
           <div style={{ display: 'grid', placeItems: 'center' }}>
             <SimilarityGauge value={combined} threshold={result.similarityThreshold} size={250} label={top?.userId ?? '—'}/>
           </div>
@@ -1004,10 +1004,10 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
               return (
                 <div key={m.userId} style={{ padding: '12px 14px', borderRadius: 12, background: i === 0 ? 'rgba(126,240,255,0.06)' : 'rgba(125,200,255,0.02)', border: `1px solid ${i === 0 ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.12)'}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span className="label-mono" style={{ fontSize: 16, color: accent, minWidth: 24 }}>#{i + 1}</span>
-                    {profile && <div style={{ width: 30, height: 30, borderRadius: '50%', background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`, display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 11, fontWeight: 600 }}>{profile.initials}</div>}
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.userId}</div>
-                    <div className="num-mono" style={{ fontSize: 20, color: accent, fontWeight: 600 }}>{pct}%</div>
+                    <span className="label-mono" style={{ fontSize: 20, color: accent, minWidth: 24 }}>#{i + 1}</span>
+                    {profile && <div style={{ width: 30, height: 30, borderRadius: '50%', background: `linear-gradient(135deg, ${profile.color1}, ${profile.color2})`, display: 'grid', placeItems: 'center', color: '#04070d', fontSize: 14, fontWeight: 600 }}>{profile.initials}</div>}
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.userId}</div>
+                    <div className="num-mono" style={{ fontSize: 25, color: accent, fontWeight: 600 }}>{pct}%</div>
                   </div>
                   <div style={{ height: 6, borderRadius: 3, background: 'rgba(0,0,0,0.4)', overflow: 'hidden', marginTop: 8 }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: i === 0 ? `linear-gradient(90deg, ${accent}88, ${accent})` : 'rgba(125,200,255,0.5)', transition: 'width 600ms cubic-bezier(.2,.8,.2,1)' }}/>
@@ -1021,22 +1021,22 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
         {/* CARD 3 — Per-model rankings */}
         {result.speakerModelMatches?.length > 0 && (
           <div className="biovoice-rise" style={{ ...cardBase, width: 'min(540px, 88vw)', animationDelay: '180ms' }}>
-            <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL RANKINGS</div>
+            <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginBottom: 10, letterSpacing: '0.2em' }}>PER-MODEL RANKINGS</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
               {result.speakerModelMatches.map((group) => (
                 <div key={group.modelKey} style={{ padding: '12px 14px', borderRadius: 12, background: group.drivesDecision ? 'rgba(126,240,255,0.06)' : 'rgba(125,200,255,0.03)', border: `1px solid ${group.drivesDecision ? 'rgba(126,240,255,0.3)' : 'rgba(125,200,255,0.14)'}` }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{modelLabel(group.modelKey)}</div>
-                    <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)' }}>{group.drivesDecision ? 'ACTIVE' : 'COMPARISON'}</div>
+                    <div style={{ fontSize: 18, fontWeight: 500 }}>{modelLabel(group.modelKey)}</div>
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)' }}>{group.drivesDecision ? 'ACTIVE' : 'COMPARISON'}</div>
                   </div>
                   <div style={{ display: 'grid', gap: 6 }}>
                     {group.matches.slice(0, 3).map((match, index) => {
                       const accent = index === 0 ? (group.drivesDecision ? '#7ef0ff' : '#bff4ff') : 'var(--ink-soft)';
                       return (
                         <div key={`${group.modelKey}-${match.userId}`} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '6px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.16)' }}>
-                          <span className="label-mono" style={{ fontSize: 10, color: accent, minWidth: 20 }}>#{index + 1}</span>
-                          <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.userId}</span>
-                          <span className="num-mono" style={{ fontSize: 16, color: accent }}>{(match.similarityScore * 100).toFixed(1)}%</span>
+                          <span className="label-mono" style={{ fontSize: 13, color: accent, minWidth: 20 }}>#{index + 1}</span>
+                          <span style={{ fontSize: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{match.userId}</span>
+                          <span className="num-mono" style={{ fontSize: 20, color: accent }}>{(match.similarityScore * 100).toFixed(1)}%</span>
                         </div>
                       );
                     })}
@@ -1049,22 +1049,22 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
 
         {/* CARD 4 — Verdict */}
         <div className="biovoice-rise" style={{ ...cardBase, width: 'min(420px, 88vw)', animationDelay: '270ms', justifyContent: 'center', gap: 22 }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', letterSpacing: '0.2em' }}>VERDICT</div>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', letterSpacing: '0.2em' }}>VERDICT</div>
           <div>
-            <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>WOULD /VERIFY ACCEPT?</div>
-            <div style={{ fontSize: 56, fontWeight: 700, lineHeight: 1, marginTop: 6, color: result.wouldAcceptTop1 ? 'var(--good)' : 'var(--bad)' }}>{result.wouldAcceptTop1 ? 'YES' : 'NO'}</div>
+            <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>WOULD /VERIFY ACCEPT?</div>
+            <div style={{ fontSize: 64, fontWeight: 700, lineHeight: 1, marginTop: 6, color: result.wouldAcceptTop1 ? 'var(--good)' : 'var(--bad)' }}>{result.wouldAcceptTop1 ? 'YES' : 'NO'}</div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
-              <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>DEEPFAKE</div>
-              <div className="num-mono" style={{ fontSize: 26, marginTop: 4, color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)' }}>{result.deepfakeScore.toFixed(3)}</div>
-              <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>{result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'} · thr {result.deepfakeThreshold.toFixed(2)}</div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>DEEPFAKE</div>
+              <div className="num-mono" style={{ fontSize: 33, marginTop: 4, color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)' }}>{result.deepfakeScore.toFixed(3)}</div>
+              <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>{result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'} · thr {result.deepfakeThreshold.toFixed(2)}</div>
             </div>
             {result.speakerFusion && (
               <div>
-                <div className="label-mono" style={{ fontSize: 9, color: 'var(--ink-mute)' }}>FUSION VOTE</div>
-                <div className="num-mono" style={{ fontSize: 26, marginTop: 4, color: result.speakerFusion.combinedMatch ? 'var(--good)' : 'var(--warn)' }}>{result.speakerFusion.matchedModels}/{result.speakerFusion.totalModels}</div>
-                <div className="label-mono" style={{ fontSize: 8, color: 'var(--ink-soft)', marginTop: 2 }}>need {result.speakerFusion.majorityRequired} · majority</div>
+                <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>FUSION VOTE</div>
+                <div className="num-mono" style={{ fontSize: 33, marginTop: 4, color: result.speakerFusion.combinedMatch ? 'var(--good)' : 'var(--warn)' }}>{result.speakerFusion.matchedModels}/{result.speakerFusion.totalModels}</div>
+                <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>need {result.speakerFusion.majorityRequired} · majority</div>
               </div>
             )}
           </div>
@@ -1083,7 +1083,7 @@ function ArtifactBar({ name, strength, delay = 0 }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px', alignItems: 'center', gap: 10 }}>
       <div>
-        <div style={{ fontSize: 12 }}>{name}</div>
+        <div style={{ fontSize: 15 }}>{name}</div>
         <div style={{ height: 6, background: 'rgba(125,200,255,0.06)', borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
           <div style={{
             height: '100%', width: `${w * 100}%`,
@@ -1094,7 +1094,7 @@ function ArtifactBar({ name, strength, delay = 0 }) {
           }}></div>
         </div>
       </div>
-      <span className="num-mono" style={{ fontSize: 13, color: '#ff7aa8', textAlign: 'right' }}>{(strength * 100).toFixed(0)}%</span>
+      <span className="num-mono" style={{ fontSize: 16, color: '#ff7aa8', textAlign: 'right' }}>{(strength * 100).toFixed(0)}%</span>
     </div>
   );
 }
@@ -1111,7 +1111,7 @@ function ScanRings() {
         }}></div>
       ))}
       <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'radial-gradient(circle, #ffb24a, transparent)', filter: 'blur(8px)' }}></div>
-      <div style={{ position: 'absolute', fontFamily: 'JetBrains Mono, monospace', fontSize: 10, letterSpacing: '0.2em', color: '#ffb24a' }}>ANALYZING</div>
+      <div style={{ position: 'absolute', fontFamily: 'JetBrains Mono, monospace', fontSize: 13, letterSpacing: '0.2em', color: '#ffb24a' }}>ANALYZING</div>
     </div>
   );
 }
@@ -1119,7 +1119,7 @@ function ScanRings() {
 function Field({ label, children }) {
   return (
     <div>
-      <div className="label-mono" style={{ fontSize: 9, marginBottom: 8 }}>{label}</div>
+      <div className="label-mono" style={{ fontSize: 11, marginBottom: 8 }}>{label}</div>
       {children}
     </div>
   );
@@ -1238,26 +1238,26 @@ function LogsScreen({ profiles }) {
         <div style={{ maxWidth: 1180, margin: '0 auto' }}>
           <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VERIFY · IDENTIFY</div>
-              <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Run logs</div>
-              <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>Every verification and identification, newest first. Click a run to reopen its full result.</div>
+              <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>VERIFY · IDENTIFY</div>
+              <div style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>Run logs</div>
+              <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Every verification and identification, newest first. Click a run to reopen its full result.</div>
             </div>
-            <button onClick={loadLogs} className="btn" style={{ padding: '10px 18px', fontSize: 12, border: '1px solid var(--line-2)', borderRadius: 10, background: 'rgba(125,200,255,0.04)', color: 'var(--ink)', cursor: 'pointer' }}>↻ REFRESH</button>
+            <button onClick={loadLogs} className="btn" style={{ padding: '10px 18px', fontSize: 15, border: '1px solid var(--line-2)', borderRadius: 10, background: 'rgba(125,200,255,0.04)', color: 'var(--ink)', cursor: 'pointer' }}>↻ REFRESH</button>
           </div>
 
           {error && <div className="panel" style={{ padding: 20, color: '#ff7aa8', marginBottom: 16 }}>Failed to load logs: {error}</div>}
 
           {logs && logs.length === 0 && !error && (
             <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-mute)' }}>
-              <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: 'var(--teal-2)' }}>NO RUNS YET</div>
-              <div style={{ fontSize: 16 }}>Run a verification (Console) or identification (Identify) to populate the log.</div>
+              <div className="label-mono" style={{ fontSize: 13, marginBottom: 8, color: 'var(--teal-2)' }}>NO RUNS YET</div>
+              <div style={{ fontSize: 20 }}>Run a verification (Console) or identification (Identify) to populate the log.</div>
             </div>
           )}
 
           {logs && logs.length > 0 && (
             <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
               {/* Header row */}
-              <div className="label-mono biovoice-log-row" style={{ display: 'grid', gridTemplateColumns: '96px 86px minmax(0,1fr) 110px 86px minmax(0,160px)', gap: 12, padding: '12px 18px', fontSize: 9, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line-2)', letterSpacing: '0.12em' }}>
+              <div className="label-mono biovoice-log-row" style={{ display: 'grid', gridTemplateColumns: '96px 86px minmax(0,1fr) 110px 86px minmax(0,160px)', gap: 12, padding: '12px 18px', fontSize: 11, color: 'var(--ink-soft)', borderBottom: '1px solid var(--line-2)', letterSpacing: '0.12em' }}>
                 <span>WHEN</span><span>TYPE</span><span>SUBJECT</span><span>DECISION</span><span>SCORE</span><span>MODELS</span>
               </div>
               {logs.map((e, i) => {
@@ -1279,12 +1279,12 @@ function LogsScreen({ profiles }) {
                     onMouseEnter={(ev) => (ev.currentTarget.style.background = 'rgba(126,240,255,0.06)')}
                     onMouseLeave={(ev) => (ev.currentTarget.style.background = i % 2 ? 'rgba(125,200,255,0.02)' : 'transparent')}
                   >
-                    <span className="num-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>{fmtTime(e.createdAt)}</span>
-                    <span className="label-mono" style={{ fontSize: 9, color: e.kind === 'verify' ? '#7ef0ff' : '#b27bff', border: `1px solid ${e.kind === 'verify' ? 'rgba(126,240,255,0.4)' : 'rgba(178,123,255,0.4)'}`, borderRadius: 6, padding: '3px 7px', textAlign: 'center', letterSpacing: '0.08em' }}>{e.kind === 'verify' ? 'VERIFY' : 'IDENTIFY'}</span>
-                    <span style={{ fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.label}</span>
-                    <span className="label-mono" style={{ fontSize: 10, color: tone, letterSpacing: '0.06em' }}>{e.decision}</span>
-                    <span className="num-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>{(e.score * 100).toFixed(1)}%</span>
-                    <span className="label-mono" style={{ fontSize: 9, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span className="num-mono" style={{ fontSize: 14, color: 'var(--ink-mute)' }}>{fmtTime(e.createdAt)}</span>
+                    <span className="label-mono" style={{ fontSize: 11, color: e.kind === 'verify' ? '#7ef0ff' : '#b27bff', border: `1px solid ${e.kind === 'verify' ? 'rgba(126,240,255,0.4)' : 'rgba(178,123,255,0.4)'}`, borderRadius: 6, padding: '3px 7px', textAlign: 'center', letterSpacing: '0.08em' }}>{e.kind === 'verify' ? 'VERIFY' : 'IDENTIFY'}</span>
+                    <span style={{ fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.label}</span>
+                    <span className="label-mono" style={{ fontSize: 13, color: tone, letterSpacing: '0.06em' }}>{e.decision}</span>
+                    <span className="num-mono" style={{ fontSize: 18, color: 'var(--teal-2)' }}>{(e.score * 100).toFixed(1)}%</span>
+                    <span className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {e.models.map((m) => MODEL_SHORT[m] ?? m).join(' · ')}{e.hasAudio ? '' : ' · no audio'}
                     </span>
                   </button>
@@ -1384,19 +1384,19 @@ function UserSettingsPage() {
 
       <div className="biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
         <div style={{ maxWidth: 1180, margin: '0 auto', paddingBottom: 40 }}>
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>ENGINE · LIVE</div>
-          <div style={{ fontSize: 40, fontWeight: 200, marginTop: 6, marginBottom: 4 }}>Settings</div>
-          <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginBottom: 8 }}>
+          <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>ENGINE · LIVE</div>
+          <div style={{ fontSize: 48, fontWeight: 200, marginTop: 6, marginBottom: 4 }}>Settings</div>
+          <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginBottom: 8 }}>
             Decision thresholds and model participation apply to the running backend immediately and persist across restarts.
           </div>
-          {err && <div className="label-mono" style={{ fontSize: 11, color: '#ff7aa8', marginBottom: 18 }}>⚠ {err}</div>}
+          {err && <div className="label-mono" style={{ fontSize: 14, color: '#ff7aa8', marginBottom: 18 }}>⚠ {err}</div>}
           <div style={{ marginBottom: 24 }}><DegradedBanner provenance={cfg.provenance} variant="compact"/></div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 32 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {['Detection', 'Per-model', 'Models', 'Engine'].map((s, i) => (
                 <a key={s} href={`#sec-${i}`}
-                  style={{ padding: '10px 14px', borderRadius: 10, color: 'var(--ink-mute)', textDecoration: 'none', fontSize: 13, background: 'transparent', cursor: 'pointer', transition: 'background 180ms, color 180ms' }}
+                  style={{ padding: '10px 14px', borderRadius: 10, color: 'var(--ink-mute)', textDecoration: 'none', fontSize: 16, background: 'transparent', cursor: 'pointer', transition: 'background 180ms, color 180ms' }}
                   onMouseEnter={e => { e.target.style.background = 'rgba(125,200,255,0.06)'; e.target.style.color = '#7ef0ff'; }}
                   onMouseLeave={e => { e.target.style.background = 'transparent'; e.target.style.color = 'var(--ink-mute)'; }}
                 >{s}</a>
@@ -1454,8 +1454,8 @@ function UserSettingsPage() {
 function SectionCard({ id, title, desc, children }) {
   return (
     <div id={id} className="panel" style={{ padding: 26 }}>
-      <div style={{ fontSize: 18, fontWeight: 400 }}>{title}</div>
-      {desc && <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 4, marginBottom: 18 }}>{desc}</div>}
+      <div style={{ fontSize: 23, fontWeight: 400 }}>{title}</div>
+      {desc && <div style={{ fontSize: 15, color: 'var(--ink-mute)', marginTop: 4, marginBottom: 18 }}>{desc}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{children}</div>
     </div>
   );
@@ -1466,14 +1466,14 @@ function SliderRow({ label, value, min, max, step, onChange, onCommit, unit = ''
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px 70px', alignItems: 'center', gap: 14, padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
       <div>
-        <div style={{ fontSize: 13 }}>{label}</div>
-        {hint && <div className="label-mono" style={{ fontSize: 9, marginTop: 2 }}>{hint}</div>}
+        <div style={{ fontSize: 16 }}>{label}</div>
+        {hint && <div className="label-mono" style={{ fontSize: 11, marginTop: 2 }}>{hint}</div>}
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
         onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit}
         style={{ accentColor: '#7ef0ff', width: '100%' }}/>
-      <span className="num-mono" style={{ fontSize: 16, color: '#7ef0ff', textAlign: 'right' }}>
+      <span className="num-mono" style={{ fontSize: 20, color: '#7ef0ff', textAlign: 'right' }}>
         {value.toFixed(2)}{unit}
       </span>
     </div>
@@ -1484,8 +1484,8 @@ function ToggleRow({ label, sub, value, onChange, disabled = false }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)', gap: 14, opacity: disabled ? 0.5 : 1 }}>
       <div>
-        <div style={{ fontSize: 13 }}>{label}</div>
-        {sub && <div className="label-mono" style={{ fontSize: 9, marginTop: 2 }}>{sub}</div>}
+        <div style={{ fontSize: 16 }}>{label}</div>
+        {sub && <div className="label-mono" style={{ fontSize: 11, marginTop: 2 }}>{sub}</div>}
       </div>
       <button onClick={() => !disabled && onChange(!value)} disabled={disabled}
         title={disabled ? 'Model not loaded on this server' : undefined}
@@ -1510,11 +1510,11 @@ function ToggleRow({ label, sub, value, onChange, disabled = false }) {
 function NumberRow({ label, value, min, max, step, onChange }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-      <div style={{ fontSize: 13 }}>{label}</div>
+      <div style={{ fontSize: 16 }}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button onClick={() => onChange(Math.max(min, value - step))}
           style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}>−</button>
-        <span className="num-mono" style={{ width: 50, textAlign: 'center', fontSize: 16, color: '#7ef0ff' }}>{value}</span>
+        <span className="num-mono" style={{ width: 50, textAlign: 'center', fontSize: 20, color: '#7ef0ff' }}>{value}</span>
         <button onClick={() => onChange(Math.min(max, value + step))}
           style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--line-2)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}>+</button>
       </div>
@@ -1525,12 +1525,12 @@ function NumberRow({ label, value, min, max, step, onChange }) {
 function SelectRow({ label, value, onChange, options }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-      <div style={{ fontSize: 13 }}>{label}</div>
+      <div style={{ fontSize: 16 }}>{label}</div>
       <select value={value} onChange={e => onChange(e.target.value)}
         style={{
           background: 'rgba(125,200,255,0.04)', color: 'var(--ink)',
           border: '1px solid var(--line-2)', borderRadius: 8,
-          padding: '8px 12px', fontFamily: 'Sora, sans-serif', fontSize: 13,
+          padding: '8px 12px', fontFamily: 'Sora, sans-serif', fontSize: 16,
         }}>
         {options.map(o => <option key={o} value={o} style={{ background: '#0a1422' }}>{o}</option>)}
       </select>
@@ -1541,8 +1541,8 @@ function SelectRow({ label, value, onChange, options }) {
 function KV({ k, v }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-      <span className="label-mono" style={{ fontSize: 10 }}>{k}</span>
-      <span className="num-mono" style={{ fontSize: 12, color: 'var(--ink)' }}>{v}</span>
+      <span className="label-mono" style={{ fontSize: 13 }}>{k}</span>
+      <span className="num-mono" style={{ fontSize: 15, color: 'var(--ink)' }}>{v}</span>
     </div>
   );
 }
@@ -1583,11 +1583,11 @@ function ProfilesPage({ profiles, audio }) {
       <div className="biovoice-page-content biovoice-scroll-page" style={{ position: 'absolute', inset: 0, padding: '150px 56px 110px 124px', overflow: 'auto', zIndex: 2 }}>
         <div className="biovoice-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 28 }}>
           <div>
-            <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
-            <div style={{ fontSize: 40, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
-            <div style={{ fontSize: 14, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
+            <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)' }}>VOICE PROFILES</div>
+            <div style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
+            <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
           </div>
-          <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 13 }}
+          <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 16 }}
                   onClick={() => setShowEnroll(true)}>
             + &nbsp;ENROLL NEW
           </button>
@@ -1595,9 +1595,9 @@ function ProfilesPage({ profiles, audio }) {
 
         {profiles.length === 0 ? (
           <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-mute)' }}>
-            <div className="label-mono" style={{ fontSize: 10, marginBottom: 8, color: 'var(--teal-2)' }}>NO PROFILES YET</div>
-            <div style={{ fontSize: 16, marginBottom: 16 }}>Enrol your first speaker to get started.</div>
-            <button className="btn btn-primary" onClick={() => setShowEnroll(true)} style={{ padding: '10px 20px', fontSize: 13 }}>
+            <div className="label-mono" style={{ fontSize: 13, marginBottom: 8, color: 'var(--teal-2)' }}>NO PROFILES YET</div>
+            <div style={{ fontSize: 20, marginBottom: 16 }}>Enrol your first speaker to get started.</div>
+            <button className="btn btn-primary" onClick={() => setShowEnroll(true)} style={{ padding: '10px 20px', fontSize: 16 }}>
               + &nbsp;ENROLL FIRST PROFILE
             </button>
           </div>
@@ -1630,7 +1630,7 @@ function ProfilesPage({ profiles, audio }) {
                     background: 'rgba(255,85,119,0.10)', color: '#ff5577',
                     border: '1px solid rgba(255,85,119,0.30)',
                     cursor: deleting === p.userId ? 'wait' : 'pointer',
-                    fontSize: 14, lineHeight: 1, padding: 0,
+                    fontSize: 18, lineHeight: 1, padding: 0,
                   }}>
                   ×
                 </button>
@@ -1639,16 +1639,16 @@ function ProfilesPage({ profiles, audio }) {
                     width: 56, height: 56, borderRadius: '50%',
                     background: `linear-gradient(135deg, ${p.color1}, ${p.color2})`,
                     display: 'grid', placeItems: 'center',
-                    color: '#04070d', fontWeight: 600, fontSize: 18,
+                    color: '#04070d', fontWeight: 600, fontSize: 23,
                     boxShadow: `0 0 20px ${p.color1}66`,
                   }}>{p.initials}</div>
                   <div>
-                    <div style={{ fontSize: 18 }}>{p.name}</div>
-                    <div className="label-mono" style={{ fontSize: 10 }}>{p.id}</div>
+                    <div style={{ fontSize: 23 }}>{p.name}</div>
+                    <div className="label-mono" style={{ fontSize: 13 }}>{p.id}</div>
                   </div>
                 </div>
                 <MiniWave color={p.color1} idx={i}/>
-                <div className="biovoice-numerals biovoice-profile-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 11 }}>
+                <div className="biovoice-numerals biovoice-profile-stats" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 16, fontSize: 14 }}>
                   <Stat2 k="VERIFIED" v={verifyCounts[p.userId] ?? 0}/>
                   <Stat2 k="ENROLLED" v={`${daysSince(p.enrolledAt)}d`}/>
                   <Stat2 k="SAMPLES"  v={`${p.sampleCount}/3`}/>
@@ -1667,8 +1667,8 @@ function ProfilesPage({ profiles, audio }) {
 function Stat2({ k, v }) {
   return (
     <div>
-      <div className="label-mono" style={{ fontSize: 8 }}>{k}</div>
-      <div className="num-mono" style={{ fontSize: 14, color: 'var(--teal-2)', marginTop: 2 }}>{v}</div>
+      <div className="label-mono" style={{ fontSize: 10 }}>{k}</div>
+      <div className="num-mono" style={{ fontSize: 18, color: 'var(--teal-2)', marginTop: 2 }}>{v}</div>
     </div>
   );
 }

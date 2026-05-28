@@ -122,7 +122,7 @@ body {
   }
 
   .biovoice-sidebar-item span:last-child {
-    font-size: 7px !important;
+    font-size: 9px !important;
     letter-spacing: 0.12em !important;
   }
 
@@ -251,7 +251,7 @@ body {
   }
 
   .biovoice-sidebar-item span:last-child {
-    font-size: 7px !important;
+    font-size: 9px !important;
   }
 
   .biovoice-sidebar-item > span:first-child {
@@ -358,7 +358,7 @@ body {
   }
 
   .biovoice-cosine-viz .num-mono {
-    font-size: 28px !important;
+    font-size: 35px !important;
   }
 
   .biovoice-cosine-viz .label-mono {
@@ -376,10 +376,10 @@ body {
 .biovoice-identify-cta:hover { transform: translateY(-2px); filter: brightness(1.08); }
 
 @media (max-width: 1280px) {
-  .biovoice-identify-hero { font-size: 44px !important; }
+  .biovoice-identify-hero { font-size: 52px !important; }
 }
 @media (max-width: 960px) {
-  .biovoice-identify-hero { font-size: 34px !important; }
+  .biovoice-identify-hero { font-size: 42px !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
