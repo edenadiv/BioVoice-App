@@ -115,15 +115,15 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "lab.generate": {
     title: "Clone generation",
     body: [
-      "Generates synthetic speech for a chosen target voice and lets you score it against the live detector — a controlled way to probe how the system holds up against spoofing.",
-      "With a true voice-cloning engine the clone is conditioned on the target's enrolled samples; other engines speak in their own voice.",
+      "Clones the chosen target's voice from their enrolled samples (or an uploaded reference WAV) and lets you score it against the live detector — a controlled way to probe how the system holds up against spoofing.",
+      "The clone is conditioned on the target's reference audio, so it mimics that specific speaker rather than reading the text in a generic voice.",
     ],
   },
   "lab.engines": {
-    title: "TTS engines",
+    title: "Voice-cloning engines",
     body: [
-      "The text-to-speech backends available on this server. Local engines (e.g. macOS say, eSpeak, XTTS) run offline; cloud engines (Edge TTS, gTTS) require network access.",
-      "Only a voice-cloning engine (XTTS) can actually mimic a specific enrolled target; the rest are generic voices.",
+      "The voice-cloning backends available on this server. Both run locally (offline): F5-TTS (flow-matching, fast + natural) and Coqui XTTS-v2 (autoregressive, multilingual).",
+      "Each conditions on the target's reference WAV to mimic that specific enrolled speaker. Generic non-cloning TTS was removed — it never resembles the target, so it added nothing to a detection workflow.",
     ],
   },
   "lab.batch": {

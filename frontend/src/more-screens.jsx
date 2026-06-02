@@ -185,8 +185,8 @@ function DeepfakeLab({ audio, profiles }) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       let friendly = msg;
-      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
-        friendly = 'Spoof generation requires XTTS-v2. Install it on the backend (see backend/README.md §XTTS spoof generation).';
+      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('f5') || msg.toLowerCase().includes('cloning') || msg.toLowerCase().includes('tts')) {
+        friendly = 'Spoof generation requires a voice-cloning engine (F5-TTS or XTTS-v2). Install it on the backend (see backend/README.md §voice-cloning spoof generation).';
       } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol') || msg.includes('404')) {
         friendly = `No reference sample for "${target}" — enrol them first via the Profiles page.`;
       }
@@ -204,7 +204,6 @@ function DeepfakeLab({ audio, profiles }) {
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchResult, setBatchResult] = useState(null);
   const [batchError, setBatchError] = useState(null);
-  const selectedEngineClones = engineId === 'xtts';
 
   const generateBatch = useCallback(async () => {
     if (!target) { setBatchError('Enrol at least one profile first.'); return; }
@@ -226,8 +225,8 @@ function DeepfakeLab({ audio, profiles }) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       let friendly = msg;
-      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('tts')) {
-        friendly = 'Batch forge needs a voice-cloning TTS engine (XTTS-v2) on the backend.';
+      if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('f5') || msg.toLowerCase().includes('cloning') || msg.toLowerCase().includes('tts')) {
+        friendly = 'Batch forge needs a voice-cloning engine (F5-TTS or XTTS-v2) on the backend.';
       } else if (msg.includes('404') || msg.toLowerCase().includes('enrol')) {
         friendly = `"${target}" isn't enrolled — add them in Profiles first.`;
       }
@@ -251,7 +250,7 @@ function DeepfakeLab({ audio, profiles }) {
 
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
-    { label: 'Cloning voice timbre', sub: 'XTTS-v2 → 24 kHz waveform' },
+    { label: 'Cloning voice timbre', sub: 'Voice-cloning engine → 24 kHz waveform' },
     { label: 'Running BioVoice detector', sub: 'AASIST + F4 sub-classifier' },
   ];
 
@@ -319,7 +318,7 @@ function DeepfakeLab({ audio, profiles }) {
                 </div>
               ) : enginesPayload.engines.filter((e) => e.available).length === 0 ? (
                 <div className="label-mono" style={{ fontSize: 13, color: 'var(--warn)' }}>
-                  No TTS engines available on the backend. Install macOS `say` / espeak-ng, or expose internet for edge-tts / gTTS.
+                  No voice-cloning engine available on the backend. Install F5-TTS or XTTS-v2 (see backend/README.md §voice-cloning spoof generation).
                 </div>
               ) : (
                 <div className="biovoice-engine-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
@@ -363,7 +362,7 @@ function DeepfakeLab({ audio, profiles }) {
                         <div className="label-mono" style={{ fontSize: 10, marginTop: 6, color: 'var(--ink-soft)' }}>
                           {disabled
                             ? 'UNAVAILABLE ON THIS BACKEND'
-                            : `${e.voices.length} VOICE${e.voices.length === 1 ? '' : 'S'}${e.id === 'xtts' ? ' · USES REFERENCE WAV' : ''}`}
+                            : 'CLONES FROM REFERENCE WAV'}
                         </div>
                       </button>
                     );
@@ -372,7 +371,7 @@ function DeepfakeLab({ audio, profiles }) {
               )}
             </Field>
 
-            {selectedEngine && selectedEngine.voices.length > 0 && (
+            {selectedEngine && selectedEngine.voices.length > 1 && (
               <Field label={`VOICE  ·  ${selectedEngine.voices.length} AVAILABLE  ·  ${selectedEngine.requiresNetwork ? 'CLOUD' : 'LOCAL'}`}>
                 <select
                   value={voiceId}
@@ -437,11 +436,9 @@ function DeepfakeLab({ audio, profiles }) {
                   style={{ width: '100%', padding: '10px 14px', background: 'rgba(125,200,255,0.04)',
                     border: '1px solid var(--line-2)', borderRadius: 10, color: 'var(--ink)',
                     fontFamily: 'JetBrains Mono, monospace', fontSize: 15, outline: 'none' }}/>
-                {!selectedEngineClones && (
-                  <div className="label-mono" style={{ fontSize: 11, color: 'var(--warn)', marginTop: 6 }}>
-                    {`"${selectedEngine?.label ?? engineId}" speaks in its own voice — pick XTTS so clones can match the target.`}
-                  </div>
-                )}
+                <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 6 }}>
+                  Every candidate is cloned from the target's reference voice, then kept only if it resembles them.
+                </div>
               </Field>
             )}
 
