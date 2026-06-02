@@ -527,9 +527,9 @@ async def generate_spoof_batch(
 ) -> SpoofBatchResponse:
     """Forge many clones of an enrolled target voice and keep only the
     candidates whose speaker-similarity to the target clears the
-    threshold. XTTS conditions on the target's enrolled reference
-    samples, so no uploaded reference is required — generation is driven
-    purely by `target_user_id` + text variations."""
+    threshold. The cloning engine conditions on the target's enrolled
+    reference samples, so no uploaded reference is required — generation
+    is driven purely by `target_user_id` + text variations."""
     speaker = verification.store.get_speaker(req.target_user_id)
     if speaker is None or not speaker.embedding:
         raise HTTPException(
@@ -549,12 +549,9 @@ async def generate_spoof_batch(
         else verification.similarity_threshold
     )
 
-    # Default to a voice-cloning engine when the caller didn't pick one —
-    # non-cloning engines speak in their own voice and never match the target.
-    chosen_engine = req.engine
-    if chosen_engine is None:
-        available = {e.id for e in spoof.list_engines() if e.available}
-        chosen_engine = "xtts" if "xtts" in available else spoof.default_engine_id()
+    # Every engine is a voice-cloning engine now, so the default pick
+    # (first available in priority order) already conditions on the target.
+    chosen_engine = req.engine or spoof.default_engine_id()
 
     candidates: list[SpoofBatchCandidate] = []
     generated = 0

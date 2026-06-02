@@ -133,6 +133,8 @@ class Settings:
     xtts_model_path: Path = _REPO_ROOT / "XTTS-v2"
     xtts_default_language: str = "en"
     xtts_output_sample_rate: int = 24000
+    # F5-TTS checkpoint id (downloaded from Hugging Face on first load).
+    f5_model_name: str = "F5TTS_v1_Base"
 
 
 settings = Settings()
