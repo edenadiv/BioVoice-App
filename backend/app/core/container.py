@@ -99,6 +99,7 @@ def build_container(settings: Settings) -> AppContainer:
         output_directory=settings.generated_samples_path,
         default_language=settings.xtts_default_language,
         output_sample_rate=settings.xtts_output_sample_rate,
+        f5_model_name=settings.f5_model_name,
     )
     return AppContainer(
         settings=settings,

@@ -1,15 +1,13 @@
-"""T5 — `GET /spoof/engines` picker route + engine-level synth contract.
+"""`GET /spoof/engines` picker route + cloning-engine contract.
 
-Each cloud engine (edge, gtts) has its own auto-skip path so the suite
-stays hermetic by default. Run with `BIOVOICE_TEST_CLOUD_TTS=1` to hit
-the real Microsoft / Google endpoints from a developer box.
+v1.2 dropped the generic TTS engines (say / espeak / edge / gtts) — they
+spoke in a stranger's voice and never matched the enrolled target. Only
+voice-cloning engines remain: F5-TTS and XTTS-v2. Both condition on a
+reference WAV and are unavailable in CI (no model weights / packages),
+so the route tests exercise the picker shape + the failure paths.
 """
 
 from __future__ import annotations
-
-import os
-from io import BytesIO
-from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -17,10 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.api import dependencies, routes
 from app.services.spoof import (
-    EdgeTtsEngine,
-    EspeakEngine,
-    GttsEngine,
-    SayEngine,
+    F5TtsEngine,
     SpoofGenerationService,
     XttsEngine,
 )
@@ -51,22 +46,21 @@ def client(spoof_service: SpoofGenerationService) -> TestClient:
 # ---------------------------------------------------------------------
 
 
-def test_engines_route_returns_all_five_known_engines(client: TestClient):
+def test_engines_route_returns_only_cloning_engines(client: TestClient):
     response = client.get("/spoof/engines")
     assert response.status_code == 200
     body = response.json()
     ids = [e["id"] for e in body["engines"]]
-    # v1.1.1 ships these five engines in this priority order. Anything
-    # else in the catalogue is a regression that needs explicit attention.
-    assert ids == ["say", "edge", "gtts", "espeak", "xtts"]
+    # v1.2 ships exactly these two cloning engines, F5 first (priority).
+    assert ids == ["f5", "xtts"]
 
 
 def test_engines_route_default_is_an_available_engine(client: TestClient):
     body = client.get("/spoof/engines").json()
     default = body["default_engine"]
     if default is None:
-        # No engines available on this host — every entry must reflect
-        # `available: False`. Acceptable on a stripped-down CI runner.
+        # No cloning engine installed on this host — every entry must
+        # reflect `available: False`. The default state on a CI runner.
         assert all(not e["available"] for e in body["engines"])
     else:
         match = next(e for e in body["engines"] if e["id"] == default)
@@ -81,61 +75,15 @@ def test_engine_descriptor_shape_is_stable(client: TestClient):
             "available", "voices", "default_voice",
         }
         assert isinstance(engine["available"], bool)
-        assert isinstance(engine["requires_network"], bool)
+        # Cloning engines run locally — never network-gated.
+        assert engine["requires_network"] is False
         for voice in engine["voices"]:
             assert set(voice.keys()) == {"id", "label", "language"}
 
 
 # ---------------------------------------------------------------------
-# Engine availability + voice counts
+# Engine availability — both are unavailable without weights/packages
 # ---------------------------------------------------------------------
-
-
-def test_say_engine_lists_voices_when_binary_present():
-    engine = SayEngine()
-    if not engine.is_available():
-        pytest.skip("`say` binary not present (non-Mac host)")
-    voices = engine.list_voices()
-    assert len(voices) > 0
-    # macOS bundles standard voices like Alex, Samantha, Daniel.
-    ids = {v.id for v in voices}
-    assert any(id_ in ids for id_ in ("Alex", "Samantha", "Daniel"))
-    assert engine.default_voice() in ids
-
-
-def test_espeak_engine_lists_languages_when_binary_present():
-    engine = EspeakEngine()
-    if not engine.is_available():
-        pytest.skip("espeak-ng / espeak binary not present")
-    voices = engine.list_voices()
-    assert len(voices) > 0
-    assert engine.default_voice() == "en"
-
-
-def test_edge_engine_returns_full_voice_catalogue():
-    engine = EdgeTtsEngine()
-    if not engine.is_available():
-        pytest.skip("edge-tts package not installed")
-    voices = engine.list_voices()
-    # U1 — full catalogue fetched from Microsoft. 50+ entries on any
-    # reachable network; the fallback list has 5 entries.
-    assert len(voices) >= 5
-    ids = {v.id for v in voices}
-    # Default voice is always present — true for both the live catalogue
-    # and the offline fallback.
-    assert "en-US-AriaNeural" in ids
-    assert engine.default_voice() == "en-US-AriaNeural"
-
-
-def test_gtts_engine_lists_languages_with_hebrew_quirk():
-    engine = GttsEngine()
-    if not engine.is_available():
-        pytest.skip("gTTS package not installed")
-    voices = engine.list_voices()
-    ids = {v.id for v in voices}
-    # gTTS uses the legacy ISO code "iw" for Hebrew, NOT "he".
-    assert "iw" in ids and "he" not in ids
-    assert engine.default_voice() == "en"
 
 
 def test_xtts_engine_unavailable_when_checkpoint_missing(tmp_path):
@@ -145,12 +93,23 @@ def test_xtts_engine_unavailable_when_checkpoint_missing(tmp_path):
     assert engine.list_voices() == []
 
 
+def test_f5_engine_voice_contract_tracks_availability():
+    engine = F5TtsEngine()
+    if engine.is_available():
+        # Package installed — exposes the single `enrolled` pseudo-voice.
+        assert engine.default_voice() == "enrolled"
+        assert [v.id for v in engine.list_voices()] == ["enrolled"]
+    else:
+        assert engine.default_voice() is None
+        assert engine.list_voices() == []
+
+
 # ---------------------------------------------------------------------
 # POST /spoof routes through the chosen engine
 # ---------------------------------------------------------------------
 
 
-def test_spoof_404s_when_engine_id_is_unknown(client: TestClient):
+def test_spoof_400s_when_engine_id_is_unknown(client: TestClient):
     response = client.post(
         "/spoof",
         data={
@@ -159,14 +118,14 @@ def test_spoof_404s_when_engine_id_is_unknown(client: TestClient):
             "engine": "not-a-real-engine",
         },
     )
-    # Unknown engine is a 400 (ValueError → "Unknown TTS engine").
+    # Unknown engine is a 400 (ValueError → "Unknown cloning engine").
     assert response.status_code == 400
-    assert "Unknown TTS engine" in response.json()["detail"]
+    assert "Unknown cloning engine" in response.json()["detail"]
 
 
 def test_spoof_503s_when_engine_is_known_but_unavailable(client: TestClient):
-    # XTTS is registered but the test fixture's checkpoint dir is empty,
-    # so it's not available. The route should map that to 503.
+    # XTTS is registered but the fixture's checkpoint dir is empty, so
+    # it's not available. The route should map that to 503.
     response = client.post(
         "/spoof",
         data={
@@ -176,61 +135,3 @@ def test_spoof_503s_when_engine_is_known_but_unavailable(client: TestClient):
         },
     )
     assert response.status_code == 503
-
-
-def test_spoof_returns_engine_and_voice_headers(client: TestClient):
-    if not SayEngine().is_available():
-        pytest.skip("`say` not available on this host")
-    response = client.post(
-        "/spoof",
-        data={
-            "target_user_id": "alice",
-            "text": "Two-factor authentication compromised.",
-            "engine": "say",
-            "voice": "Samantha",
-        },
-    )
-    assert response.status_code == 200
-    assert response.headers.get("X-Spoof-Engine") == "say"
-    assert response.headers.get("X-Spoof-Voice") == "Samantha"
-    assert len(response.content) > 1000  # real WAV bytes
-    assert response.content[:4] == b"RIFF"  # WAV magic
-
-
-# ---------------------------------------------------------------------
-# Live cloud smoke tests (skipped by default; gated by env flag)
-# ---------------------------------------------------------------------
-
-
-def _cloud_tts_enabled() -> bool:
-    return os.environ.get("BIOVOICE_TEST_CLOUD_TTS", "").lower() in {"1", "true", "yes"}
-
-
-@pytest.mark.skipif(not _cloud_tts_enabled(), reason="cloud TTS gated; set BIOVOICE_TEST_CLOUD_TTS=1")
-def test_edge_engine_synthesizes_real_audio():
-    engine = EdgeTtsEngine()
-    if not engine.is_available():
-        pytest.skip("edge-tts not installed")
-    audio = engine.synthesize(
-        text="Verification challenge initiated.",
-        voice_id="en-US-AriaNeural",
-        language="en",
-        target_sample_rate=16000,
-    )
-    assert len(audio) > 1000
-    assert audio[:4] == b"RIFF"
-
-
-@pytest.mark.skipif(not _cloud_tts_enabled(), reason="cloud TTS gated; set BIOVOICE_TEST_CLOUD_TTS=1")
-def test_gtts_engine_synthesizes_real_audio():
-    engine = GttsEngine()
-    if not engine.is_available():
-        pytest.skip("gTTS not installed")
-    audio = engine.synthesize(
-        text="Verification challenge initiated.",
-        voice_id="en",
-        language="en",
-        target_sample_rate=16000,
-    )
-    assert len(audio) > 1000
-    assert audio[:4] == b"RIFF"

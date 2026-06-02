@@ -30,17 +30,7 @@ model = [
   "speechbrain>=1.0",
   "packaging>=23",       # speechbrain imports `packaging`; not always pulled transitively
   "soundfile>=0.12",
-  # T1 (v1.1.1) — fast TTS engines for DeepfakeLab. Pure-Python, no
-  # native deps; safe to bake into the standard runtime image so the
-  # operator can pick from multiple synthesisers out of the box.
-  "edge-tts>=6.1",       # Microsoft Edge TTS — neural voices, free, cloud
-  "gTTS>=2.5",           # Google Translate TTS — simple cloud fallback
 ]
-# F1.4 — XTTS spoof generation. Lives behind its own extra because
-# `TTS>=0.22,<0.23` does not resolve cleanly on Python 3.12+ (the
-# upstream package has fallen out of date). Operators install with
-# `pip install -e .[model,spoof]` on a pinned 3.12 venv when the spoof
-# generation route is in scope.
 speaker_models = [
   "onnxruntime>=1.18",
   "huggingface_hub>=0.23",
@@ -48,8 +38,14 @@ speaker_models = [
   "packaging>=23",       # speechbrain imports `packaging`; not always pulled transitively
   "soundfile>=0.12",
 ]
+# Voice-cloning spoof generation for DeepfakeLab. Both engines clone an
+# enrolled target's voice from a reference WAV. Installed with
+# `pip install -e .[model,spoof]`. XTTS also needs its weights pulled via
+# `bash backend/scripts/setup_xtts.sh`; F5 fetches its checkpoints from
+# Hugging Face on first use. TTS pins to <0.23 (upstream is unmaintained).
 spoof = [
-  "TTS>=0.22,<0.23",
+  "f5-tts>=1.1",         # F5-TTS — flow-matching DiT zero-shot voice cloner
+  "TTS>=0.22,<0.23",     # Coqui XTTS-v2 — autoregressive zero-shot cloner
 ]
 # Test runner deps. CI installs `[model,test]` so `pytest` is on PATH +
 # httpx is available for fastapi.testclient. Locally, the dev venv
