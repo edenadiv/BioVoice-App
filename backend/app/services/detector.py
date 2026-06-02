@@ -14,7 +14,7 @@ class DeepfakeDetectorService:
         self.weights_path = Path(weights_path) if weights_path else None
         self.model = None
         self._torch = None
-        self._target_peak = 0.05
+        self._target_peak = 0.95
 
     @property
     def provenance(self) -> str:
@@ -30,6 +30,7 @@ class DeepfakeDetectorService:
 
         try:
             import torch
+
             # G1 — locally vendored under `app/vendor/aasist/` (was a stale
             # `biovoice.core.vendor.aasist` namespace that never resolved).
             from app.vendor.aasist.aasist_model import AASISTModel, AASIST_CONFIG
@@ -40,14 +41,19 @@ class DeepfakeDetectorService:
             return
 
         if self.weights_path is None or not self.weights_path.exists():
-            logger.warning("AASIST weights not found at %s; using heuristic detector", self.weights_path)
+            logger.warning(
+                "AASIST weights not found at %s; using heuristic detector",
+                self.weights_path,
+            )
             self.model = None
             self._torch = torch
             return
 
         logger.info("Loading AASIST weights from %s", self.weights_path)
         model = AASISTModel(AASIST_CONFIG)
-        state_dict = torch.load(str(self.weights_path), map_location=self.device, weights_only=True)
+        state_dict = torch.load(
+            str(self.weights_path), map_location=self.device, weights_only=True
+        )
         model.load_state_dict(state_dict)
         self.model = model.to(self.device).eval()
         self._torch = torch
