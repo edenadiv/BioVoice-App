@@ -251,7 +251,16 @@ class XttsEngine:
                 return self._model, self._config
             import torch
             from TTS.tts.configs.xtts_config import XttsConfig
-            from TTS.tts.models.xtts import Xtts
+            from TTS.tts.models.xtts import Xtts, XttsArgs, XttsAudioConfig
+            from TTS.config.shared_configs import BaseDatasetConfig
+
+            # torch>=2.6 flipped `torch.load(weights_only=...)` to True, which
+            # rejects XTTS's pickled config classes. The Coqui checkpoint is a
+            # trusted local file (pulled from the official HF repo by
+            # scripts/setup_xtts.sh), so allowlist its globals.
+            torch.serialization.add_safe_globals(
+                [XttsConfig, XttsAudioConfig, XttsArgs, BaseDatasetConfig]
+            )
             config_path = self.model_path / "config.json"
             checkpoint_path = self.model_path / "model.pth"
             if not config_path.exists() or not checkpoint_path.exists():
