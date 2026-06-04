@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import math
 from dataclasses import dataclass
 from typing import Callable
 
@@ -11,6 +13,8 @@ import torchaudio
 
 from app.core.config import settings
 from app.schemas import CamSegment, ExplainModelKey, ModelCAM
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 HEATMAP_T = 200
@@ -79,9 +83,14 @@ def _cosine_or_norm(emb: torch.Tensor, centroid: torch.Tensor | None) -> torch.T
 
 
 def _redimnet_adapter(
-    encoder_model: torch.nn.Module, centroid: torch.Tensor | None = None
+    encoder_model: torch.nn.Module,
+    centroid: torch.Tensor | None = None,
+    target_layer: torch.nn.Module | None = None,
 ) -> _AdapterCtx:
-    target_layer = encoder_model.backbone
+    # Default: the backbone output (B, F·C, T) — frequency is folded into the
+    # channel axis there, so the resulting CAM is time-only. Pass an inner 2D
+    # conv layer (see scripts/cam_layer_sweep.py) for a real time–frequency CAM.
+    layer = target_layer if target_layer is not None else encoder_model.backbone
 
     def prep(wav: torch.Tensor) -> torch.Tensor:
         return wav.unsqueeze(0)
@@ -90,7 +99,7 @@ def _redimnet_adapter(
         emb = encoder_model(x)
         return _cosine_or_norm(emb, centroid)
 
-    return _AdapterCtx(encoder_model, target_layer, prep, forward)
+    return _AdapterCtx(encoder_model, layer, prep, forward)
 
 
 def _ecapa_adapter(encoder_model, centroid: torch.Tensor | None = None) -> _AdapterCtx:
@@ -163,11 +172,24 @@ def _resize_and_orient(cam: torch.Tensor) -> torch.Tensor:
     return cam.squeeze(0).squeeze(0).transpose(0, 1)
 
 
-def _extract_segments(
-    cam_tf: torch.Tensor, duration_ms: float, threshold: float
+def _pool_and_mask(cam_tf: torch.Tensor, threshold: float) -> tuple[torch.Tensor, torch.Tensor]:
+    """Collapse the CAM over frequency → a per-time-frame saliency profile,
+    and the boolean above-threshold mask. Single source of truth shared by
+    the salient-segment extraction and the faithfulness masking.
+
+    Pools by MAX over frequency: a time frame is salient if it's hot at *any*
+    frequency. Mean-pooling would wash out a real 2-D CAM (energy sits in a
+    few freq bins, so the per-frame mean never clears the threshold and
+    coverage collapses to 0%). For the tiled backbone CAM, max == mean, so
+    this is a no-op there."""
+    pooled = cam_tf.amax(dim=1)
+    return pooled, pooled > threshold
+
+
+def _segments_from_mask(
+    mask: list[bool], pooled: torch.Tensor, duration_ms: float
 ) -> list[CamSegment]:
-    pooled = cam_tf.mean(dim=1)
-    mask = (pooled > threshold).tolist()
+    """Contiguous above-mask runs as time bands (for display + playback)."""
     segments: list[CamSegment] = []
     T = len(mask)
     if T == 0:
@@ -183,15 +205,16 @@ def _extract_segments(
         while j < T and mask[j]:
             peak = max(peak, float(pooled[j]))
             j += 1
-        segments.append(
-            CamSegment(
-                start_ms=i * frame_ms,
-                end_ms=j * frame_ms,
-                peak=peak,
-            )
-        )
+        segments.append(CamSegment(start_ms=i * frame_ms, end_ms=j * frame_ms, peak=peak))
         i = j
     return segments
+
+
+def _extract_segments(
+    cam_tf: torch.Tensor, duration_ms: float, threshold: float
+) -> list[CamSegment]:
+    pooled, mask_t = _pool_and_mask(cam_tf, threshold)
+    return _segments_from_mask(mask_t.tolist(), pooled, duration_ms)
 
 
 def _build_axes(duration_ms: float) -> tuple[list[float], list[float]]:
@@ -219,19 +242,236 @@ def explain_model(
     )
 
 
+@dataclass(slots=True)
+class CamMasks:
+    """Time-domain masked copies of the input for the faithfulness check.
+
+    `retain` is the audio under the above-threshold Grad-CAM time region;
+    `delete` is its complement. `coverage_pct` is the fraction of the clip
+    kept by `retain`.
+
+    Masking mode matters for the encoder:
+
+    * ``"splice"`` (default) drops the masked samples and concatenates the
+      kept speech — no silence is injected. This is the right choice for
+      ReDimNet / ECAPA, which pool statistics over the WHOLE waveform: zeroing
+      a region turns it into silence that shifts the pooled embedding
+      regardless of content, and biases retain (mostly silence at low
+      coverage) far harder than delete.
+    * ``"zero"`` keeps full length and zeroes the masked region. Faithful to
+      "0 out the rest", but confounded for global-pooling encoders.
+    """
+
+    retain: list[float]
+    delete: list[float]
+    coverage_pct: float
+    threshold: float
+    mode: str = "splice"
+
+
+def _raised_cosine_envelope(
+    mask: torch.Tensor, n_samples: int, fade_samples: int
+) -> torch.Tensor:
+    """Upsample a per-frame 0/1 mask to a sample-rate gain envelope, then
+    smooth every 0↔1 transition with a raised-cosine ramp so the masked
+    waveform has no step discontinuities (clicks) that would themselves
+    perturb the model and confound the faithfulness result."""
+    T = int(mask.numel())
+    if T == 0 or n_samples <= 0:
+        return torch.zeros(max(0, n_samples), dtype=torch.float32)
+    frame_vals = mask.to(torch.float32)
+    # Nearest-neighbour frame → sample expansion.
+    idx = (torch.arange(n_samples) * T // n_samples).clamp(max=T - 1)
+    env = frame_vals[idx].clone()
+    if fade_samples <= 1:
+        return env
+    edges = (env[1:] - env[:-1]).nonzero(as_tuple=False).flatten().tolist()
+    half = fade_samples // 2
+    for e in edges:
+        rising = bool(env[e + 1] > env[e])
+        start = max(0, e - half)
+        end = min(n_samples, e + half + 1)
+        steps = end - start
+        if steps <= 1:
+            continue
+        ramp = 0.5 - 0.5 * torch.cos(torch.linspace(0.0, math.pi, steps))
+        env[start:end] = ramp if rising else (1.0 - ramp)
+    return env
+
+
+def _sample_mask(mask: torch.Tensor, n_samples: int) -> torch.Tensor:
+    """Nearest-neighbour expand a per-frame boolean mask to per-sample."""
+    T = int(mask.numel())
+    if T == 0 or n_samples <= 0:
+        return torch.zeros(max(0, n_samples), dtype=torch.bool)
+    idx = (torch.arange(n_samples) * T // n_samples).clamp(max=T - 1)
+    return mask[idx]
+
+
+def _splice(w: torch.Tensor, keep: torch.Tensor, fade_samples: int) -> list[float]:
+    """Drop the masked samples and concatenate the kept runs, with a short
+    raised-cosine fade on each run's edges so the joins don't click. Returns
+    a (shorter) waveform of only the kept audio — no silence injected."""
+    if not bool(keep.any()):
+        return []
+    wf = w.clone()
+    if fade_samples > 1:
+        boundaries = (keep[1:].int() - keep[:-1].int())
+        starts = (boundaries == 1).nonzero(as_tuple=False).flatten() + 1
+        ends = (boundaries == -1).nonzero(as_tuple=False).flatten() + 1
+        run_starts = ([0] if keep[0] else []) + starts.tolist()
+        run_ends = ends.tolist() + ([keep.numel()] if keep[-1] else [])
+        for s, e in zip(run_starts, run_ends):
+            f = min(fade_samples, (e - s) // 2)
+            if f <= 0:
+                continue
+            ramp = 0.5 - 0.5 * torch.cos(torch.linspace(0.0, math.pi, f))
+            wf[s : s + f] *= ramp
+            wf[e - f : e] *= ramp.flip(0)
+    return wf[keep].tolist()
+
+
+def build_cam_masks(
+    ctx: _AdapterCtx,
+    waveform: list[float],
+    threshold: float,
+    sample_rate: int = SAMPLE_RATE,
+    fade_ms: float = 5.0,
+    mode: str = "splice",
+) -> CamMasks:
+    """Compute the Grad-CAM for `ctx`'s model, then carve the input into
+    retain (salient) and delete (salient-removed) waveforms in the time
+    domain. Frequency is collapsed out — the model consumes raw audio, so a
+    time-domain occlusion keeps real speech going in and avoids the spectral
+    artifacts an STFT-domain mask + ISTFT would inject.
+
+    See `CamMasks` for the ``"splice"`` vs ``"zero"`` trade-off."""
+    cam_src = _compute_cam(ctx, waveform)
+    cam_tf = _resize_and_orient(cam_src)
+    _, mask = _pool_and_mask(cam_tf, threshold)
+    w = torch.tensor(waveform, dtype=torch.float32)
+    fade_samples = int(fade_ms / 1000.0 * sample_rate)
+
+    if mode == "zero":
+        env = _raised_cosine_envelope(mask, w.numel(), fade_samples)
+        retain = (w * env).tolist()
+        delete = (w * (1.0 - env)).tolist()
+    else:
+        keep = _sample_mask(mask, w.numel())
+        retain = _splice(w, keep, fade_samples)
+        delete = _splice(w, ~keep, fade_samples)
+
+    coverage_pct = float(mask.to(torch.float32).mean().item()) * 100.0 if mask.numel() else 0.0
+    return CamMasks(
+        retain=retain, delete=delete, coverage_pct=coverage_pct, threshold=threshold, mode=mode
+    )
+
+
+# -----------------------------------------------------------------------------
+# Fixed-coverage masking (faithfulness panel) — top-k frames + random baseline
+# -----------------------------------------------------------------------------
+
+def _topk_frame_mask(pooled: torch.Tensor, k: int) -> torch.Tensor:
+    """Boolean mask selecting the k highest-saliency time frames."""
+    mask = torch.zeros_like(pooled, dtype=torch.bool)
+    if k > 0 and pooled.numel():
+        mask[torch.topk(pooled, min(k, pooled.numel())).indices] = True
+    return mask
+
+
+def random_frame_mask(n_frames: int, k: int, seed: int) -> torch.Tensor:
+    """A seeded random selection of k frames — the fairness baseline: deleting
+    any k frames hurts a global-pooling speaker encoder a little, so the
+    question is whether the CAM's k frames beat a random k."""
+    import random as _random
+
+    rng = _random.Random(seed)
+    mask = torch.zeros(n_frames, dtype=torch.bool)
+    for i in rng.sample(range(n_frames), min(k, n_frames)):
+        mask[i] = True
+    return mask
+
+
+def splice_by_frame_mask(
+    waveform: torch.Tensor | list[float], frame_mask: torch.Tensor, sample_rate: int, fade_ms: float = 5.0
+) -> tuple[list[float], list[float]]:
+    """Splice retain (kept frames) and delete (complement) from a frame mask."""
+    w = waveform if isinstance(waveform, torch.Tensor) else torch.tensor(waveform, dtype=torch.float32)
+    fade = int(fade_ms / 1000.0 * sample_rate)
+    keep = _sample_mask(frame_mask, w.numel())
+    return _splice(w, keep, fade), _splice(w, ~keep, fade)
+
+
+@dataclass(slots=True)
+class CamTopkMasks:
+    retain: list[float]
+    delete: list[float]
+    segments: list[CamSegment]
+    coverage_pct: float
+    n_frames: int
+    k: int
+
+
+def cam_topk_masks(
+    ctx: _AdapterCtx,
+    waveform: list[float],
+    coverage: float,
+    duration_ms: float,
+    sample_rate: int = SAMPLE_RATE,
+    fade_ms: float = 5.0,
+) -> CamTopkMasks:
+    """Keep the top-`coverage` fraction of frames by Grad-CAM saliency (not a
+    fixed threshold) so every clip/layer keeps the SAME amount — the protocol
+    cam_layer_sweep.py uses, which doesn't swing with clip length the way a
+    threshold does. Splices the kept speech into `retain` (rest → `delete`).
+
+    Pools per-frame saliency by MEAN over frequency (total attention the frame
+    received) — the principled frame-importance for top-k, and what
+    cam_layer_sweep.py validated. The threshold display bands use max pooling,
+    but that's a separate visualisation concern."""
+    cam_tf = _resize_and_orient(_compute_cam(ctx, waveform))
+    pooled = cam_tf.mean(dim=1)
+    T = int(pooled.numel())
+    k = max(1, round(coverage * T))
+    mask = _topk_frame_mask(pooled, k)
+    retain, delete = splice_by_frame_mask(waveform, mask, sample_rate, fade_ms)
+    segments = _segments_from_mask(mask.tolist(), pooled, duration_ms)
+    return CamTopkMasks(
+        retain=retain, delete=delete, segments=segments,
+        coverage_pct=100.0 * k / T if T else 0.0, n_frames=T, k=k,
+    )
+
+
+def resolve_redimnet_layer(encoder_model: torch.nn.Module, name: str | None) -> torch.nn.Module:
+    """Resolve the Grad-CAM target layer from a config name. ``"backbone"`` /
+    empty → the backbone output (time-only). Any other value is a dotted
+    submodule path under the backbone (e.g. ``"stage5.6"``) carrying a real
+    time×frequency map. Unknown names fall back to the backbone with a warning."""
+    backbone = encoder_model.backbone
+    if not name or name == "backbone":
+        return backbone
+    try:
+        return backbone.get_submodule(name)
+    except AttributeError:
+        logger.warning("CAM_REDIMNET_LAYER %r not found on backbone; using backbone output", name)
+        return backbone
+
+
 def build_adapters(
     detector_model: torch.nn.Module | None,
     redimnet_model: torch.nn.Module | None,
     ecapa_model: object | None,
     redimnet_centroid: list[float] | None = None,
     ecapa_centroid: list[float] | None = None,
+    redimnet_layer: str | None = None,
 ) -> dict[ExplainModelKey, _AdapterCtx]:
     out: dict[ExplainModelKey, _AdapterCtx] = {}
     if detector_model is not None:
         out["aasist"] = _aasist_adapter(detector_model)
     if redimnet_model is not None:
         c = torch.tensor(redimnet_centroid, dtype=torch.float32) if redimnet_centroid else None
-        out["redimnet_b5"] = _redimnet_adapter(redimnet_model, c)
+        layer = resolve_redimnet_layer(redimnet_model, redimnet_layer or settings.cam_redimnet_layer)
+        out["redimnet_b5"] = _redimnet_adapter(redimnet_model, c, target_layer=layer)
     if ecapa_model is not None:
         c = torch.tensor(ecapa_centroid, dtype=torch.float32) if ecapa_centroid else None
         out["ecapa_voxceleb"] = _ecapa_adapter(ecapa_model, c)
