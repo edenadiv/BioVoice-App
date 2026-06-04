@@ -262,6 +262,58 @@ class SpeakerModelMatches(BaseModel):
     drives_decision: bool = False
 
 
+# -----------------------------------------------------------------------------
+# Grad-CAM faithfulness — "is the attribution actually what the model used?"
+# -----------------------------------------------------------------------------
+
+CamFaithfulnessVerdict = Literal["faithful", "weak", "unfaithful", "no_salience"]
+
+
+class CamFaithModel(BaseModel):
+    """Faithfulness check for one speaker model's Grad-CAM, against a random
+    baseline (the protocol cam_layer_sweep.py uses — stable run-to-run).
+
+    Every variant keeps the same fixed `coverage_pct` of the clip and is scored
+    by cosine similarity to the *target speaker's centroid* (not rank-vs-all,
+    which is noisy at low coverage).
+
+    * sufficiency = retain(CAM) − retain(random): does the CAM's region carry
+      MORE identity than a random region of equal size?
+    * necessity   = delete(random) − delete(CAM): does removing the CAM's
+      region hurt MORE than removing a random one?
+
+    Both clearing the margin ⇒ `faithful`. Region beats random on one ⇒
+    `weak`. Neither ⇒ `unfaithful` (the CAM is no better than chance)."""
+
+    model_key: SpeakerModelKey
+    target_user_id: str | None = None
+    coverage_pct: float = Field(ge=0.0, le=100.0)
+    original_similarity: float = Field(ge=0.0, le=1.0, default=0.0)
+    retain_cam: float = Field(ge=0.0, le=1.0, default=0.0)
+    retain_random: float = Field(ge=0.0, le=1.0, default=0.0)
+    delete_cam: float = Field(ge=0.0, le=1.0, default=0.0)
+    delete_random: float = Field(ge=0.0, le=1.0, default=0.0)
+    sufficiency_margin: float = 0.0
+    necessity_margin: float = 0.0
+    verdict: CamFaithfulnessVerdict
+    # Top-k salient time bands, for the panel's retain/delete playback.
+    retain_segments: list[CamSegment] = Field(default_factory=list)
+    # Raw embeddings of each variant, for the voice-space comparison plot.
+    # Populated for redimnet_b5 only (the model the constellation projects).
+    original_embedding: list[float] = Field(default_factory=list)
+    retain_embedding: list[float] = Field(default_factory=list)
+    delete_embedding: list[float] = Field(default_factory=list)
+    retain_random_embedding: list[float] = Field(default_factory=list)
+
+
+class CamFaithfulnessResponse(BaseModel):
+    models: list[CamFaithModel] = Field(default_factory=list)
+    coverage_pct: float = Field(ge=0.0, le=100.0, default=0.0)
+    duration_ms: float = Field(ge=0.0, default=0.0)
+    n_enrolled_total: int = Field(ge=0, default=0)
+    model_provenance: ModelProvenance | None = None
+
+
 class SpoofVoice(BaseModel):
     """One selectable voice inside a TTS engine. Surfaced by
     `GET /spoof/engines` so the DeepfakeLab UI can render a picker."""
