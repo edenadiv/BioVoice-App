@@ -28,7 +28,7 @@ export function DegradedBanner({ provenance, show, variant = "compact", style }:
   if (tracked.includes("encoder") && provenance.encoder !== "redimnet_b5") {
     offenders.push("speaker encoder (heuristic fallback)");
   }
-  if (tracked.includes("detector") && provenance.detector !== "aasist") {
+  if (tracked.includes("detector") && provenance.detector === "heuristic") {
     offenders.push("anti-spoof detector (heuristic fallback)");
   }
   // acoustic_probe is intentionally NOT surfaced as a degradation in

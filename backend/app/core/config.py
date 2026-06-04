@@ -122,11 +122,19 @@ class Settings:
     # provenance "trained_heads"; otherwise it falls back to the
     # heuristic axis mapping. Produced by scripts/train_sub_classifier.py.
     aasist_heads_path: Path = _BACKEND_DIR / "models" / "aasist_heads.pt"
+    # Ensemble detector: folder containing ASVspoof5 per-system classifiers.
+    # Expected layout: <root>/train/A01..A08/ and <root>/dev/A09..A16/,
+    # each with logistic_regression.pkl + scaler.pkl.
+    ensemble_models_path: Path = _BACKEND_DIR / "models" / "asvspoof5_train_dev_16_systems"
     redimnet_weights_path: Path = _BACKEND_DIR / "models" / "redimnet_b5.pt"
     ecapa_savedir: Path = _BACKEND_DIR / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = _BACKEND_DIR / "models" / "wespeaker_resnet293_lm"
     enable_ecapa_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_ECAPA_COMPARISON", True))
     enable_wespeaker_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_WESPEAKER_COMPARISON", False))
+    # When set, MySQLStore is used instead of SQLiteStore.
+    # Format: mysql+pymysql://user:password@host:3306/dbname
+    # Leave empty (default) to keep using the local SQLite file.
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))
     database_path: Path = _BACKEND_DIR / "data" / "biovoice.sqlite3"
     reference_samples_path: Path = _BACKEND_DIR / "data" / "reference_samples"
     generated_samples_path: Path = _BACKEND_DIR / "data" / "generated_samples"

@@ -1,6 +1,6 @@
 // Central registry of "what is this?" copy for the (i) info buttons placed
 // on each major panel/visualization. Keep entries accurate to the real
-// pipeline (ReDimNet B5 speaker encoder, AASIST anti-spoof, optional ECAPA /
+// pipeline (ReDimNet B5 speaker encoder, Ensemble anti-spoof A01–A16, optional ECAPA /
 // WeSpeaker comparison encoders, Grad-CAM explainability). `body` lines
 // render as paragraphs; a line starting with "• " renders as a bullet.
 
@@ -20,7 +20,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     body: [
       "Runs a one-to-one check of the captured voice against the selected enrolled profile.",
       "• Speaker match: cosine similarity between the clip's ReDimNet B5 embedding and the profile's enrolled centroid.",
-      "• Liveness / anti-spoof: the AASIST model scores how likely the audio is a genuine human vs a synthetic/replayed fake.",
+      "• Liveness / anti-spoof: the ensemble detector (16 ASVspoof5 classifiers, A01–A16) scores how likely the audio is a genuine human vs a synthetic/replayed fake.",
       "The decision is ACCEPT only when the similarity clears the similarity threshold and the clip passes the anti-spoof threshold. Tune both in Settings.",
     ],
   },
@@ -51,7 +51,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "console.pipeline": {
     title: "Inference Pipeline",
     body: [
-      "The stages every clip flows through: PCM capture → mel-spectrogram → speaker encoder(s) → AASIST anti-spoof → fused decision.",
+      "The stages every clip flows through: PCM capture → mel-spectrogram → speaker encoder(s) → ensemble anti-spoof (A01–A16) → fused decision.",
       "Nodes light up as a run progresses, so you can see where time is spent and confirm each stage actually executed.",
     ],
   },
@@ -98,7 +98,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     title: "Per-model Grad-CAM",
     body: [
       "Explainability overlay: for each model it highlights the regions of the spectrogram that most drove that model's output (Grad-CAM attribution).",
-      "• AASIST shows where the anti-spoof evidence concentrated.",
+      "• The ensemble detector (A01–A16) does not produce Grad-CAM output — it uses sklearn classifiers with no gradient graph.",
       "• ReDimNet / ECAPA show which time–frequency regions most defined the speaker identity.",
       "Click a highlighted band to play just that slice. WeSpeaker is omitted here — it runs as an ONNX graph with no gradients, so a heatmap can't be computed.",
     ],
@@ -136,7 +136,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "lab.test": {
     title: "Anti-spoof test",
     body: [
-      "Drop in any WAV and score it directly with the AASIST anti-spoof model, independent of enrolment.",
+      "Drop in any WAV and score it directly with the ensemble anti-spoof detector (16 ASVspoof5 classifiers, A01–A16), independent of enrolment.",
       "Returns the synthetic-vs-genuine probability and the GENUINE/FAKE call at the current deepfake threshold.",
     ],
   },
@@ -169,7 +169,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "settings.thresholds": {
     title: "Decision thresholds",
     body: [
-      "Tune the cut-offs the decision uses. The similarity threshold sets how close a voice must be to ACCEPT; the deepfake threshold sets how confident AASIST must be to flag audio as FAKE.",
+      "Tune the cut-offs the decision uses. The similarity threshold sets how close a voice must be to ACCEPT; the deepfake threshold sets how confident the ensemble detector must be to flag audio as FAKE.",
       "Raising similarity reduces false accepts but risks rejecting genuine users; lowering it does the opposite.",
     ],
   },

@@ -103,11 +103,11 @@ class VerificationService:
 
     def _collect_provenance(self) -> ModelProvenance:
         encoder_provenance = getattr(self.encoder, "provenance", "redimnet_b5")
-        detector_provenance = getattr(self.detector, "provenance", "aasist")
+        detector_provenance = getattr(self.detector, "provenance", "ensemble")
         probe_provenance = getattr(self.acoustic_probe, "provenance", "heuristic")
         is_degraded = (
             encoder_provenance == "heuristic_placeholder"
-            or detector_provenance != "aasist"
+            or detector_provenance == "heuristic"
         )
         return ModelProvenance(
             encoder=encoder_provenance,
@@ -266,6 +266,8 @@ class VerificationService:
         t0 = perf_counter()
         deepfake_score = self.detector.detect(trimmed.waveform)
         detect_ms = (perf_counter() - t0) * 1000.0
+        spoof_votes = getattr(self.detector, "last_flagged", 0)
+        spoof_total = getattr(self.detector, "last_total", 0)
 
         sample_similarities = [
             _clamp_unit(self.encoder.cosine_similarity(sample_embedding, query_embedding))
@@ -347,6 +349,8 @@ class VerificationService:
             speaker_fusion=speaker_fusion,
             analysis_details=analysis_details,
             model_provenance=self._collect_provenance(),
+            spoof_votes=spoof_votes,
+            spoof_total=spoof_total,
             query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
             created_at=created_at,
         )
@@ -364,6 +368,8 @@ class VerificationService:
         trimmed, _ = self.audio.trim_to_voice(payload)
         query_embedding = self.encoder.embed(trimmed.waveform)
         deepfake_score = _clamp_unit(self.detector.detect(trimmed.waveform))
+        id_spoof_votes = getattr(self.detector, "last_flagged", 0)
+        id_spoof_total = getattr(self.detector, "last_total", 0)
         analysis_details = self.acoustic_probe.score(trimmed.waveform, sample_rate=trimmed.sample_rate)
         speakers = [self._ensure_comparison_embeddings(speaker) for speaker in speakers]
 
@@ -444,6 +450,8 @@ class VerificationService:
             deepfake_threshold=self.deepfake_threshold,
             n_enrolled_total=len(speakers),
             model_provenance=self._collect_provenance(),
+            spoof_votes=id_spoof_votes,
+            spoof_total=id_spoof_total,
             query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
         )
         self.store.add_identification(

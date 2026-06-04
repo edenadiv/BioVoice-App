@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.services.detector import DeepfakeDetectorService
+from app.services.ensemble_detector import EnsembleDetectorService
 from app.services.speaker_encoder import (
     EcapaSpeakerEncoder,
     RedimNetSpeakerEncoder,
@@ -17,6 +17,21 @@ from app.services.sub_classifier import AcousticProbe
 from app.services.verification import VerificationService
 from app.storage.sqlite_store import SQLiteStore
 
+
+def _build_store(settings: Settings) -> SQLiteStore:
+    """Return MySQLStore or SQLiteStore depending on DATABASE_URL."""
+    if settings.database_url and settings.database_url.startswith("mysql"):
+        from app.storage.mysql_store import MySQLStore
+        logger.info("DATABASE_URL set — using MySQL store (%s)", settings.database_url)
+        return MySQLStore(  # type: ignore[return-value]
+            database_url=settings.database_url,
+            reference_samples_path=settings.reference_samples_path,
+        )
+    return SQLiteStore(
+        database_path=settings.database_path,
+        reference_samples_path=settings.reference_samples_path,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +39,7 @@ logger = logging.getLogger(__name__)
 class AppContainer:
     settings: Settings
     store: SQLiteStore
-    detector: DeepfakeDetectorService
+    detector: EnsembleDetectorService
     verification_service: VerificationService
     spoof_service: SpoofGenerationService
     # Every comparison encoder we could load, whether or not it currently
@@ -54,16 +69,13 @@ def _load_comparison_encoders(settings: Settings) -> dict:
 
 
 def build_container(settings: Settings) -> AppContainer:
-    store = SQLiteStore(
-        database_path=settings.database_path,
-        reference_samples_path=settings.reference_samples_path,
-    )
+    store = _build_store(settings)
     overrides = store.get_config_overrides()
 
     def ov(key: str, default):
         return overrides.get(key, default)
 
-    detector = DeepfakeDetectorService(weights_path=settings.aasist_weights_path)
+    detector = EnsembleDetectorService(models_path=settings.ensemble_models_path)
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
 
     loaded_comparison_encoders = _load_comparison_encoders(settings)
