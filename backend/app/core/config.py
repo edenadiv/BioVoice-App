@@ -114,6 +114,15 @@ class Settings:
     cam_thr_aasist: float = float(os.environ.get("CAM_THR_AASIST", "0.55"))
     cam_thr_redimnet: float = float(os.environ.get("CAM_THR_REDIMNET", "0.50"))
     cam_thr_ecapa: float = float(os.environ.get("CAM_THR_ECAPA", "0.50"))
+    # Which ReDimNet layer the Grad-CAM hooks. "backbone" (the layer before
+    # ASTP pooling) folds frequency into channels → a TIME-ONLY heatmap whose
+    # frequency stripes are tiled. An inner stage (e.g. "stage4.10", "stage5.6")
+    # keeps a real time×frequency map. cam_layer_sweep.py ranked layers by
+    # faithfulness vs a random baseline over 60 VoxCeleb clips: margins are
+    # small everywhere (~+2-4 pts); stage4.10 (F=18) is the best frequency-
+    # resolved layer (ties stage5.6, finer frequency), so it's the default.
+    # "backbone" scores marginally higher but its frequency axis is fake.
+    cam_redimnet_layer: str = os.environ.get("CAM_REDIMNET_LAYER", "stage4.10")
     cors_origins: list[str] = field(default_factory=_cors_origins_from_env)
     log_level: str = field(default_factory=_log_level_from_env)
     aasist_weights_path: Path = _BACKEND_DIR / "models" / "aasist.pt"

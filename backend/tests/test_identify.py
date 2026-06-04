@@ -103,6 +103,26 @@ def test_identify_raises_when_no_users_enrolled(verification_service: Verificati
         verification_service.identify(audio_bytes=make_wav(2.0))
 
 
+def test_score_waveform_ranks_matching_speaker_first(verification_service: VerificationService):
+    """score_waveform re-scores a raw (already-trimmed) waveform with no VAD
+    re-trim — the masking path the faithfulness check relies on. The exact
+    enrolled waveform should rank its own speaker top."""
+    waveforms = {"alice": _user_wav(seed=11), "bob": _user_wav(seed=22)}
+    for user_id, wav in waveforms.items():
+        _seed_speaker(verification_service, user_id, wav)
+
+    payload = verification_service.audio.decode_wav(waveforms["alice"])
+    trimmed, _ = verification_service.audio.trim_to_voice(payload)
+    matches = verification_service.score_waveform(trimmed.waveform, model_key="redimnet_b5", top_n=2)
+
+    assert [m.user_id for m in matches] == ["alice", "bob"] or matches[0].user_id == "alice"
+    assert matches[0].user_id == "alice"
+
+
+def test_score_waveform_empty_when_no_users(verification_service: VerificationService):
+    assert verification_service.score_waveform([0.1, 0.2, 0.3], top_n=3) == []
+
+
 # -----------------------------------------------------------------------------
 # Route-level tests
 # -----------------------------------------------------------------------------

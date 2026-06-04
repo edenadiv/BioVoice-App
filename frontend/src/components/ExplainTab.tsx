@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, FC } from "react";
-import { embedAudio, explainAudio, type ExplainResult, type ModelCAM, type ExplainModelKey } from "../lib/api";
-import { decodeFileToBuffer, playSalient, playSegment, sliceBufferToFloat32, type SalientPlayback } from "../lib/explainAudio";
+import type { CSSProperties, FC, ReactNode } from "react";
+import { camFaithfulness, embedAudio, explainAudio, type CamFaithfulness, type CamFaithModel, type ExplainResult, type ModelCAM, type ExplainModelKey } from "../lib/api";
+import { complementSegments, decodeFileToBuffer, playSalient, playSegment, sliceBufferToFloat32, type SalientPlayback } from "../lib/explainAudio";
 import { useEmbeddingProjection } from "../hooks/useEmbeddingProjection";
 import { projectPCA3 } from "../lib/pca";
 import { nearestByCosine, type CosineMatch } from "../lib/embeddingMatch";
@@ -11,7 +11,7 @@ import { InfoButton } from "./InfoButton";
 import { EmbeddingConstellation as EmbeddingConstellationImpl } from "../console-ext.jsx";
 const EmbeddingConstellation = EmbeddingConstellationImpl as unknown as FC<Record<string, unknown>>;
 
-type HeatZonePoint = { point: [number, number, number]; label: string; peak: number };
+type HeatZonePoint = { point: [number, number, number]; label: string; peak: number; color?: string };
 
 interface ExplainTabProps {
   wavFile: File | Blob | null;
@@ -47,6 +47,11 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = useState<number | null>(null);
   const [heatZones, setHeatZones] = useState<HeatZonePoint[]>([]);
+  // Faithfulness check — mask the clip to each model's salient region and
+  // re-run, to prove the Grad-CAM marks what the model actually used.
+  const [faith, setFaith] = useState<CamFaithfulness | null>(null);
+  const [faithLoading, setFaithLoading] = useState(false);
+  const [faithError, setFaithError] = useState<string | null>(null);
   // The enrolled speaker the Grad-CAM region embedding sits closest to, by
   // true cosine similarity over the raw 192-d space (not PCA proximity).
   const [nearest, setNearest] = useState<CosineMatch | null>(null);
@@ -60,6 +65,8 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
     setResult(null);
     setActiveModel(null);
     setError(null);
+    setFaith(null);
+    setFaithError(null);
     setLoading(true);
     (async () => {
       try {
@@ -182,12 +189,38 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
     startPlayback(key, playSegment(bufferRef.current, startMs, endMs, { onTick: setPlayheadMs }));
   }, [playingKey, startPlayback, stopPlayback]);
 
+  // Play an arbitrary set of bands (salient region for "retain", its
+  // complement for "delete"), gated over the full clip so the playhead still
+  // tracks the spectrogram.
+  const handlePlayBands = useCallback((key: string, segments: { startMs: number; endMs: number; peak: number }[]) => {
+    if (!bufferRef.current || segments.length === 0) return;
+    if (playingKey === key) { stopPlayback(); return; }
+    startPlayback(key, playSalient(bufferRef.current, segments, { onTick: setPlayheadMs }));
+  }, [playingKey, startPlayback, stopPlayback]);
+
+  const runFaithfulness = useCallback(async () => {
+    if (!wavFile) return;
+    setFaithLoading(true);
+    setFaithError(null);
+    setFaith(null);
+    try {
+      const file = wavFile instanceof File ? wavFile : new File([wavFile], "probe.wav", { type: "audio/wav" });
+      setFaith(await camFaithfulness(file, matchUserId ?? undefined));
+    } catch (err) {
+      setFaithError(err instanceof Error ? err.message : "Faithfulness check failed");
+    } finally {
+      setFaithLoading(false);
+    }
+  }, [wavFile, matchUserId]);
+
   if (!open) return null;
 
   const cams = result?.cams ?? [];
   const activeCam = cams.find((c) => c.modelKey === activeModel) ?? cams[0] ?? null;
   const durationMs = result?.durationMs ?? 0;
   const pctOf = (ms: number) => (durationMs > 0 ? (100 * ms) / durationMs : 0);
+  // The redimnet variant carries the embeddings for the voice-space scatter.
+  const faithModel = faith?.models.find((m) => m.modelKey === "redimnet_b5" && m.originalEmbedding.length > 0) ?? null;
 
   return (
     <aside style={{ ...panelStyle, width: panelWidth }}>
@@ -297,7 +330,37 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
         </>
       )}
 
-      {result && (projection.profiles.length > 0 || heatZones.length > 0) && (
+      {result && cams.length > 0 && (
+        <FaithfulnessPanel
+          faith={faith}
+          loading={faithLoading}
+          error={faithError}
+          onRun={runFaithfulness}
+          durationMs={durationMs}
+          playingKey={playingKey}
+          canPlay={!!bufferRef.current}
+          onPlayBands={handlePlayBands}
+        />
+      )}
+
+      {result && faithModel ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
+            Voice space · masked vs full
+            <InfoButton k="explain.voicespace" />
+          </div>
+          <FaithScatter
+            size={Math.max(260, Math.min(panelWidth - 28, 340))}
+            targetId={matchUserId ?? faithModel.targetUserId}
+            profiles={projection.profiles}
+            model={faithModel}
+          />
+          <div style={mutedStyle}>
+            centre = <span style={{ color: "#d67cff" }}>{matchUserId ?? faithModel.targetUserId ?? "target"}</span> · closer = more like them.{" "}
+            <span style={{ color: "#7ef0ff" }}>full</span> · <span style={{ color: "#ffb24a" }}>delete</span> · <span style={{ color: "#6ee7a8" }}>retain·CAM</span> · <span style={{ color: "#9aa7b8" }}>retain·rnd</span> · <span style={{ color: "#52708a" }}>other speakers</span>. retain·CAM inside retain·rnd = the +margin.
+          </div>
+        </div>
+      ) : result && (projection.profiles.length > 0 || heatZones.length > 0) ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", color: "#d67cff" }}>
             Voice space · heat zones{nearest ? ` · closest ${nearest.userId}` : ""}
@@ -320,10 +383,208 @@ export function ExplainTab({ wavFile, open, matchUserId, panelWidth = 340, specW
             )}
           </div>
         </div>
-      )}
+      ) : null}
 
       {result && cams.length === 0 && <div style={mutedStyle}>No explainable models loaded.</div>}
     </aside>
+  );
+}
+
+function cosUnit(a: number[], b: number[]): number {
+  let d = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  const den = Math.sqrt(na * nb);
+  return den ? (d / den + 1) / 2 : 0; // map to 0..1, matching the backend
+}
+
+interface FaithScatterProps {
+  size: number;
+  targetId: string | null;
+  profiles: { userId: string; centroidRaw: number[] }[];
+  model: CamFaithModel;
+}
+
+// Radial similarity map: target speaker at the centre, everything else placed
+// at radius ∝ (1 − similarity-to-target). Closer = more like the speaker.
+// Distances come straight from the measured cosines, so it can't contradict
+// the margins and always renders — no shared multi-speaker PCA basis (which
+// breaks on mixed embedding dims / a single enrolled speaker).
+function FaithScatter({ size, targetId, profiles, model }: FaithScatterProps) {
+  const dim = model.originalEmbedding.length;
+  const target = profiles.find((p) => p.userId === targetId && p.centroidRaw.length === dim) ?? null;
+
+  const variants = [
+    { label: "full", color: "#7ef0ff", sim: model.originalSimilarity },
+    { label: "delete", color: "#ffb24a", sim: model.deleteCam },
+    { label: "retain·CAM", color: "#6ee7a8", sim: model.retainCam },
+    { label: "retain·rnd", color: "#9aa7b8", sim: model.retainRandom },
+  ].filter((v) => v.sim > 0);
+  const others = target
+    ? profiles
+        .filter((p) => p.userId !== targetId && p.centroidRaw.length === dim)
+        .map((p) => ({ label: p.userId, color: "#52708a", sim: cosUnit(target.centroidRaw, p.centroidRaw) }))
+    : [];
+
+  const items = [...variants, ...others];
+  if (items.length === 0) return null;
+  const maxD = Math.max(0.05, ...items.map((it) => 1 - it.sim));
+  const cx = size / 2, cy = size / 2;
+  const R = size / 2 - 36;
+  const placed = items.map((it, i) => {
+    const angle = (i / items.length) * Math.PI * 2 - Math.PI / 2;
+    const r = ((1 - it.sim) / maxD) * R;
+    return { ...it, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  });
+
+  return (
+    <svg width={size} height={size} style={{ display: "block", margin: "0 auto" }}>
+      {[0.5, 1].map((f) => (
+        <circle key={f} cx={cx} cy={cy} r={R * f} fill="none" stroke="rgba(126,240,255,0.12)" />
+      ))}
+      {placed.map((p, i) => (
+        <line key={`l${i}`} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke={p.color} strokeOpacity={0.25} />
+      ))}
+      <circle cx={cx} cy={cy} r={6} fill="#d67cff" />
+      <text x={cx + 9} y={cy + 4} fill="#d67cff" fontSize={11} fontFamily="JetBrains Mono, monospace">{targetId ?? "target"}</text>
+      {placed.map((p, i) => (
+        <g key={i}>
+          <circle cx={p.x} cy={p.y} r={5} fill={p.color} />
+          <text x={p.x + 7} y={p.y + 4} fill={p.color} fontSize={10} fontFamily="JetBrains Mono, monospace">
+            {p.label} {(p.sim * 100).toFixed(0)}%
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+const VERDICT_META: Record<string, { label: string; color: string; note: string }> = {
+  faithful: { label: "FAITHFUL", color: "#6ee7a8", note: "the salient region beats a random region on both sufficiency and necessity" },
+  weak: { label: "WEAK", color: "#ffd27a", note: "the salient region beats random on one axis — honest for speaker ID, where identity is distributed" },
+  unfaithful: { label: "UNFAITHFUL", color: "#ff7aa8", note: "the salient region is no more identity-bearing than a random region of equal size" },
+  no_salience: { label: "NO SALIENCE", color: "#6f8aa3", note: "no target speaker / region to test" },
+};
+
+interface FaithfulnessPanelProps {
+  faith: CamFaithfulness | null;
+  loading: boolean;
+  error: string | null;
+  onRun: () => void;
+  durationMs: number;
+  playingKey: string | null;
+  canPlay: boolean;
+  onPlayBands: (key: string, segments: { startMs: number; endMs: number; peak: number }[]) => void;
+}
+
+// Random-baseline faithfulness: keep the top-30% most-salient frames and
+// compare their identity content to a random 30% (sufficiency); compare
+// removing them to removing a random 30% (necessity).
+function FaithfulnessPanel({ faith, loading, error, onRun, durationMs, playingKey, canPlay, onPlayBands }: FaithfulnessPanelProps) {
+  return (
+    <div style={faithWrapStyle}>
+      <div style={faithHeaderStyle}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          Attribution check · vs random
+          <InfoButton k="explain.faithfulness" />
+        </span>
+        <button type="button" style={loading ? { ...faithRunBtnStyle, opacity: 0.5, cursor: "wait" } : faithRunBtnStyle} onClick={onRun} disabled={loading}>
+          {loading ? "running…" : faith ? "↻ re-run" : "▶ run test"}
+        </button>
+      </div>
+      {error && <div style={errorStyle}>{error}</div>}
+      {!faith && !loading && !error && (
+        <div style={mutedStyle}>
+          Does the Grad-CAM's top-30% carry more identity than a random 30%? cam vs rnd, scored against the speaker centroid. ▶ plays the kept / removed audio.
+        </div>
+      )}
+      {faith && faith.models.length === 0 && (
+        <div style={mutedStyle}>No speaker-model attribution available to test.</div>
+      )}
+      {faith && faith.models.map((m) => (
+        <FaithModelCard
+          key={m.modelKey}
+          model={m}
+          durationMs={durationMs}
+          playingKey={playingKey}
+          canPlay={canPlay}
+          onPlayBands={onPlayBands}
+        />
+      ))}
+    </div>
+  );
+}
+
+function signedPts(margin: number): string {
+  return `${margin >= 0 ? "+" : "−"}${Math.abs(margin * 100).toFixed(1)}`;
+}
+
+interface FaithModelCardProps {
+  model: CamFaithModel;
+  durationMs: number;
+  playingKey: string | null;
+  canPlay: boolean;
+  onPlayBands: (key: string, segments: { startMs: number; endMs: number; peak: number }[]) => void;
+}
+
+function FaithModelCard({ model, durationMs, playingKey, canPlay, onPlayBands }: FaithModelCardProps) {
+  const meta = VERDICT_META[model.verdict] ?? VERDICT_META.no_salience;
+  const target = model.targetUserId ?? "—";
+  const retainSegs = model.retainSegments;
+  const deleteSegs = complementSegments(retainSegs, durationMs);
+
+  const playBtn = (key: string, segs: { startMs: number; endMs: number; peak: number }[]) =>
+    canPlay && segs.length > 0 ? (
+      <button
+        type="button"
+        style={playingKey === key ? faithPlayActiveStyle : faithPlayStyle}
+        onClick={() => onPlayBands(key, segs)}
+        title="play this masked audio"
+      >
+        {playingKey === key ? "■" : "▶"}
+      </button>
+    ) : (
+      <span style={{ width: 22 }} />
+    );
+
+  // cam vs random row: similarity-to-centroid for the CAM-chosen region and a
+  // random region of equal size, plus the margin (CAM − random) that drives
+  // the verdict. A positive margin (green) = the CAM beat chance.
+  const row = (
+    label: string,
+    camSim: number,
+    rndSim: number,
+    margin: number,
+    play: ReactNode,
+  ) => (
+    <div style={faithRowStyle}>
+      <span style={faithRowLabelStyle}>{label}</span>
+      <span className="num-mono" style={{ flex: 1, minWidth: 0, color: "#cfe9ff" }}>
+        {(camSim * 100).toFixed(1)}
+        <span style={{ color: "#6f8aa3" }}> / {(rndSim * 100).toFixed(1)} rnd</span>
+      </span>
+      <span className="num-mono" style={{ color: margin >= 0.02 ? "#6ee7a8" : margin <= -0.02 ? "#ff7aa8" : "#ffd27a", fontWeight: 600 }}>
+        {signedPts(margin)}
+      </span>
+      {play}
+    </div>
+  );
+  return (
+    <div style={faithCardStyle}>
+      <div style={faithCardHeadStyle}>
+        <span>{(MODEL_LABELS[model.modelKey] ?? model.modelKey).split(" · ")[0]}</span>
+        <span style={{ ...verdictBadgeStyle, color: meta.color, borderColor: meta.color }}>{meta.label}</span>
+      </div>
+      <div style={mutedStyle}>
+        kept {model.coveragePct.toFixed(0)}% · vs {target} · whole clip {(model.originalSimilarity * 100).toFixed(1)}%
+      </div>
+      <div style={{ ...mutedStyle, fontSize: 11 }}>cam / random · margin (cam−rnd)</div>
+      {row("RETAIN", model.retainCam, model.retainRandom, model.sufficiencyMargin, playBtn(`faith:retain:${model.modelKey}`, retainSegs))}
+      {row("DELETE", model.deleteCam, model.deleteRandom, model.necessityMargin, playBtn(`faith:delete:${model.modelKey}`, deleteSegs))}
+      <div style={mutedStyle}>
+        suff {signedPts(model.sufficiencyMargin)} · nec {signedPts(model.necessityMargin)} · {meta.note}
+      </div>
+    </div>
   );
 }
 
@@ -721,6 +982,101 @@ const segBtnActiveStyle: CSSProperties = {
   ...segBtnStyle,
   background: "rgba(255, 200, 90, 0.12)",
   border: "1px solid rgba(255, 200, 90, 0.5)",
+  color: "#ffe6b0",
+};
+
+const faithWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  paddingTop: 4,
+  borderTop: "1px solid rgba(126, 240, 255, 0.12)",
+};
+
+const faithHeaderStyle: CSSProperties = {
+  fontSize: 13,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: "#d67cff",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+};
+
+const faithRunBtnStyle: CSSProperties = {
+  background: "rgba(214, 124, 255, 0.12)",
+  border: "1px solid rgba(214, 124, 255, 0.45)",
+  color: "#e9b8ff",
+  padding: "3px 10px",
+  borderRadius: 6,
+  fontFamily: "inherit",
+  fontSize: 12,
+  letterSpacing: "0.04em",
+  cursor: "pointer",
+  textTransform: "none",
+};
+
+const faithCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+  padding: "10px 12px",
+  background: "rgba(8, 14, 24, 0.55)",
+  border: "1px solid rgba(126, 240, 255, 0.14)",
+  borderRadius: 8,
+};
+
+const faithCardHeadStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  fontSize: 14,
+  letterSpacing: "0.08em",
+  color: "#7ef0ff",
+};
+
+const verdictBadgeStyle: CSSProperties = {
+  fontSize: 11,
+  letterSpacing: "0.1em",
+  padding: "2px 8px",
+  borderRadius: 999,
+  border: "1px solid",
+  background: "rgba(0,0,0,0.25)",
+};
+
+const faithRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  fontSize: 13,
+};
+
+const faithRowLabelStyle: CSSProperties = {
+  width: 64,
+  flexShrink: 0,
+  color: "#6f8aa3",
+  fontSize: 11,
+  letterSpacing: "0.08em",
+};
+
+const faithPlayStyle: CSSProperties = {
+  width: 22,
+  flexShrink: 0,
+  background: "rgba(126, 240, 255, 0.1)",
+  border: "1px solid rgba(126, 240, 255, 0.35)",
+  color: "#7ef0ff",
+  borderRadius: 5,
+  fontFamily: "inherit",
+  fontSize: 11,
+  lineHeight: 1.4,
+  cursor: "pointer",
+  padding: 0,
+};
+
+const faithPlayActiveStyle: CSSProperties = {
+  ...faithPlayStyle,
+  background: "rgba(255, 200, 90, 0.16)",
+  border: "1px solid rgba(255, 200, 90, 0.6)",
   color: "#ffe6b0",
 };
 

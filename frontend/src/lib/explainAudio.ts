@@ -37,6 +37,21 @@ export function sliceBufferToFloat32(
   return channel.slice(startSample, endSample);
 }
 
+// The gaps BETWEEN the salient bands across [0, durationMs] — i.e. the audio
+// the faithfulness "delete" pass keeps. Mirrors the backend's complement mask
+// so what you hear matches what the model was re-scored on.
+export function complementSegments(segments: CamSegment[], durationMs: number): CamSegment[] {
+  const sorted = [...segments].sort((a, b) => a.startMs - b.startMs);
+  const out: CamSegment[] = [];
+  let cursor = 0;
+  for (const seg of sorted) {
+    if (seg.startMs > cursor) out.push({ startMs: cursor, endMs: seg.startMs, peak: seg.peak });
+    cursor = Math.max(cursor, seg.endMs);
+  }
+  if (cursor < durationMs) out.push({ startMs: cursor, endMs: durationMs, peak: 0 });
+  return out;
+}
+
 export type SalientPlayback = { stop: () => void; promise: Promise<void> };
 
 // `onTick` reports the current playhead position in milliseconds along the

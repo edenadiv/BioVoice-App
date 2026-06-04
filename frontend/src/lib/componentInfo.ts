@@ -103,6 +103,16 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
       "Click a highlighted band to play just that slice. WeSpeaker is omitted here — it runs as an ONNX graph with no gradients, so a heatmap can't be computed.",
     ],
   },
+  "explain.faithfulness": {
+    title: "Attribution check — does the Grad-CAM beat random?",
+    body: [
+      "Tests whether the highlighted region is actually what the model used to decide \"this person\" — by comparing it to a random region of the same size. The clip keeps its top-30% most-salient frames (RETAIN) and the rest (DELETE); each is scored by cosine similarity to the target speaker's centroid.",
+      "• SUFFICIENCY = retain(CAM) − retain(random): does the CAM's region carry more identity than a random 30%?",
+      "• NECESSITY = delete(random) − delete(CAM): does removing the CAM's region hurt more than removing a random 30%?",
+      "Beats random on both ⇒ FAITHFUL. On one ⇒ WEAK (common for speaker ID — identity is distributed, so necessity is hard). On neither ⇒ UNFAITHFUL (no better than chance).",
+      "Fixed coverage + centroid similarity + a random baseline keep the verdict stable run-to-run. ▶ plays the kept (retain) or removed (delete) audio. This is the same protocol as scripts/cam_layer_sweep.py.",
+    ],
+  },
   "explain.voicespace": {
     title: "Voice space — closest speaker",
     body: [

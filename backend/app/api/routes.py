@@ -21,6 +21,8 @@ from app.api.dependencies import (
 )
 from app.core.metrics import metrics
 from app.schemas import (
+    CamFaithfulnessResponse,
+    CamFaithModel,
     ConfigPatch,
     ConfigResponse,
     EmbedResponse,
@@ -48,8 +50,11 @@ from app.services.explain import (
     SAMPLE_RATE as EXPLAIN_SAMPLE_RATE,
     _build_axes as build_explain_axes,
     build_adapters,
+    cam_topk_masks,
     explain_model,
     input_spectrogram,
+    random_frame_mask,
+    splice_by_frame_mask,
 )
 from app.services.spoof import SpoofGenerationService
 from app.services.verification import VerificationService
@@ -384,6 +389,179 @@ async def explain(
         frame_times_ms=times,
         freq_hz=freqs,
         duration_ms=duration_ms,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Explain — Grad-CAM faithfulness (sufficiency + comprehensiveness)
+# -----------------------------------------------------------------------------
+
+# Speaker models whose Grad-CAM we can mask-and-rescore. AASIST is anti-spoof
+# (genuine/fake), not identity, so it's excluded from the "is this person" test.
+_FAITHFULNESS_MODELS = ("redimnet_b5", "ecapa_voxceleb")
+
+# Fraction of the clip every variant keeps (top-k by saliency). Fixed coverage
+# = the cam_layer_sweep.py protocol: doesn't swing with clip length the way a
+# threshold does, and gives retain enough audio to embed stably.
+_FAITH_COVERAGE = 0.30
+# Random-baseline masks averaged per model. Each adds 2 embeds, so keep modest.
+_FAITH_SEEDS = 4
+# Margin (similarity points / 100) the CAM must beat random by to "count".
+_FAITH_MARGIN = 0.02
+
+
+def _faith_verdict(target: str | None, testable: bool, suff: float, nec: float) -> str:
+    """Verdict from beating a random region of equal coverage.
+
+    * sufficiency > margin → CAM's kept region carries more identity than a
+      random region (it localises *what to keep*).
+    * necessity   > margin → removing the CAM region hurts more than removing
+      a random one (it localises *what matters*).
+    both ⇒ faithful; either ⇒ weak; neither ⇒ unfaithful (no better than
+    chance). Identity is distributed in speaker models, so necessity is the
+    hard half — most honest CAMs land on `weak`."""
+    if target is None or not testable:
+        return "no_salience"
+    suff_ok = suff >= _FAITH_MARGIN
+    nec_ok = nec >= _FAITH_MARGIN
+    if suff_ok and nec_ok:
+        return "faithful"
+    if suff_ok or nec_ok:
+        return "weak"
+    return "unfaithful"
+
+
+def _faith_centroid(speaker, key: str) -> list[float]:
+    if speaker is None:
+        return []
+    if key == "redimnet_b5":
+        return speaker.embedding
+    return speaker.comparison_embeddings.get(key, [])
+
+
+@router.post("/explain/faithfulness", response_model=CamFaithfulnessResponse)
+async def explain_faithfulness(
+    audio: UploadFile = File(...),
+    user_id: str = Form(default=""),
+    top_n: int = Form(default=3, ge=1, le=10),
+    service: VerificationService = Depends(get_verification_service),
+) -> CamFaithfulnessResponse:
+    """Grad-CAM faithfulness check for the Identify tab (random-baseline test).
+
+    For each speaker model, keep the top-`_FAITH_COVERAGE` fraction of frames
+    by Grad-CAM saliency (`retain`) and its complement (`delete`), then score
+    each against the target speaker's centroid — and against a random region
+    of the same size. The CAM is faithful when its region carries more identity
+    than random (sufficiency) and removing it hurts more than random
+    (necessity). Fixed coverage + centroid similarity keep the verdict stable
+    run-to-run, unlike a threshold + rank-vs-all."""
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    try:
+        decoded = service.audio.decode_wav(payload)
+        trimmed, _ = service.audio.trim_to_voice(decoded)
+    except NoSpeechDetectedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, WaveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    n_enrolled = len(service.store.list_users())
+    if n_enrolled == 0:
+        raise HTTPException(status_code=404, detail="No users enrolled. Enrol at least one profile first.")
+
+    redimnet_model = getattr(service.encoder, "model", None)
+    ecapa_encoder = service.comparison_encoders.get("ecapa_voxceleb")
+    ecapa_model = getattr(ecapa_encoder, "model", None) if ecapa_encoder else None
+
+    # Target speaker = the explicit user_id if given, else the best match for
+    # the full clip. Its centroid is what every masked variant is scored against.
+    waveform = trimmed.waveform
+    duration_ms = 1000.0 * len(waveform) / EXPLAIN_SAMPLE_RATE
+    target = user_id or None
+    if target is None:
+        ranked = service.score_waveform(waveform, model_key="redimnet_b5", top_n=1)
+        target = ranked[0].user_id if ranked else None
+    target_speaker = service.store.get_speaker(target) if target else None
+    if target_speaker is not None:
+        target_speaker = service._ensure_comparison_embeddings(target_speaker)
+
+    redimnet_centroid = _faith_centroid(target_speaker, "redimnet_b5")
+    ecapa_centroid = _faith_centroid(target_speaker, "ecapa_voxceleb")
+    adapters = build_adapters(
+        None,  # AASIST excluded — identity test only
+        redimnet_model,
+        ecapa_model,
+        redimnet_centroid=redimnet_centroid or None,
+        ecapa_centroid=ecapa_centroid or None,
+    )
+
+    min_samples = int(0.1 * EXPLAIN_SAMPLE_RATE)
+    coverage_pct = 0.0
+    models: list[CamFaithModel] = []
+    for key in _FAITHFULNESS_MODELS:
+        ctx = adapters.get(key)
+        centroid = _faith_centroid(target_speaker, key)
+        if ctx is None or not centroid:
+            continue
+        masks = cam_topk_masks(ctx, waveform, _FAITH_COVERAGE, duration_ms, sample_rate=EXPLAIN_SAMPLE_RATE)
+        coverage_pct = masks.coverage_pct
+        testable = len(masks.retain) >= min_samples and len(masks.delete) >= min_samples
+        # Only the projectable model's vectors feed the voice-space plot.
+        want_vectors = key == "redimnet_b5"
+
+        orig_emb, original_similarity = service.embed_and_compare(waveform, centroid, key)
+        retain_emb, retain_cam = ([], 0.0)
+        delete_emb, delete_cam = ([], 0.0)
+        if testable:
+            retain_emb, retain_cam = service.embed_and_compare(masks.retain, centroid, key)
+            delete_emb, delete_cam = service.embed_and_compare(masks.delete, centroid, key)
+
+        retain_rs: list[float] = []
+        delete_rs: list[float] = []
+        rand_retain_emb: list[float] = []
+        if testable:
+            for seed in range(_FAITH_SEEDS):
+                rmask = random_frame_mask(masks.n_frames, masks.k, seed)
+                r_ret, r_del = splice_by_frame_mask(waveform, rmask, EXPLAIN_SAMPLE_RATE)
+                re_emb, re_sim = service.embed_and_compare(r_ret, centroid, key)
+                _, rd_sim = service.embed_and_compare(r_del, centroid, key)
+                retain_rs.append(re_sim)
+                delete_rs.append(rd_sim)
+                if seed == 0:
+                    rand_retain_emb = re_emb
+        retain_random = sum(retain_rs) / len(retain_rs) if retain_rs else 0.0
+        delete_random = sum(delete_rs) / len(delete_rs) if delete_rs else 0.0
+
+        suff = retain_cam - retain_random
+        nec = delete_random - delete_cam
+        models.append(
+            CamFaithModel(
+                model_key=key,
+                target_user_id=target,
+                coverage_pct=coverage_pct,
+                original_similarity=original_similarity,
+                retain_cam=retain_cam,
+                retain_random=retain_random,
+                delete_cam=delete_cam,
+                delete_random=delete_random,
+                sufficiency_margin=suff,
+                necessity_margin=nec,
+                verdict=_faith_verdict(target, testable, suff, nec),
+                retain_segments=masks.segments,
+                original_embedding=orig_emb if want_vectors else [],
+                retain_embedding=retain_emb if want_vectors else [],
+                delete_embedding=delete_emb if want_vectors else [],
+                retain_random_embedding=rand_retain_emb if want_vectors else [],
+            )
+        )
+
+    return CamFaithfulnessResponse(
+        models=models,
+        coverage_pct=coverage_pct,
+        duration_ms=duration_ms,
+        n_enrolled_total=n_enrolled,
+        model_provenance=service._collect_provenance(),
     )
 
 

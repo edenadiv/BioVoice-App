@@ -468,6 +468,68 @@ class VerificationService:
         self.store.save_run_audio(result_id, audio_bytes)
         return response
 
+    def score_waveform(
+        self,
+        waveform: list[float],
+        model_key: SpeakerModelKey = "redimnet_b5",
+        top_n: int = 3,
+    ) -> list[IdentificationMatch]:
+        """Rank enrolled speakers for an already-trimmed waveform under a
+        single speaker model — no VAD re-trim, no detector, no persistence.
+
+        Used by the Grad-CAM faithfulness check, which feeds masked copies
+        (retain / delete) of the SAME trimmed clip and needs them scored on
+        identical footing. Re-running /identify would VAD-trim the zeroed
+        regions away and defeat the masking, so we embed the waveform as-is."""
+        speakers = [self._ensure_comparison_embeddings(s) for s in self.store.list_users()]
+        if not speakers:
+            return []
+        encoder = self._encoder_for_model(model_key)
+        query_embedding = encoder.embed(waveform)
+        matches: list[IdentificationMatch] = []
+        for speaker in speakers:
+            if model_key == "redimnet_b5":
+                centroid, samples = speaker.embedding, speaker.sample_embeddings
+            else:
+                centroid = speaker.comparison_embeddings.get(model_key, [])
+                samples = speaker.comparison_sample_embeddings.get(model_key, [])
+            if not centroid and not samples:
+                continue
+            sample_sims = [
+                _clamp_unit(encoder.cosine_similarity(s, query_embedding)) for s in samples
+            ]
+            centroid_sim = (
+                _clamp_unit(encoder.cosine_similarity(centroid, query_embedding))
+                if centroid
+                else 0.0
+            )
+            similarity = _clamp_unit(self._aggregate_similarity(sample_sims, centroid_sim))
+            matches.append(
+                IdentificationMatch(
+                    user_id=speaker.user_id,
+                    similarity_score=similarity,
+                    centroid_similarity=centroid_sim,
+                    sample_count=speaker.sample_count,
+                    enrolled_at=speaker.enrolled_at,
+                )
+            )
+        matches.sort(key=lambda match: match.similarity_score, reverse=True)
+        return matches[: max(1, top_n)]
+
+    def embed_and_compare(
+        self, waveform: list[float], centroid: list[float], model_key: SpeakerModelKey = "redimnet_b5"
+    ) -> tuple[list[float], float]:
+        """Embed a waveform once and return (embedding, cosine-to-centroid in
+        0..1). Used by the Grad-CAM faithfulness panel so each masked copy is
+        embedded a single time — the vector feeds the voice-space comparison
+        plot, the similarity feeds the verdict."""
+        if not waveform:
+            return [], 0.0
+        encoder = self._encoder_for_model(model_key)
+        embedding = encoder.embed(waveform)
+        similarity = _clamp_unit(encoder.cosine_similarity(centroid, embedding)) if centroid else 0.0
+        return embedding, similarity
+
     def get_result(self, user_id: str, result_id: str) -> VerificationResponse | None:
         record = self.store.get_result(result_id)
         if record is None or record.user_id != user_id:

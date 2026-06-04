@@ -385,21 +385,33 @@ function EmbeddingConstellation({
         zones.forEach((hz) => {
           if (!hz || !hz.point) return;
           const zp = project(hz.point[0] * scale, hz.point[1] * scale, hz.point[2] * scale);
+          // Per-point colour/label (faithfulness comparison). Defaults to the
+          // original magenta heat-zone look when unset.
+          const col = hz.color || '#d67cff';
           if (tp) {
-            ctx.strokeStyle = `rgba(214,124,255,${0.22 + 0.22 * Math.sin(t * 4)})`;
+            ctx.save();
+            ctx.globalAlpha = 0.22 + 0.22 * Math.sin(t * 4);
+            ctx.strokeStyle = col;
             ctx.lineWidth = 1;
             ctx.setLineDash([2, 3]);
             ctx.beginPath();
             ctx.moveTo(zp.x, zp.y); ctx.lineTo(tp.x, tp.y);
             ctx.stroke();
-            ctx.setLineDash([]);
+            ctx.restore();
           }
           const peak = typeof hz.peak === 'number' ? hz.peak : 0.5;
           const sz = (3 + 2 * peak) * Math.max(0.6, zp.scale);
-          ctx.shadowBlur = 8; ctx.shadowColor = '#d67cff';
-          ctx.fillStyle = `rgba(214,124,255,${0.5 + 0.4 * peak})`;
+          ctx.shadowBlur = 8; ctx.shadowColor = col;
+          ctx.fillStyle = col;
           ctx.fillRect(zp.x - sz, zp.y - sz, sz * 2, sz * 2);
           ctx.shadowBlur = 0;
+          if (hz.label) {
+            ctx.fillStyle = col;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(hz.label, zp.x + sz + 3, zp.y + 3);
+            ctx.textAlign = 'start';
+          }
         });
       }
 
