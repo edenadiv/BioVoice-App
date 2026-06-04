@@ -73,3 +73,105 @@ def test_compute_cam_runs_end_to_end_on_toy_model():
     assert torch.isfinite(cam).all()
     assert cam.min().item() >= 0.0
     assert cam.max().item() <= 1.0 + 1e-6
+
+
+class _ToyRedim(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.backbone = torch.nn.Sequential(torch.nn.Conv1d(1, 4, 3, padding=1))
+
+    def forward(self, x):
+        return self.backbone(x.unsqueeze(1)).mean(-1)
+
+
+def test_resolve_redimnet_layer_backbone_and_submodule():
+    toy = _ToyRedim()
+    assert ex.resolve_redimnet_layer(toy, "backbone") is toy.backbone
+    assert ex.resolve_redimnet_layer(toy, None) is toy.backbone
+    assert ex.resolve_redimnet_layer(toy, "0") is toy.backbone[0]
+    # Unknown path falls back to the backbone instead of raising.
+    assert ex.resolve_redimnet_layer(toy, "does.not.exist") is toy.backbone
+
+
+def test_build_adapters_honours_configured_redimnet_layer():
+    toy = _ToyRedim()
+    adapters = ex.build_adapters(None, toy, None, redimnet_layer="0")
+    assert adapters["redimnet_b5"].target_layer is toy.backbone[0]
+
+
+def test_pool_and_mask_thresholds_per_frame():
+    cam_tf = torch.zeros(6, 4)
+    cam_tf[1:3, :] = 0.8
+    pooled, mask = ex._pool_and_mask(cam_tf, threshold=0.5)
+    assert pooled.shape == (6,)
+    assert mask.tolist() == [False, True, True, False, False, False]
+
+
+def test_raised_cosine_envelope_is_smooth_and_bounded():
+    mask = torch.tensor([False, True, True, False])
+    env = ex._raised_cosine_envelope(mask, n_samples=400, fade_samples=40)
+    assert env.shape == (400,)
+    assert env.min().item() >= 0.0
+    assert env.max().item() <= 1.0 + 1e-6
+    # Core of the salient region (frames 1–2 → samples ~100–300) reaches full gain.
+    assert env[200].item() == pytest.approx(1.0, abs=1e-3)
+    # Edges with no fade requested would be a step; the ramp keeps |Δ| small.
+    assert (env[1:] - env[:-1]).abs().max().item() < 0.2
+
+
+def _toy_ctx() -> "ex._AdapterCtx":
+    model = _ToyConvModel()
+    return ex._AdapterCtx(
+        model=model,
+        target_layer=model.conv,
+        waveform_to_input=lambda w: w.unsqueeze(0),
+        forward_target=lambda x: model(x).norm(dim=-1),
+    )
+
+
+def test_build_cam_masks_splice_partitions_the_clip():
+    """Default (splice) mode drops masked samples and concatenates the kept
+    speech — no silence injected — so retain + delete partition the clip."""
+    waveform = [0.2 * ((i % 11) - 5) for i in range(1600)]
+    masks = ex.build_cam_masks(_toy_ctx(), waveform, threshold=0.4, sample_rate=16000)
+
+    assert masks.mode == "splice"
+    assert 0.0 <= masks.coverage_pct <= 100.0
+    # No silence padding: the two parts together account for the whole clip.
+    assert len(masks.retain) + len(masks.delete) == len(waveform)
+    # retain length tracks coverage.
+    assert len(masks.retain) == pytest.approx(masks.coverage_pct / 100.0 * len(waveform), abs=2)
+
+
+def test_cam_topk_masks_fixed_coverage_and_partition():
+    """Fixed-coverage masking keeps ~coverage of the frames as top-k salient,
+    splices retain + delete to partition the clip, and emits playable bands."""
+    waveform = [0.2 * ((i % 11) - 5) for i in range(1600)]
+    masks = ex.cam_topk_masks(_toy_ctx(), waveform, coverage=0.30, duration_ms=100.0, sample_rate=16000)
+
+    assert masks.n_frames == ex.HEATMAP_T
+    assert masks.k == round(0.30 * ex.HEATMAP_T)
+    assert masks.coverage_pct == pytest.approx(30.0, abs=1.0)
+    assert len(masks.retain) + len(masks.delete) == len(waveform)
+    assert len(masks.segments) >= 1
+    assert all(s.end_ms > s.start_ms for s in masks.segments)
+
+
+def test_random_frame_mask_is_seeded_and_sized():
+    a = ex.random_frame_mask(200, 60, seed=0)
+    b = ex.random_frame_mask(200, 60, seed=0)
+    c = ex.random_frame_mask(200, 60, seed=1)
+    assert int(a.sum()) == 60
+    assert torch.equal(a, b)          # deterministic per seed
+    assert not torch.equal(a, c)      # varies across seeds
+
+
+def test_build_cam_masks_zero_mode_reconstructs_input():
+    """zero mode keeps full length: retain·env + delete·(1-env) == input."""
+    waveform = [0.2 * ((i % 11) - 5) for i in range(1600)]
+    masks = ex.build_cam_masks(_toy_ctx(), waveform, threshold=0.4, sample_rate=16000, mode="zero")
+
+    assert len(masks.retain) == len(waveform) == len(masks.delete)
+    recon = [r + d for r, d in zip(masks.retain, masks.delete)]
+    for original, rebuilt in zip(waveform, recon):
+        assert rebuilt == pytest.approx(original, abs=1e-4)
