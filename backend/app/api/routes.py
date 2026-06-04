@@ -111,10 +111,10 @@ def ready(request: Request) -> dict:
         overall_ok = False
 
     s = container.settings
-    checks["aasist_weights"] = {"ok": s.aasist_weights_path.exists()}
+    checks["ensemble_models"] = {"ok": s.ensemble_models_path.is_dir()}
     checks["redimnet_weights"] = {"ok": s.redimnet_weights_path.exists()}
-    if not checks["aasist_weights"]["ok"] or not checks["redimnet_weights"]["ok"]:
-        checks["models_note"] = "Weights missing — falling back to heuristic detector + encoder"
+    if not checks["ensemble_models"]["ok"] or not checks["redimnet_weights"]["ok"]:
+        checks["models_note"] = "Models missing — falling back to heuristic detector + encoder"
 
     if not overall_ok:
         raise HTTPException(status_code=503, detail={"ready": False, "checks": checks})
@@ -355,7 +355,7 @@ async def explain(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     service.detector.load()
-    detector_model = service.detector.model
+    detector_model = getattr(service.detector, "model", None)
     redimnet_model = getattr(service.encoder, "model", None)
     ecapa_encoder = service.comparison_encoders.get("ecapa_voxceleb")
     ecapa_model = getattr(ecapa_encoder, "model", None) if ecapa_encoder else None
@@ -474,7 +474,7 @@ async def test_spoof_sample(
     audio: UploadFile = File(...),
     service: VerificationService = Depends(get_verification_service),
 ) -> SpoofTestResponse:
-    """Score an arbitrary uploaded WAV against AASIST + the F4
+    """Score an arbitrary uploaded WAV against the ensemble detector + the F4
     sub-classifier. Used by the DeepfakeLab UI to test whether a
     freshly generated clone passes the deepfake gate. Same audio
     pipeline as /verify minus the speaker-similarity step — the
@@ -494,6 +494,8 @@ async def test_spoof_sample(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     deepfake_score = service.detector.detect(trimmed.waveform)
+    spoof_votes = getattr(service.detector, "last_flagged", 0)
+    spoof_total = getattr(service.detector, "last_total", 0)
     # G1 / Py 3.12 float-precision defence — clamp before the value
     # reaches the Pydantic le=1.0 constraint.
     if deepfake_score < 0.0:
@@ -512,6 +514,8 @@ async def test_spoof_sample(
         decision=decision,
         analysis_details=analysis_details,
         model_provenance=service._collect_provenance(),
+        spoof_votes=spoof_votes,
+        spoof_total=spoof_total,
     )
 
 
@@ -595,7 +599,7 @@ async def generate_spoof_batch(
 
             deepfake_score: float | None = None
             decision = None
-            if req.run_aasist:
+            if req.run_detector:
                 deepfake_score = _clamp_unit(verification.detector.detect(trimmed.waveform))
                 decision = (
                     "GENUINE" if deepfake_score >= verification.deepfake_threshold else "FAKE"

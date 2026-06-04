@@ -14,7 +14,7 @@ EncoderProvenance = Literal[
     "wespeaker_resnet293_lm",
     "heuristic_placeholder",
 ]
-DetectorProvenance = Literal["aasist", "heuristic"]
+DetectorProvenance = Literal["aasist", "ensemble", "heuristic"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
 ExplainModelKey = Literal["aasist", "redimnet_b5", "ecapa_voxceleb"]
@@ -175,6 +175,8 @@ class SpoofTestResponse(BaseModel):
     decision: SpoofDecision
     analysis_details: AnalysisDetails
     model_provenance: ModelProvenance | None = None
+    spoof_votes: int = 0
+    spoof_total: int = 0
 
 
 class SpoofBatchRequest(BaseModel):
@@ -192,7 +194,7 @@ class SpoofBatchRequest(BaseModel):
     language: str = "en"
     # Defaults to the service's similarity_threshold when omitted.
     keep_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
-    run_aasist: bool = True
+    run_detector: bool = True
 
 
 class SpoofBatchCandidate(BaseModel):
@@ -237,6 +239,8 @@ class VerificationResponse(BaseModel):
     speaker_fusion: SpeakerFusionDecision | None = None
     analysis_details: AnalysisDetails | None = None
     model_provenance: ModelProvenance | None = None
+    spoof_votes: int = 0
+    spoof_total: int = 0
     # Raw query embedding per speaker model — lets the UI project the queried
     # voice into the embedding space alongside the enrolled clusters.
     query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
@@ -348,6 +352,8 @@ class IdentificationResponse(BaseModel):
     deepfake_threshold: float = Field(ge=0.0, le=1.0)
     n_enrolled_total: int = Field(ge=0)
     model_provenance: ModelProvenance | None = None
+    spoof_votes: int = 0
+    spoof_total: int = 0
     # Raw query embedding per speaker model (see VerificationResponse).
     query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
 

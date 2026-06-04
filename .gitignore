@@ -49,3 +49,4 @@ backend/models/ecapa_voxceleb/
 # Generated validation reports (keep the directory via .gitkeep).
 /reports/*
 !/reports/.gitkeep
+data

@@ -58,6 +58,8 @@ export type VerificationResult = {
   decisionReason: DecisionReason;
   similarityScore: number;
   deepfakeScore: number;
+  spoofVotes: number;
+  spoofTotal: number;
   centroidSimilarity: number;
   sampleSimilarities: number[];
   speakerModelScores: SpeakerModelScore[];
@@ -122,6 +124,8 @@ export type SpoofTestResult = {
   decision: SpoofDecision;
   analysisDetails: AnalysisDetails;
   modelProvenance: ModelProvenance | null;
+  spoofVotes: number;
+  spoofTotal: number;
 };
 
 export type SpoofBatchCandidate = {
@@ -162,6 +166,8 @@ export type IdentificationResult = {
   speakerModelMatches: SpeakerModelMatches[];
   speakerFusion: SpeakerFusionDecision | null;
   deepfakeScore: number;
+  spoofVotes: number;
+  spoofTotal: number;
   analysisDetails: AnalysisDetails | null;
   wouldAcceptTop1: boolean;
   similarityThreshold: number;
@@ -179,7 +185,7 @@ export type SpeakerModelMatches = {
 
 export type ModelProvenance = {
   encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
-  detector: "aasist" | "heuristic";
+  detector: "aasist" | "ensemble" | "heuristic";
   acousticProbe: "heuristic" | "trained_heads";
   isDegraded: boolean;
 };

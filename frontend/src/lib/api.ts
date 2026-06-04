@@ -64,7 +64,7 @@ type AnalysisDetailsResponse = {
 
 type ModelProvenanceResponse = {
   encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
-  detector: "aasist" | "heuristic";
+  detector: "aasist" | "ensemble" | "heuristic";
   acoustic_probe: "heuristic" | "trained_heads";
   is_degraded: boolean;
 };
@@ -76,6 +76,8 @@ type VerificationResponse = {
   decision_reason: "accepted" | "mismatch" | "synthetic" | "not_enrolled";
   similarity_score: number;
   deepfake_score: number;
+  spoof_votes?: number;
+  spoof_total?: number;
   centroid_similarity: number;
   sample_similarities: number[];
   speaker_model_scores?: SpeakerModelScoreResponse[];
@@ -131,6 +133,8 @@ type SpoofTestResponse = {
   decision: SpoofDecision;
   analysis_details: AnalysisDetailsResponse;
   model_provenance?: ModelProvenanceResponse | null;
+  spoof_votes?: number;
+  spoof_total?: number;
 };
 
 type IdentificationMatchResponse = {
@@ -146,6 +150,8 @@ type IdentificationResponse = {
   speaker_model_matches?: SpeakerModelMatchesResponse[];
   speaker_fusion?: SpeakerFusionDecisionResponse | null;
   deepfake_score: number;
+  spoof_votes?: number;
+  spoof_total?: number;
   analysis_details: AnalysisDetailsResponse | null;
   would_accept_top1: boolean;
   similarity_threshold: number;
@@ -173,7 +179,7 @@ type ReadyzResponse = {
   ready: boolean;
   checks: {
     database?: { ok: boolean };
-    aasist_weights?: { ok: boolean; path?: string };
+    ensemble_models?: { ok: boolean; path?: string };
     redimnet_weights?: { ok: boolean; path?: string };
   };
   models_note?: string;
@@ -190,7 +196,7 @@ export type MetricsSummary = {
 export type ReadyState = {
   ready: boolean;
   databaseOk: boolean;
-  aasistWeightsOk: boolean;
+  ensembleModelsOk: boolean;
   redimnetWeightsOk: boolean;
 };
 
@@ -308,6 +314,8 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
       : { loadMs: 0, resampleMs: 0, normalizeMs: 0, vadMs: 0, embedMs: 0, detectMs: 0, totalMs: 0 },
     analysisDetails: details ? toAnalysisDetails(details) : null,
     modelProvenance: toModelProvenance(response.model_provenance),
+    spoofVotes: response.spoof_votes ?? 0,
+    spoofTotal: response.spoof_total ?? 0,
     queryEmbeddings: response.query_embeddings ?? {},
     createdAt: response.created_at,
   };
@@ -513,6 +521,8 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     decision: response.decision,
     analysisDetails: toAnalysisDetails(response.analysis_details),
     modelProvenance: toModelProvenance(response.model_provenance),
+    spoofVotes: response.spoof_votes ?? 0,
+    spoofTotal: response.spoof_total ?? 0,
   };
 }
 
@@ -553,7 +563,7 @@ export async function generateSpoofBatch(payload: {
   voice?: string;
   language?: string;
   keepThreshold?: number;
-  runAasist?: boolean;
+  runDetector?: boolean;
 }): Promise<SpoofBatchResult> {
   const body: Record<string, unknown> = {
     target_user_id: payload.targetUserId,
@@ -564,7 +574,7 @@ export async function generateSpoofBatch(payload: {
   if (payload.voice) body.voice = payload.voice;
   if (payload.language) body.language = payload.language;
   if (payload.keepThreshold != null) body.keep_threshold = payload.keepThreshold;
-  if (payload.runAasist != null) body.run_aasist = payload.runAasist;
+  if (payload.runDetector != null) body.run_detector = payload.runDetector;
 
   const response = await request<SpoofBatchResponse>("/spoof/batch", {
     method: "POST",
@@ -642,6 +652,8 @@ function toIdentificationResult(response: IdentificationResponse): Identificatio
     })),
     speakerFusion: toSpeakerFusionDecision(response.speaker_fusion),
     deepfakeScore: response.deepfake_score,
+    spoofVotes: response.spoof_votes ?? 0,
+    spoofTotal: response.spoof_total ?? 0,
     analysisDetails: response.analysis_details ? toAnalysisDetails(response.analysis_details) : null,
     wouldAcceptTop1: response.would_accept_top1,
     similarityThreshold: response.similarity_threshold,
@@ -689,7 +701,7 @@ export async function getReady(): Promise<ReadyState> {
   return {
     ready: response.ready,
     databaseOk: response.checks.database?.ok ?? false,
-    aasistWeightsOk: response.checks.aasist_weights?.ok ?? false,
+    ensembleModelsOk: response.checks.ensemble_models?.ok ?? false,
     redimnetWeightsOk: response.checks.redimnet_weights?.ok ?? false,
   };
 }

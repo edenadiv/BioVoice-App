@@ -176,6 +176,8 @@ function DeepfakeLab({ audio, profiles }) {
         sourceDescription: generation.sourceDescription,
         dfScore: detection.deepfakeScore,
         decision: detection.decision,
+        spoofVotes: detection.spoofVotes ?? 0,
+        spoofTotal: detection.spoofTotal ?? 0,
         analysisDetails: detection.analysisDetails,
         modelProvenance: detection.modelProvenance,
         time: (elapsedMs / 1000).toFixed(2),
@@ -251,7 +253,7 @@ function DeepfakeLab({ audio, profiles }) {
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
     { label: 'Cloning voice timbre', sub: 'Voice-cloning engine → 24 kHz waveform' },
-    { label: 'Running BioVoice detector', sub: 'AASIST + F4 sub-classifier' },
+    { label: 'Running BioVoice detector', sub: 'Ensemble (A01–A16)' },
   ];
 
   return (
@@ -510,7 +512,7 @@ function DeepfakeLab({ audio, profiles }) {
                       <div style={{ fontSize: 15, color: 'var(--ink-mute)', margin: '4px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.text}</div>
                       {c.decision && (
                         <div className="label-mono" style={{ fontSize: 10, color: c.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)' }}>
-                          AASIST {c.decision} · {c.deepfakeScore != null ? c.deepfakeScore.toFixed(3) : '—'}
+                          Ensemble {c.decision} · {c.deepfakeScore != null ? c.deepfakeScore.toFixed(3) : '—'}
                         </div>
                       )}
                       {c.kept && batchUrls[c.index] && (
@@ -632,16 +634,22 @@ function DeepfakeLab({ audio, profiles }) {
                     background: result.decision === 'FAKE' ? 'rgba(255,85,119,0.06)' : 'rgba(255,178,74,0.06)',
                     border: '1px solid ' + (result.decision === 'FAKE' ? 'rgba(255,85,119,0.2)' : 'rgba(255,178,74,0.25)'),
                   }}>
-                    <div className="label-mono" style={{ fontSize: 11 }}>AASIST AUTHENTICITY</div>
+                    <div className="label-mono" style={{ fontSize: 11 }}>ENSEMBLE DETECTION</div>
                     <div className="num-mono biovoice-numerals" style={{
                       fontSize: 38, marginTop: 4, fontWeight: 200,
                       color: result.decision === 'FAKE' ? '#ff5577' : '#ffb24a',
-                    }}>{result.dfScore.toFixed(3)}</div>
+                    }}>
+                      {result.spoofTotal > 0 ? `${result.spoofVotes}/${result.spoofTotal}` : result.dfScore.toFixed(3)}
+                    </div>
                     <div className="label-mono" style={{
                       fontSize: 10, marginTop: 2,
                       color: result.decision === 'FAKE' ? 'var(--bad)' : 'var(--warn)',
                     }}>
-                      {result.decision === 'FAKE' ? 'BELOW 0.50 · SYNTHETIC' : 'ABOVE 0.50 · GATE FAILED TO CATCH'}
+                      {result.spoofTotal > 0
+                        ? result.spoofVotes > 0
+                          ? `${result.spoofVotes} SYSTEM${result.spoofVotes > 1 ? 'S' : ''} FLAGGED · SYNTHETIC`
+                          : 'NO SYSTEMS FLAGGED · GATE FAILED TO CATCH'
+                        : result.decision === 'FAKE' ? 'SYNTHETIC' : 'GATE FAILED TO CATCH'}
                     </div>
                   </div>
                   <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
@@ -654,7 +662,7 @@ function DeepfakeLab({ audio, profiles }) {
                 <div className="label-mono" style={{ fontSize: 11, marginBottom: 8 }}>
                   {result.analysisDetails.mode === "trained_heads"
                     ? "ACOUSTIC SUB-AXES · TRAINED PROBE"
-                    : "ACOUSTIC FEATURES (heuristic v1.0 · not from AASIST)"}
+                    : "ACOUSTIC FEATURES (heuristic v1.0)"}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {/* G14 — real F4 sub-axis values from AcousticProbe instead
@@ -1054,9 +1062,22 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
-              <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>DEEPFAKE</div>
-              <div className="num-mono" style={{ fontSize: 33, marginTop: 4, color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)' }}>{result.deepfakeScore.toFixed(3)}</div>
-              <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>{result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'} · thr {result.deepfakeThreshold.toFixed(2)}</div>
+              <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-mute)' }}>ENSEMBLE DETECTION</div>
+              {result.spoofTotal > 0 ? (
+                <>
+                  <div className="num-mono" style={{ fontSize: 33, marginTop: 4, color: result.spoofVotes > 0 ? 'var(--bad)' : 'var(--good)' }}>
+                    {result.spoofVotes}/{result.spoofTotal}
+                  </div>
+                  <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
+                    {result.spoofVotes > 0 ? `${result.spoofVotes} SYSTEM${result.spoofVotes > 1 ? 'S' : ''} FLAGGED · FAKE` : 'NONE FLAGGED · GENUINE'}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="num-mono" style={{ fontSize: 33, marginTop: 4, color: result.deepfakeScore >= result.deepfakeThreshold ? 'var(--good)' : 'var(--bad)' }}>{result.deepfakeScore.toFixed(3)}</div>
+                  <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>{result.deepfakeScore >= result.deepfakeThreshold ? 'GENUINE' : 'FAKE'} · thr {result.deepfakeThreshold.toFixed(2)}</div>
+                </>
+              )}
             </div>
             {result.speakerFusion && (
               <div>
@@ -1158,6 +1179,8 @@ function verifyToIdentification(v, config) {
     })),
     speakerFusion: v.speakerFusion,
     deepfakeScore: v.deepfakeScore,
+    spoofVotes: v.spoofVotes ?? 0,
+    spoofTotal: v.spoofTotal ?? 0,
     analysisDetails: v.analysisDetails,
     wouldAcceptTop1: v.decision === 'ACCEPT',
     similarityThreshold: simThr,
@@ -1437,7 +1460,7 @@ function UserSettingsPage() {
                 <KV k="Sample rate" v={`${cfg.sampleRate} Hz`}/>
                 <KV k="Active speaker models" v={cfg.models.filter((m) => m.participating).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
                 <KV k="Loaded encoders" v={cfg.models.filter((m) => m.loaded).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
-                <KV k="Detector" v={cfg.provenance?.detector === 'aasist' ? 'AASIST' : (cfg.provenance?.detector ?? '—')}/>
+                <KV k="Detector" v={cfg.provenance?.detector === 'ensemble' ? 'Ensemble (A01–A16)' : cfg.provenance?.detector === 'aasist' ? 'AASIST' : (cfg.provenance?.detector ?? '—')}/>
                 <KV k="Encoder provenance" v={cfg.provenance?.encoder ?? '—'}/>
                 <KV k="Status" v={cfg.provenance?.isDegraded ? 'Degraded (heuristic fallback)' : 'Healthy'}/>
               </SectionCard>
