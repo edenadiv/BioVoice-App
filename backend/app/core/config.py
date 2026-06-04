@@ -125,7 +125,7 @@ class Settings:
     redimnet_weights_path: Path = _BACKEND_DIR / "models" / "redimnet_b5.pt"
     ecapa_savedir: Path = _BACKEND_DIR / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = _BACKEND_DIR / "models" / "wespeaker_resnet293_lm"
-    enable_ecapa_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_ECAPA_COMPARISON", False))
+    enable_ecapa_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_ECAPA_COMPARISON", True))
     enable_wespeaker_comparison: bool = field(default_factory=lambda: _bool_from_env("ENABLE_WESPEAKER_COMPARISON", False))
     database_path: Path = _BACKEND_DIR / "data" / "biovoice.sqlite3"
     reference_samples_path: Path = _BACKEND_DIR / "data" / "reference_samples"
