@@ -46,6 +46,11 @@ XTTS-v2/speakers_xtts.pth
 XTTS-v2/vocab.json
 backend/models/ecapa_voxceleb/
 
+# ASVspoof5 training artifacts (only .pkl files are needed at runtime)
+backend/models/asvspoof5_train_dev_16_systems/**/*.npz
+backend/models/asvspoof5_train_dev_16_systems/**/*.csv
+backend/models/asvspoof5_train_dev_16_systems/**/*.json
+
 # Generated validation reports (keep the directory via .gitkeep).
 /reports/*
 !/reports/.gitkeep
