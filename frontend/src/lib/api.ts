@@ -630,6 +630,102 @@ export async function explainAudio(file: File, userId?: string): Promise<Explain
   };
 }
 
+// -- Explain (Grad-CAM faithfulness) -----------------------------------------
+
+type CamFaithModelResponse = {
+  model_key: SpeakerModelKey;
+  target_user_id: string | null;
+  coverage_pct: number;
+  original_similarity: number;
+  retain_cam: number;
+  retain_random: number;
+  delete_cam: number;
+  delete_random: number;
+  sufficiency_margin: number;
+  necessity_margin: number;
+  verdict: CamFaithVerdict;
+  retain_segments: CamSegmentResponse[];
+  original_embedding: number[];
+  retain_embedding: number[];
+  delete_embedding: number[];
+  retain_random_embedding: number[];
+};
+type CamFaithfulnessResponse = {
+  models: CamFaithModelResponse[];
+  coverage_pct: number;
+  duration_ms: number;
+  n_enrolled_total: number;
+  model_provenance?: ModelProvenanceResponse | null;
+};
+
+export type CamFaithVerdict = "faithful" | "weak" | "unfaithful" | "no_salience";
+export type CamFaithModel = {
+  modelKey: SpeakerModelKey;
+  targetUserId: string | null;
+  coveragePct: number;
+  originalSimilarity: number;
+  retainCam: number;
+  retainRandom: number;
+  deleteCam: number;
+  deleteRandom: number;
+  sufficiencyMargin: number;
+  necessityMargin: number;
+  verdict: CamFaithVerdict;
+  retainSegments: CamSegment[];
+  originalEmbedding: number[];
+  retainEmbedding: number[];
+  deleteEmbedding: number[];
+  retainRandomEmbedding: number[];
+};
+export type CamFaithfulness = {
+  models: CamFaithModel[];
+  coveragePct: number;
+  durationMs: number;
+  nEnrolledTotal: number;
+  modelProvenance: ModelProvenance | null;
+};
+
+function toCamFaithModel(m: CamFaithModelResponse): CamFaithModel {
+  return {
+    modelKey: m.model_key,
+    targetUserId: m.target_user_id,
+    coveragePct: m.coverage_pct,
+    originalSimilarity: m.original_similarity,
+    retainCam: m.retain_cam,
+    retainRandom: m.retain_random,
+    deleteCam: m.delete_cam,
+    deleteRandom: m.delete_random,
+    sufficiencyMargin: m.sufficiency_margin,
+    necessityMargin: m.necessity_margin,
+    verdict: m.verdict,
+    retainSegments: m.retain_segments.map((s) => ({ startMs: s.start_ms, endMs: s.end_ms, peak: s.peak })),
+    originalEmbedding: m.original_embedding ?? [],
+    retainEmbedding: m.retain_embedding ?? [],
+    deleteEmbedding: m.delete_embedding ?? [],
+    retainRandomEmbedding: m.retain_random_embedding ?? [],
+  };
+}
+
+/**
+ * Grad-CAM faithfulness check for the Identify tab. Keeps each model's top-30%
+ * most-salient frames (retain) and the rest (delete), scores both against the
+ * target speaker's centroid, and compares to a random region of equal size.
+ * Faithful = the CAM region beats random on sufficiency and/or necessity.
+ */
+export async function camFaithfulness(file: File, userId?: string): Promise<CamFaithfulness> {
+  const formData = new FormData();
+  formData.append("audio", file);
+  if (userId) formData.append("user_id", userId);
+  const response = await postForm<CamFaithfulnessResponse>("/explain/faithfulness", formData);
+  return {
+    models: response.models.map(toCamFaithModel),
+    coveragePct: response.coverage_pct,
+    durationMs: response.duration_ms,
+    nEnrolledTotal: response.n_enrolled_total,
+    modelProvenance: toModelProvenance(response.model_provenance),
+  };
+}
+
 // -- Open-set identification --------------------------------------------------
 
 function toIdentificationResult(response: IdentificationResponse): IdentificationResult {

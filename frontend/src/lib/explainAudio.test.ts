@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sliceBufferToFloat32 } from "./explainAudio";
+import { complementSegments, sliceBufferToFloat32 } from "./explainAudio";
 
 // AudioBuffer isn't available in happy-dom; stub the two members the
 // function uses. 1000 Hz sample rate => 1 sample per millisecond.
@@ -28,5 +28,27 @@ describe("sliceBufferToFloat32", () => {
     const buf = stubBuffer(1000, Array.from({ length: 100 }, (_, i) => i));
     expect(sliceBufferToFloat32(buf, 80, 80).length).toBe(0);
     expect(sliceBufferToFloat32(buf, 90, 50).length).toBe(0);
+  });
+});
+
+describe("complementSegments", () => {
+  const seg = (startMs: number, endMs: number) => ({ startMs, endMs, peak: 1 });
+
+  it("returns the gaps between salient bands across the clip", () => {
+    const out = complementSegments([seg(200, 500), seg(700, 800)], 1000);
+    expect(out.map((s) => [s.startMs, s.endMs])).toEqual([
+      [0, 200],
+      [500, 700],
+      [800, 1000],
+    ]);
+  });
+
+  it("is the whole clip when there are no salient bands", () => {
+    expect(complementSegments([], 1000)).toEqual([{ startMs: 0, endMs: 1000, peak: 0 }]);
+  });
+
+  it("merges overlapping bands and drops empty gaps", () => {
+    const out = complementSegments([seg(0, 400), seg(300, 600)], 600);
+    expect(out).toEqual([]);
   });
 });
