@@ -22,6 +22,7 @@ engines via `GET /spoof/engines` and accepts `engine` + a reference
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,60 @@ from app.schemas import ReferenceSampleResponse
 from app.services.audio import AudioService
 
 _LOG = logging.getLogger(__name__)
+
+
+def _sanitize_speechbrain_lazy_modules() -> None:
+    """Work around a speechbrain/torch interaction bug.
+
+    speechbrain registers `LazyModule` proxies (for optional deps like
+    k2, spacy, flair) in `sys.modules`. Importing `transformers` pulls in
+    `torch._dynamo`, whose import chain calls `inspect.getmodule()` on
+    every `sys.modules` entry -- which does `hasattr(module, "__file__")`.
+    `LazyModule.__getattr__` raises `ImportError` for those missing deps,
+    and `hasattr()` only suppresses `AttributeError`, so the ImportError
+    propagates and crashes the unrelated `f5_tts`/`TTS` import. Replace
+    any such proxies with inert empty modules first.
+    """
+    try:
+        from speechbrain.utils.importutils import LazyModule
+    except ImportError:
+        return
+    import sys
+    import types
+
+    for name, module in list(sys.modules.items()):
+        if isinstance(module, LazyModule):
+            sys.modules[name] = types.ModuleType(name)
+
+
+_ffmpeg_dll_dir_registered = False
+
+
+def _register_ffmpeg_shared_dll_dir() -> None:
+    """Make FFmpeg's shared libraries discoverable by torchcodec.
+
+    F5-TTS/XTTS load reference audio via `torchaudio.load`, which on
+    recent torchaudio versions requires `torchcodec`. torchcodec loads
+    its `libtorchcodec_core*.dll` via `ctypes.CDLL`, which on Python 3.8+
+    does not search `PATH` for that DLL's own dependencies (FFmpeg's
+    avutil/avcodec/etc DLLs) -- it needs `os.add_dll_directory`. Find the
+    FFmpeg *shared* build's `bin` directory (the one shipping
+    `avutil-*.dll`, not just `ffmpeg.exe`) on PATH and register it.
+    """
+    global _ffmpeg_dll_dir_registered
+    if _ffmpeg_dll_dir_registered or not hasattr(os, "add_dll_directory"):
+        return
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        d = Path(directory)
+        try:
+            if any(d.glob("avutil-*.dll")):
+                os.add_dll_directory(str(d))
+                _ffmpeg_dll_dir_registered = True
+                return
+        except OSError:
+            continue
 
 
 class ReferenceSampleStore(Protocol):
@@ -142,6 +197,8 @@ class F5TtsEngine:
     def _import(self):
         if self._pkg_ok is False:
             return None
+        _sanitize_speechbrain_lazy_modules()
+        _register_ffmpeg_shared_dll_dir()
         try:
             from f5_tts.api import F5TTS  # type: ignore
         except (ImportError, ModuleNotFoundError):
@@ -223,6 +280,8 @@ class XttsEngine:
     def _import(self) -> bool:
         if self._pkg_ok is False:
             return False
+        _sanitize_speechbrain_lazy_modules()
+        _register_ffmpeg_shared_dll_dir()
         try:
             import TTS.tts.configs.xtts_config  # noqa: F401
             import TTS.tts.models.xtts  # noqa: F401

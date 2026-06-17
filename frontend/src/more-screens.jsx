@@ -178,6 +178,7 @@ function DeepfakeLab({ audio, profiles }) {
         decision: detection.decision,
         spoofVotes: detection.spoofVotes ?? 0,
         spoofTotal: detection.spoofTotal ?? 0,
+        spoofCluster: detection.spoofCluster ?? null,
         analysisDetails: detection.analysisDetails,
         modelProvenance: detection.modelProvenance,
         time: (elapsedMs / 1000).toFixed(2),
@@ -253,7 +254,7 @@ function DeepfakeLab({ audio, profiles }) {
   // Pipeline stage labels — names mirror the real backend pipeline.
   const stages = [
     { label: 'Cloning voice timbre', sub: 'Voice-cloning engine → 24 kHz waveform' },
-    { label: 'Running BioVoice detector', sub: 'Ensemble (A01–A16)' },
+    { label: 'Running BioVoice detector', sub: 'ECAPA Cluster Ensemble (K=7)' },
   ];
 
   return (
@@ -651,6 +652,11 @@ function DeepfakeLab({ audio, profiles }) {
                           : 'NO SYSTEMS FLAGGED · GATE FAILED TO CATCH'
                         : result.decision === 'FAKE' ? 'SYNTHETIC' : 'GATE FAILED TO CATCH'}
                     </div>
+                    {result.spoofVotes > 0 && result.spoofCluster && (
+                      <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
+                        Flagged as: {result.spoofCluster.label} (cluster {result.spoofCluster.clusterId})
+                      </div>
+                    )}
                   </div>
                   <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
                     <div className="label-mono" style={{ fontSize: 11 }}>ATTACK MODEL</div>
@@ -1071,6 +1077,11 @@ function IdentifyResults({ result, profiles, wavFile, onReset, resetLabel = '↺
                   <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
                     {result.spoofVotes > 0 ? `${result.spoofVotes} SYSTEM${result.spoofVotes > 1 ? 'S' : ''} FLAGGED · FAKE` : 'NONE FLAGGED · GENUINE'}
                   </div>
+                  {result.spoofVotes > 0 && result.spoofCluster && (
+                    <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
+                      Flagged as: {result.spoofCluster.label} (cluster {result.spoofCluster.clusterId})
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -1181,6 +1192,7 @@ function verifyToIdentification(v, config) {
     deepfakeScore: v.deepfakeScore,
     spoofVotes: v.spoofVotes ?? 0,
     spoofTotal: v.spoofTotal ?? 0,
+    spoofCluster: v.spoofCluster ?? null,
     analysisDetails: v.analysisDetails,
     wouldAcceptTop1: v.decision === 'ACCEPT',
     similarityThreshold: simThr,
@@ -1460,7 +1472,12 @@ function UserSettingsPage() {
                 <KV k="Sample rate" v={`${cfg.sampleRate} Hz`}/>
                 <KV k="Active speaker models" v={cfg.models.filter((m) => m.participating).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
                 <KV k="Loaded encoders" v={cfg.models.filter((m) => m.loaded).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
-                <KV k="Detector" v={cfg.provenance?.detector === 'ensemble' ? 'Ensemble (A01–A16)' : cfg.provenance?.detector === 'aasist' ? 'AASIST' : (cfg.provenance?.detector ?? '—')}/>
+                <KV k="Detector" v={
+                  cfg.provenance?.detector === 'ecapa_cluster_ensemble' ? 'ECAPA Cluster Ensemble (7 clusters)'
+                  : cfg.provenance?.detector === 'ensemble' ? 'Ensemble (A01–A16)'
+                  : cfg.provenance?.detector === 'aasist' ? 'AASIST'
+                  : (cfg.provenance?.detector ?? '—')
+                }/>
                 <KV k="Encoder provenance" v={cfg.provenance?.encoder ?? '—'}/>
                 <KV k="Status" v={cfg.provenance?.isDegraded ? 'Degraded (heuristic fallback)' : 'Healthy'}/>
               </SectionCard>

@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
-from app.services.ensemble_detector import EnsembleDetectorService
+from app.services.cluster_detector import ClusterEnsembleDetectorService
 from app.services.speaker_encoder import (
     EcapaSpeakerEncoder,
     RedimNetSpeakerEncoder,
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class AppContainer:
     settings: Settings
     store: SQLiteStore
-    detector: EnsembleDetectorService
+    detector: ClusterEnsembleDetectorService
     verification_service: VerificationService
     spoof_service: SpoofGenerationService
     # Every comparison encoder we could load, whether or not it currently
@@ -75,7 +75,10 @@ def build_container(settings: Settings) -> AppContainer:
     def ov(key: str, default):
         return overrides.get(key, default)
 
-    detector = EnsembleDetectorService(models_path=settings.ensemble_models_path)
+    detector = ClusterEnsembleDetectorService(
+        models_path=settings.cluster_models_path,
+        ecapa_savedir=settings.ecapa_savedir,
+    )
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
 
     loaded_comparison_encoders = _load_comparison_encoders(settings)

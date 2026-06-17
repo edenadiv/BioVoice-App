@@ -116,9 +116,9 @@ def ready(request: Request) -> dict:
         overall_ok = False
 
     s = container.settings
-    checks["ensemble_models"] = {"ok": s.ensemble_models_path.is_dir()}
+    checks["cluster_models"] = {"ok": s.cluster_models_path.is_dir()}
     checks["redimnet_weights"] = {"ok": s.redimnet_weights_path.exists()}
-    if not checks["ensemble_models"]["ok"] or not checks["redimnet_weights"]["ok"]:
+    if not checks["cluster_models"]["ok"] or not checks["redimnet_weights"]["ok"]:
         checks["models_note"] = "Models missing — falling back to heuristic detector + encoder"
 
     if not overall_ok:
@@ -674,6 +674,7 @@ async def test_spoof_sample(
     deepfake_score = service.detector.detect(trimmed.waveform)
     spoof_votes = getattr(service.detector, "last_flagged", 0)
     spoof_total = getattr(service.detector, "last_total", 0)
+    spoof_cluster = service._collect_spoof_cluster()
     # G1 / Py 3.12 float-precision defence — clamp before the value
     # reaches the Pydantic le=1.0 constraint.
     if deepfake_score < 0.0:
@@ -694,6 +695,7 @@ async def test_spoof_sample(
         model_provenance=service._collect_provenance(),
         spoof_votes=spoof_votes,
         spoof_total=spoof_total,
+        spoof_cluster=spoof_cluster,
     )
 
 

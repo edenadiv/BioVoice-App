@@ -20,6 +20,7 @@ import type {
   ModelProvenance,
   Speaker,
   SpoofBatchResult,
+  SpoofClusterInfo,
   SpoofDecision,
   SpoofEngines,
   SpoofGenerationResult,
@@ -64,9 +65,16 @@ type AnalysisDetailsResponse = {
 
 type ModelProvenanceResponse = {
   encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
-  detector: "aasist" | "ensemble" | "heuristic";
+  detector: "aasist" | "ensemble" | "heuristic" | "ecapa_cluster_ensemble";
   acoustic_probe: "heuristic" | "trained_heads";
   is_degraded: boolean;
+};
+
+type SpoofClusterInfoResponse = {
+  cluster_id: number;
+  label: string;
+  p_spoof: number;
+  members: string[];
 };
 
 type VerificationResponse = {
@@ -78,6 +86,7 @@ type VerificationResponse = {
   deepfake_score: number;
   spoof_votes?: number;
   spoof_total?: number;
+  spoof_cluster?: SpoofClusterInfoResponse | null;
   centroid_similarity: number;
   sample_similarities: number[];
   speaker_model_scores?: SpeakerModelScoreResponse[];
@@ -135,6 +144,7 @@ type SpoofTestResponse = {
   model_provenance?: ModelProvenanceResponse | null;
   spoof_votes?: number;
   spoof_total?: number;
+  spoof_cluster?: SpoofClusterInfoResponse | null;
 };
 
 type IdentificationMatchResponse = {
@@ -152,6 +162,7 @@ type IdentificationResponse = {
   deepfake_score: number;
   spoof_votes?: number;
   spoof_total?: number;
+  spoof_cluster?: SpoofClusterInfoResponse | null;
   analysis_details: AnalysisDetailsResponse | null;
   would_accept_top1: boolean;
   similarity_threshold: number;
@@ -179,7 +190,7 @@ type ReadyzResponse = {
   ready: boolean;
   checks: {
     database?: { ok: boolean };
-    ensemble_models?: { ok: boolean; path?: string };
+    cluster_models?: { ok: boolean; path?: string };
     redimnet_weights?: { ok: boolean; path?: string };
   };
   models_note?: string;
@@ -196,7 +207,7 @@ export type MetricsSummary = {
 export type ReadyState = {
   ready: boolean;
   databaseOk: boolean;
-  ensembleModelsOk: boolean;
+  clusterModelsOk: boolean;
   redimnetWeightsOk: boolean;
 };
 
@@ -251,6 +262,16 @@ function toModelProvenance(payload: ModelProvenanceResponse | null | undefined):
     detector: payload.detector,
     acousticProbe: payload.acoustic_probe,
     isDegraded: payload.is_degraded,
+  };
+}
+
+function toSpoofCluster(payload: SpoofClusterInfoResponse | null | undefined): SpoofClusterInfo | null {
+  if (!payload) return null;
+  return {
+    clusterId: payload.cluster_id,
+    label: payload.label,
+    pSpoof: payload.p_spoof,
+    members: payload.members,
   };
 }
 
@@ -316,6 +337,7 @@ function toVerificationResult(response: VerificationResponse): VerificationResul
     modelProvenance: toModelProvenance(response.model_provenance),
     spoofVotes: response.spoof_votes ?? 0,
     spoofTotal: response.spoof_total ?? 0,
+    spoofCluster: toSpoofCluster(response.spoof_cluster),
     queryEmbeddings: response.query_embeddings ?? {},
     createdAt: response.created_at,
   };
@@ -523,6 +545,7 @@ export async function spoofTest(file: File): Promise<SpoofTestResult> {
     modelProvenance: toModelProvenance(response.model_provenance),
     spoofVotes: response.spoof_votes ?? 0,
     spoofTotal: response.spoof_total ?? 0,
+    spoofCluster: toSpoofCluster(response.spoof_cluster),
   };
 }
 
@@ -750,6 +773,7 @@ function toIdentificationResult(response: IdentificationResponse): Identificatio
     deepfakeScore: response.deepfake_score,
     spoofVotes: response.spoof_votes ?? 0,
     spoofTotal: response.spoof_total ?? 0,
+    spoofCluster: toSpoofCluster(response.spoof_cluster),
     analysisDetails: response.analysis_details ? toAnalysisDetails(response.analysis_details) : null,
     wouldAcceptTop1: response.would_accept_top1,
     similarityThreshold: response.similarity_threshold,
@@ -797,7 +821,7 @@ export async function getReady(): Promise<ReadyState> {
   return {
     ready: response.ready,
     databaseOk: response.checks.database?.ok ?? false,
-    ensembleModelsOk: response.checks.ensemble_models?.ok ?? false,
+    clusterModelsOk: response.checks.cluster_models?.ok ?? false,
     redimnetWeightsOk: response.checks.redimnet_weights?.ok ?? false,
   };
 }

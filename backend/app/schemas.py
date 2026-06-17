@@ -14,7 +14,7 @@ EncoderProvenance = Literal[
     "wespeaker_resnet293_lm",
     "heuristic_placeholder",
 ]
-DetectorProvenance = Literal["aasist", "ensemble", "heuristic"]
+DetectorProvenance = Literal["aasist", "ensemble", "heuristic", "ecapa_cluster_ensemble"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
 ExplainModelKey = Literal["aasist", "redimnet_b5", "ecapa_voxceleb"]
@@ -165,6 +165,18 @@ class AnalysisDetails(BaseModel):
 SpoofDecision = Literal["FAKE", "GENUINE"]
 
 
+class SpoofClusterInfo(BaseModel):
+    """Explainability detail for the ECAPA cluster-ensemble detector --
+    identifies which of the 7 ECAPA-TDNN attack-system clusters produced
+    the highest spoof probability for this audio, and what kinds of
+    synthesis systems that cluster represents."""
+
+    cluster_id: int = Field(ge=1, le=7)
+    label: str
+    p_spoof: float = Field(ge=0.0, le=1.0)
+    members: list[str] = Field(default_factory=list)
+
+
 class SpoofTestResponse(BaseModel):
     """G14 — payload for `POST /me/spoof/test`. The DeepfakeLab UI uses
     this to score an arbitrary uploaded WAV (typically the just-generated
@@ -177,6 +189,7 @@ class SpoofTestResponse(BaseModel):
     model_provenance: ModelProvenance | None = None
     spoof_votes: int = 0
     spoof_total: int = 0
+    spoof_cluster: SpoofClusterInfo | None = None
 
 
 class SpoofBatchRequest(BaseModel):
@@ -241,6 +254,7 @@ class VerificationResponse(BaseModel):
     model_provenance: ModelProvenance | None = None
     spoof_votes: int = 0
     spoof_total: int = 0
+    spoof_cluster: SpoofClusterInfo | None = None
     # Raw query embedding per speaker model — lets the UI project the queried
     # voice into the embedding space alongside the enrolled clusters.
     query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
@@ -406,6 +420,7 @@ class IdentificationResponse(BaseModel):
     model_provenance: ModelProvenance | None = None
     spoof_votes: int = 0
     spoof_total: int = 0
+    spoof_cluster: SpoofClusterInfo | None = None
     # Raw query embedding per speaker model (see VerificationResponse).
     query_embeddings: dict[str, list[float]] = Field(default_factory=dict)
 

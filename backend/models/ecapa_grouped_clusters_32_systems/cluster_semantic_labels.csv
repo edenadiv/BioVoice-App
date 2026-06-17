@@ -1,0 +1,22 @@
+backbone,cluster_id,members,cluster_size,dominant_category,category_breakdown,suggested_label
+ECAPA,1,"A12,A19",2,Concatenative / Unit-selection,Concatenative / Unit-selection=2,Concatenative / Unit-selection
+ECAPA,2,"A18,A20,A23,A27,A30,A31,A32",7,Adversarial - Malafide,Adversarial - Malafide=3; Adversarial - Malacopula=3; Adversarial - Malacopula+Malafide=1,"Mixed (dominant: Adversarial - Malafide, 3/7 systems)"
+ECAPA,3,"A16,A26",2,Voice Conversion - Disentanglement,Voice Conversion - Disentanglement=2,Voice Conversion - Disentanglement
+ECAPA,4,"A08,A17,A29",3,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=2; Neural TTS - Flow (end-to-end)=1,VITS / ZMM-TTS / XTTS (Coqui pretrained)
+ECAPA,5,"A09,A10,A21,A22",4,Neural TTS - Conformer,Neural TTS - Conformer=4,Neural TTS - Conformer
+ECAPA,6,"A01,A02,A03,A04,A05,A06,A07,A11,A13,A14,A15,A24,A25",13,Neural TTS - Flow,Neural TTS - Flow=3; Neural TTS - Diffusion=3; Voice Conversion - GAN=3; Neural TTS - Feedforward=1; Neural TTS - Autoregressive=1; Neural TTS - Flow (end-to-end)=1; Voice Conversion - Diffusion=1,"Mixed (dominant: Neural TTS - Flow, 3/13 systems)"
+ECAPA,7,A28,1,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=1,Neural TTS - Pretrained (external data)
+ReDimNet,1,"A01,A02,A03,A04,A05,A06,A07,A08,A09,A10,A11,A13,A14,A15,A16,A21,A22,A23,A24,A25,A29",21,Neural TTS - Conformer,Neural TTS - Conformer=4; Neural TTS - Diffusion=3; Neural TTS - Flow=3; Voice Conversion - GAN=3; Neural TTS - Flow (end-to-end)=2; Neural TTS - Feedforward=1; Neural TTS - Autoregressive=1; Voice Conversion - Disentanglement=1; Adversarial - Malafide=1; Voice Conversion - Diffusion=1; Neural TTS - Pretrained (external data)=1,"Mixed (dominant: Neural TTS - Conformer, 4/21 systems)"
+ReDimNet,2,A26,1,Voice Conversion - Disentanglement,Voice Conversion - Disentanglement=1,Voice Conversion - Disentanglement
+ReDimNet,3,A17,1,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=1,Neural TTS - Pretrained (external data)
+ReDimNet,4,A28,1,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=1,Neural TTS - Pretrained (external data)
+ReDimNet,5,"A18,A20,A27,A30,A31,A32",6,Adversarial - Malacopula,Adversarial - Malacopula=3; Adversarial - Malafide=2; Adversarial - Malacopula+Malafide=1,"Mixed (dominant: Adversarial - Malacopula, 3/6 systems)"
+ReDimNet,6,A12,1,Concatenative / Unit-selection,Concatenative / Unit-selection=1,Concatenative / Unit-selection
+ReDimNet,7,A19,1,Concatenative / Unit-selection,Concatenative / Unit-selection=1,Concatenative / Unit-selection
+ResNet293,1,"A12,A14,A18,A19,A20,A23,A27,A30,A31,A32",10,Adversarial - Malafide,Adversarial - Malafide=3; Adversarial - Malacopula=3; Concatenative / Unit-selection=2; Neural TTS - Flow (end-to-end)=1; Adversarial - Malacopula+Malafide=1,"Mixed (dominant: Adversarial - Malafide, 3/10 systems)"
+ResNet293,2,"A22,A24",2,Neural TTS - Conformer,Neural TTS - Conformer=1; Voice Conversion - GAN=1,A10 + BigVGAN / Posteriorgram VC
+ResNet293,3,"A13,A25",2,Voice Conversion - GAN,Voice Conversion - GAN=1; Voice Conversion - Diffusion=1,StarGAN-ZSVC / Diffusion VC
+ResNet293,4,"A11,A15,A16,A26",4,Voice Conversion - Disentanglement,Voice Conversion - Disentanglement=2; Neural TTS - Autoregressive=1; Voice Conversion - GAN=1,"Mixed (dominant: Voice Conversion - Disentanglement, 2/4 systems)"
+ResNet293,5,"A17,A29",2,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=2,Neural TTS - Pretrained (external data)
+ResNet293,6,"A01,A02,A03,A04,A05,A06,A07,A08,A09,A10,A21",11,Neural TTS - Flow,Neural TTS - Flow=3; Neural TTS - Diffusion=3; Neural TTS - Conformer=3; Neural TTS - Feedforward=1; Neural TTS - Flow (end-to-end)=1,"Mixed (dominant: Neural TTS - Flow, 3/11 systems)"
+ResNet293,7,A28,1,Neural TTS - Pretrained (external data),Neural TTS - Pretrained (external data)=1,Neural TTS - Pretrained (external data)

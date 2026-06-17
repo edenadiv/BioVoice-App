@@ -153,7 +153,7 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
         const ready = await getReady();
         if (!cancelled) setModels(ready);
       } catch {
-        if (!cancelled) setModels({ ready: false, databaseOk: false, ensembleModelsOk: false, redimnetWeightsOk: false });
+        if (!cancelled) setModels({ ready: false, databaseOk: false, clusterModelsOk: false, redimnetWeightsOk: false });
       }
     })();
     return () => { cancelled = true; };
@@ -242,7 +242,7 @@ function SettingsPanel({ mode, setMode, soundOn, setSoundOn }) {
             const rows = models
               ? [
                   ['ReDimNet-B5', '192-d speaker embedding · vendored checkpoint', models.redimnetWeightsOk ? 'good' : 'warn'],
-                  ['Ensemble (A01–A16)', 'Anti-spoofing detector · 16 ASVspoof5 classifiers', models.ensembleModelsOk ? 'good' : 'warn'],
+                  ['ECAPA Cluster Ensemble (K=7)', 'Anti-spoofing detector · 7 attack-family clusters', models.clusterModelsOk ? 'good' : 'warn'],
                   ['Spoof generator', 'system TTS fallback (XTTS planned for v1.1)', 'warn'],
                 ]
               : [['Loading…', 'Probing /readyz', 'warn']];
@@ -781,9 +781,14 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
         {r.message && <div style={{ fontSize: 16, color: 'var(--ink-mute)', lineHeight: 1.5 }}>{r.message}</div>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
           <Metric label="Similarity" value={r.similarityScore.toFixed(3)} sub="cosine" trend={r.decision === 'ACCEPT' ? 'up' : 'flat'}/>
-          <Metric label="Deepfake" value={r.deepfakeScore.toFixed(3)} sub="ensemble" trend={r.decision === 'DEEPFAKE' ? 'flat' : 'up'}/>
+          <Metric label="Deepfake" value={r.deepfakeScore.toFixed(3)} sub={r.modelProvenance?.detector === 'ecapa_cluster_ensemble' ? 'cluster ensemble' : 'ensemble'} trend={r.decision === 'DEEPFAKE' ? 'flat' : 'up'}/>
           <Metric label="Centroid" value={r.centroidSimilarity.toFixed(3)} sub="vs profile" trend="flat"/>
         </div>
+        {r.spoofCluster && r.decision === 'DEEPFAKE' && (
+          <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>
+            Flagged as: {r.spoofCluster.label} (cluster {r.spoofCluster.clusterId})
+          </div>
+        )}
         {scores.length > 0 && (
           <div style={{ display: 'grid', gap: 8 }}>
             <div className="label-mono" style={{ fontSize: 13 }}>PER-MODEL SCORES</div>

@@ -135,6 +135,11 @@ class Settings:
     # Expected layout: <root>/train/A01..A08/ and <root>/dev/A09..A16/,
     # each with logistic_regression.pkl + scaler.pkl.
     ensemble_models_path: Path = _BACKEND_DIR / "models" / "asvspoof5_train_dev_16_systems"
+    # Cluster ensemble detector: folder containing 7 ECAPA-TDNN cluster
+    # classifiers (cluster_1..cluster_7), each with scaler.pkl +
+    # logistic_regression.pkl + members.json, plus
+    # cluster_semantic_labels.csv for human-readable labels.
+    cluster_models_path: Path = _BACKEND_DIR / "models" / "ecapa_grouped_clusters_32_systems"
     redimnet_weights_path: Path = _BACKEND_DIR / "models" / "redimnet_b5.pt"
     ecapa_savedir: Path = _BACKEND_DIR / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = _BACKEND_DIR / "models" / "wespeaker_resnet293_lm"

@@ -26,6 +26,7 @@ from app.schemas import (
     SpeakerModelMatches,
     SpeakerModelScore,
     SpeakerResponse,
+    SpoofClusterInfo,
     StageBreakdown,
     UserEmbedding,
     VerificationResponse,
@@ -100,6 +101,17 @@ class VerificationService:
         self.encoder = speaker_encoder
         self.comparison_encoders = dict(comparison_encoders or {})
         self.acoustic_probe = acoustic_probe or AcousticProbe()
+
+    def _collect_spoof_cluster(self) -> SpoofClusterInfo | None:
+        top = getattr(self.detector, "last_top_cluster", None)
+        if top is None:
+            return None
+        return SpoofClusterInfo(
+            cluster_id=top.cluster_id,
+            label=top.label,
+            p_spoof=top.p_spoof,
+            members=top.members,
+        )
 
     def _collect_provenance(self) -> ModelProvenance:
         encoder_provenance = getattr(self.encoder, "provenance", "redimnet_b5")
@@ -268,6 +280,7 @@ class VerificationService:
         detect_ms = (perf_counter() - t0) * 1000.0
         spoof_votes = getattr(self.detector, "last_flagged", 0)
         spoof_total = getattr(self.detector, "last_total", 0)
+        spoof_cluster = self._collect_spoof_cluster()
 
         sample_similarities = [
             _clamp_unit(self.encoder.cosine_similarity(sample_embedding, query_embedding))
@@ -351,6 +364,7 @@ class VerificationService:
             model_provenance=self._collect_provenance(),
             spoof_votes=spoof_votes,
             spoof_total=spoof_total,
+            spoof_cluster=spoof_cluster,
             query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
             created_at=created_at,
         )
@@ -370,6 +384,7 @@ class VerificationService:
         deepfake_score = _clamp_unit(self.detector.detect(trimmed.waveform))
         id_spoof_votes = getattr(self.detector, "last_flagged", 0)
         id_spoof_total = getattr(self.detector, "last_total", 0)
+        id_spoof_cluster = self._collect_spoof_cluster()
         analysis_details = self.acoustic_probe.score(trimmed.waveform, sample_rate=trimmed.sample_rate)
         speakers = [self._ensure_comparison_embeddings(speaker) for speaker in speakers]
 
@@ -452,6 +467,7 @@ class VerificationService:
             model_provenance=self._collect_provenance(),
             spoof_votes=id_spoof_votes,
             spoof_total=id_spoof_total,
+            spoof_cluster=id_spoof_cluster,
             query_embeddings=self._query_embeddings(trimmed.waveform, primary=query_embedding),
         )
         self.store.add_identification(
