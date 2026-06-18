@@ -4,7 +4,7 @@ import { projectPCA3, type PCA3 } from "../lib/pca";
 import type { SpeakerModelKey } from "../types";
 
 const LIVE_WINDOW_SECONDS = 1.5;
-const DEFAULT_INTERVAL_MS = 500;
+const DEFAULT_INTERVAL_MS = 1000;
 
 export type LiveEmbeddingState = {
   liveProjected: [number, number, number] | null;

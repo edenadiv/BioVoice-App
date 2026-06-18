@@ -26,7 +26,6 @@ interface ExplainTabProps {
 }
 
 const MODEL_LABELS: Record<string, string> = {
-  aasist: "AASIST · anti-spoof",
   redimnet_b5: "ReDimNet · speaker",
   ecapa_voxceleb: "ECAPA · speaker",
 };

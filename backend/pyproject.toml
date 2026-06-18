@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "biovoice-backend"
 version = "0.1.0"
 description = "FastAPI backend for the BioVoice web refactor"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
   "fastapi>=0.111",
   "uvicorn[standard]>=0.30",
@@ -46,8 +46,9 @@ speaker_models = [
 # `bash backend/scripts/setup_xtts.sh`; F5 fetches its checkpoints from
 # Hugging Face on first use. TTS pins to <0.23 (upstream is unmaintained).
 spoof = [
-  "f5-tts>=1.1",         # F5-TTS — flow-matching DiT zero-shot voice cloner
-  "TTS>=0.22,<0.23",     # Coqui XTTS-v2 — autoregressive zero-shot cloner
+  "f5-tts>=1.1",                  # F5-TTS — flow-matching DiT zero-shot voice cloner
+  "TTS>=0.22,<0.23",              # Coqui XTTS-v2 — autoregressive zero-shot cloner
+  "transformers>=4.38,<4.41",     # TTS 0.22 needs BeamSearchScorer, removed in 4.41
 ]
 # Test runner deps. CI installs `[model,test]` so `pytest` is on PATH +
 # httpx is available for fastapi.testclient. Locally, the dev venv

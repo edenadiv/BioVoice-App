@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,6 +18,8 @@ from app.api.routes import router
 from app.core.container import build_container
 from app.core.config import settings
 from app.core.logging_setup import configure_logging
+
+_log = logging.getLogger(__name__)
 
 # F7.2 — set up structured (JSON) logging before any module-level
 # logger.getLogger() side effects fire. Honour BIOVOICE_LOG_FORMAT=plain
@@ -68,9 +73,26 @@ def _mount_spa(app: FastAPI, dist_dir: Path) -> None:
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
+def _warmup_spoof(container) -> None:
+    """Import f5-tts and TTS packages so /spoof/engines responds instantly."""
+    try:
+        container.spoof_service.list_engines()
+        _log.info("Spoof engines pre-warmed at startup.")
+    except Exception as exc:
+        _log.warning("Spoof engine warmup failed (non-fatal): %s", exc)
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="BioVoice API", version="0.1.0")
     container = build_container(settings)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Pre-warm spoof engine imports in a thread so the first visit to
+        # the Deepfake Lab page doesn't block on f5-tts / TTS import time.
+        asyncio.get_running_loop().run_in_executor(None, _warmup_spoof, container)
+        yield
+
+    app = FastAPI(title="BioVoice API", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -78,7 +100,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.state.container = container
+    app.state.container = container  # type: ignore[attr-defined]
     app.include_router(router)
     dist_dir = _resolve_frontend_dist()
     if dist_dir is not None:

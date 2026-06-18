@@ -25,7 +25,7 @@ export type AnalysisDetails = {
 };
 
 export type SpeakerModelKey = "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm";
-export type ExplainModelKey = "aasist" | "redimnet_b5" | "ecapa_voxceleb";
+export type ExplainModelKey = "redimnet_b5" | "ecapa_voxceleb";
 
 export type CamSegment = {
   startMs: number;
@@ -188,7 +188,7 @@ export type SpeakerModelMatches = {
 
 export type ModelProvenance = {
   encoder: "redimnet_b5" | "ecapa_voxceleb" | "wespeaker_resnet293_lm" | "heuristic_placeholder";
-  detector: "aasist" | "ensemble" | "heuristic" | "ecapa_cluster_ensemble";
+  detector: "ensemble" | "heuristic" | "ecapa_cluster_ensemble";
   acousticProbe: "heuristic" | "trained_heads";
   isDegraded: boolean;
 };

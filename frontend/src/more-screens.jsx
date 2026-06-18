@@ -17,6 +17,17 @@ import {
   useVoiceRecorder,
 } from "./lib/audio";
 
+// ECAPA K=7 cluster descriptions — from asvspoof5_clustering_session_summary.md
+const CLUSTER_DESCRIPTIONS = {
+  1: "Concatenative / unit-selection synthesis — splices recorded speech segments. Often leaves audible seam artifacts at segment boundaries.",
+  2: "Adversarial filtering attack (Malafide / Malacopula) — applies a learned filter specifically designed to fool anti-spoofing models. Hardest category for detectors.",
+  3: "Voice Conversion via disentanglement — separates and swaps speaker identity from speech content.",
+  4: "High-fidelity neural TTS (VITS / ZMM-TTS / XTTS) — end-to-end or externally-pretrained systems producing very natural-sounding speech.",
+  5: "Conformer-based neural TTS (IMS Toucan / BigVGAN variants) — transformer architecture known for strong prosody control.",
+  6: "Mixed neural TTS / Voice Conversion — general catch-all covering 13 systems across multiple TTS and VC architectures.",
+  7: "Externally-pretrained neural TTS (A28) — the single hardest system across all backbones; trained on external data.",
+};
+
 // ============================================================================
 // Sidebar — three-item navigation rail (Console / DeepfakeLab / Profiles).
 // ============================================================================
@@ -141,7 +152,7 @@ function DeepfakeLab({ audio, profiles }) {
 
   const generate = useCallback(async () => {
     if (!target) {
-      setError("Enrol at least one profile in the Profiles page first.");
+      setError("Enroll at least one profile in the Profiles page first.");
       return;
     }
     setError(null);
@@ -191,7 +202,7 @@ function DeepfakeLab({ audio, profiles }) {
       if (msg.includes('503') || msg.toLowerCase().includes('xtts') || msg.toLowerCase().includes('f5') || msg.toLowerCase().includes('cloning') || msg.toLowerCase().includes('tts')) {
         friendly = 'Spoof generation requires a voice-cloning engine (F5-TTS or XTTS-v2). Install it on the backend (see backend/README.md §voice-cloning spoof generation).';
       } else if (msg.toLowerCase().includes('reference') || msg.toLowerCase().includes('enrol') || msg.includes('404')) {
-        friendly = `No reference sample for "${target}" — enrol them first via the Profiles page.`;
+        friendly = `No reference sample for "${target}" — enroll them first via the Profiles page.`;
       }
       setError(friendly);
       setStage(0);
@@ -209,7 +220,7 @@ function DeepfakeLab({ audio, profiles }) {
   const [batchError, setBatchError] = useState(null);
 
   const generateBatch = useCallback(async () => {
-    if (!target) { setBatchError('Enrol at least one profile first.'); return; }
+    if (!target) { setBatchError('Enroll at least one profile first.'); return; }
     const texts = text.split('\n').map((t) => t.trim()).filter(Boolean);
     if (texts.length === 0) { setBatchError('Enter at least one utterance (one per line).'); return; }
     setBatchError(null);
@@ -262,7 +273,7 @@ function DeepfakeLab({ audio, profiles }) {
       <Chrome status="DEEPFAKE LABORATORY · ETHICAL USE ONLY" statusKind="warn" subtitle="Adversarial testing" screenName="DF LAB"/>
       <AmbientField count={50}/>
 
-      <div className="biovoice-page-content biovoice-split-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, zIndex: 2 }}>
+      <div className="biovoice-page-content biovoice-split-grid" style={{ position: 'absolute', inset: 0, padding: '150px 56px 90px 124px', display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 28, zIndex: 2 }}>
 
         {/* LEFT: Forge */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
@@ -458,14 +469,14 @@ function DeepfakeLab({ audio, profiles }) {
             </button>
             {!target && (
               <div className="label-mono" style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
-                Enrol at least one profile in Profiles before forging.
+                Enroll at least one profile in Profiles before forging.
               </div>
             )}
           </div>
         </div>
 
         {/* RIGHT: Outcome */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
           <div>
             <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>BLUE-TEAM · DETECTOR <InfoButton k="lab.test"/></div>
             <div style={{ fontSize: 38, fontWeight: 200, marginTop: 4 }}>BioVoice response</div>
@@ -564,7 +575,7 @@ function DeepfakeLab({ audio, profiles }) {
           </div>
 
           {/* Verdict */}
-          <div className="panel outline-glow" style={{ padding: 24, flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 }}>
+          <div className="panel outline-glow" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
             {!result && !generating && !error && (
               <div style={{ display: 'grid', placeItems: 'center', flex: 1, color: 'var(--ink-soft)', textAlign: 'center', padding: 24 }}>
                 <div>
@@ -653,15 +664,29 @@ function DeepfakeLab({ audio, profiles }) {
                         : result.decision === 'FAKE' ? 'SYNTHETIC' : 'GATE FAILED TO CATCH'}
                     </div>
                     {result.spoofVotes > 0 && result.spoofCluster && (
-                      <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>
-                        Flagged as: {result.spoofCluster.label} (cluster {result.spoofCluster.clusterId})
+                      <div style={{
+                        marginTop: 10, padding: '10px 12px', borderRadius: 8,
+                        background: 'rgba(255,85,119,0.08)', border: '1px solid rgba(255,85,119,0.2)',
+                      }}>
+                        <div className="label-mono" style={{ fontSize: 10, color: '#ff5577', marginBottom: 4 }}>
+                          ATTACK FAMILY · CLUSTER {result.spoofCluster.clusterId}
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                          {result.spoofCluster.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--ink-soft)', lineHeight: 1.5, marginBottom: 6 }}>
+                          {CLUSTER_DESCRIPTIONS[result.spoofCluster.clusterId] ?? 'Unknown cluster type.'}
+                        </div>
+                        <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>
+                          SYSTEMS: {result.spoofCluster.members?.join(', ')} · P(SPOOF) {result.spoofCluster.pSpoof?.toFixed(3)}
+                        </div>
                       </div>
                     )}
                   </div>
                   <div style={{ padding: 14, borderRadius: 10, background: 'rgba(126,240,255,0.06)', border: '1px solid rgba(126,240,255,0.2)' }}>
-                    <div className="label-mono" style={{ fontSize: 11 }}>ATTACK MODEL</div>
-                    <div style={{ fontSize: 23, marginTop: 6, fontWeight: 300 }}>{result.model}</div>
-                    <div className="label-mono" style={{ fontSize: 10, marginTop: 2 }}>VIA /me/spoof + /me/spoof/test</div>
+                    <div className="label-mono" style={{ fontSize: 11 }}>TTS ENGINE</div>
+                    <div style={{ fontSize: 19, marginTop: 6, fontWeight: 300 }}>{result.engine || '—'}</div>
+                    {result.voice && <div className="label-mono" style={{ fontSize: 10, marginTop: 4, color: 'var(--ink-soft)' }}>VOICE · {result.voice}</div>}
                   </div>
                 </div>
 
@@ -853,7 +878,7 @@ function IdentifyScreen({ profiles }) {
           <div style={{ display: 'flex', gap: 14, width: '100%' }}>
             <button onClick={handleSubmit} disabled={profiles.length === 0} className="biovoice-identify-cta"
               style={{ flex: 2, padding: '22px', borderRadius: 14, background: profiles.length > 0 ? 'linear-gradient(180deg, #7ef0ff, #3da9fc)' : 'rgba(125,200,255,0.06)', color: profiles.length > 0 ? '#04070d' : 'var(--ink-mute)', border: 'none', cursor: profiles.length > 0 ? 'pointer' : 'not-allowed', fontFamily: 'JetBrains Mono, monospace', fontSize: 19, fontWeight: 700, letterSpacing: '0.12em' }}>
-              {profiles.length === 0 ? 'ENROL A PROFILE FIRST' : 'FIND TOP 3 MATCHES'}
+              {profiles.length === 0 ? 'ENROLL A PROFILE FIRST' : 'FIND TOP 3 MATCHES'}
             </button>
             <button onClick={handleReset}
               style={{ flex: 1, padding: '22px', borderRadius: 14, background: 'transparent', color: 'var(--ink-mute)', border: '1px solid rgba(125,200,255,0.18)', cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace', fontSize: 15 }}>↺ REDO</button>
@@ -1475,7 +1500,6 @@ function UserSettingsPage() {
                 <KV k="Detector" v={
                   cfg.provenance?.detector === 'ecapa_cluster_ensemble' ? 'ECAPA Cluster Ensemble (7 clusters)'
                   : cfg.provenance?.detector === 'ensemble' ? 'Ensemble (A01–A16)'
-                  : cfg.provenance?.detector === 'aasist' ? 'AASIST'
                   : (cfg.provenance?.detector ?? '—')
                 }/>
                 <KV k="Encoder provenance" v={cfg.provenance?.encoder ?? '—'}/>
@@ -1626,7 +1650,7 @@ function ProfilesPage({ profiles, audio }) {
           <div>
             <div className="label-mono" style={{ fontSize: 14, color: 'var(--teal-2)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>VOICE PROFILES <InfoButton k="profiles.list"/></div>
             <div style={{ fontSize: 48, fontWeight: 200, marginTop: 4 }}>Enrolled voices</div>
-            <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a 192-dimensional fingerprint — not a recording.</div>
+            <div style={{ fontSize: 18, color: 'var(--ink-mute)', marginTop: 6 }}>Each profile is a high-dimensional voiceprint — not a recording.</div>
           </div>
           <button className="btn btn-primary" style={{ padding: '12px 22px', fontSize: 16 }}
                   onClick={() => setShowEnroll(true)}>
@@ -1637,7 +1661,7 @@ function ProfilesPage({ profiles, audio }) {
         {profiles.length === 0 ? (
           <div className="panel" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-mute)' }}>
             <div className="label-mono" style={{ fontSize: 13, marginBottom: 8, color: 'var(--teal-2)' }}>NO PROFILES YET</div>
-            <div style={{ fontSize: 20, marginBottom: 16 }}>Enrol your first speaker to get started.</div>
+            <div style={{ fontSize: 20, marginBottom: 16 }}>Enroll your first speaker to get started.</div>
             <button className="btn btn-primary" onClick={() => setShowEnroll(true)} style={{ padding: '10px 20px', fontSize: 16 }}>
               + &nbsp;ENROLL FIRST PROFILE
             </button>

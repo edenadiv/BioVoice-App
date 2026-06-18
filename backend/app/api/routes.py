@@ -359,8 +359,6 @@ async def explain(
     except (ValueError, WaveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    service.detector.load()
-    detector_model = getattr(service.detector, "model", None)
     redimnet_model = getattr(service.encoder, "model", None)
     ecapa_encoder = service.comparison_encoders.get("ecapa_voxceleb")
     ecapa_model = getattr(ecapa_encoder, "model", None) if ecapa_encoder else None
@@ -374,7 +372,6 @@ async def explain(
             ecapa_centroid = speaker.comparison_embeddings.get("ecapa_voxceleb")
 
     adapters = build_adapters(
-        detector_model,
         redimnet_model,
         ecapa_model,
         redimnet_centroid=redimnet_centroid,
@@ -489,7 +486,6 @@ async def explain_faithfulness(
     redimnet_centroid = _faith_centroid(target_speaker, "redimnet_b5")
     ecapa_centroid = _faith_centroid(target_speaker, "ecapa_voxceleb")
     adapters = build_adapters(
-        None,  # AASIST excluded — identity test only
         redimnet_model,
         ecapa_model,
         redimnet_centroid=redimnet_centroid or None,

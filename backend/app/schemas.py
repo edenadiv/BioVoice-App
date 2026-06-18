@@ -14,10 +14,10 @@ EncoderProvenance = Literal[
     "wespeaker_resnet293_lm",
     "heuristic_placeholder",
 ]
-DetectorProvenance = Literal["aasist", "ensemble", "heuristic", "ecapa_cluster_ensemble"]
+DetectorProvenance = Literal["ensemble", "heuristic", "ecapa_cluster_ensemble"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
-ExplainModelKey = Literal["aasist", "redimnet_b5", "ecapa_voxceleb"]
+ExplainModelKey = Literal["redimnet_b5", "ecapa_voxceleb"]
 
 
 class CamSegment(BaseModel):

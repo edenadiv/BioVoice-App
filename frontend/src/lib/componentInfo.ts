@@ -41,8 +41,8 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "console.embedding": {
     title: "Voice Embedding Space",
     body: [
-      "A 3-D map of the 192-dimensional speaker space. Each enrolled clip is encoded by ReDimNet B5, then all vectors are projected to 3-D with PCA so distance is meaningful.",
-      "• Dots = individual enrolment samples, colored per speaker.",
+      "A 3-D map of the speaker embedding space. Each enrolled clip is encoded by the selected model (ReDimNet B5 · ECAPA · WeSpeaker), then all vectors are projected to 3-D with PCA so distance is meaningful.",
+      "• Dots = individual enrollment samples, colored per speaker.",
       "• Larger rings = each speaker's centroid (their average voiceprint).",
       "• Cyan point = your live mic window, projected through the same basis.",
       "How to read it: the closer two points sit, the more similar the voices. Drag to rotate; switch the encoder (ReDimNet / ECAPA / WeSpeaker) with the buttons below.",
@@ -66,7 +66,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     title: "Enrolled Profiles",
     body: [
       "The speakers currently enrolled on this node and how many samples each has.",
-      "Verification needs at least the minimum enrolment samples (default 3) before a profile becomes usable. Select a profile to target it for a 1:1 verification.",
+      "Verification needs at least the minimum enrollment samples (default 3) before a profile becomes usable. Select a profile to target it for a 1:1 verification.",
     ],
   },
 
@@ -146,7 +146,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
   "lab.test": {
     title: "Anti-spoof test",
     body: [
-      "Drop in any WAV and score it directly with the ensemble anti-spoof detector (16 ASVspoof5 classifiers, A01–A16), independent of enrolment.",
+      "Drop in any WAV and score it directly with the ensemble anti-spoof detector (16 ASVspoof5 classifiers, A01–A16), independent of enrollment.",
       "Returns the synthetic-vs-genuine probability and the GENUINE/FAKE call at the current deepfake threshold.",
     ],
   },
@@ -171,7 +171,7 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     title: "Profiles manager",
     body: [
       "Create, inspect, and remove enrolled speakers. Each profile stores a centroid plus its individual sample embeddings used for matching.",
-      "Add samples until a profile reaches the minimum enrolment count; more, varied samples generally improve accuracy.",
+      "Add samples until a profile reaches the minimum enrollment count; more, varied samples generally improve accuracy.",
     ],
   },
 
@@ -199,9 +199,9 @@ export const COMPONENT_INFO: Record<string, ComponentInfo> = {
     ],
   },
   "enroll.modal": {
-    title: "Enrol a voice",
+    title: "Enroll a voice",
     body: [
-      "Captures samples to build a speaker profile. Record the prompt several times; each clip is encoded by ReDimNet and added to the profile's voiceprint.",
+      "Captures samples to build a speaker profile. Record the prompt several times; each clip is encoded by the active speaker models and added to the profile's voiceprint.",
       "Use a quiet room and speak naturally — varied, clean samples make later verification more reliable.",
     ],
   },

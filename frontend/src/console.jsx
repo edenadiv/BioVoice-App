@@ -18,6 +18,16 @@ const SPEAKER_MODEL_LABELS = {
   wespeaker_resnet293_lm: "WeSpeaker ResNet293",
 };
 
+const CLUSTER_DESCRIPTIONS = {
+  1: "Concatenative / unit-selection synthesis — splices recorded speech segments. Often leaves audible seam artifacts at segment boundaries.",
+  2: "Adversarial filtering attack (Malafide / Malacopula) — applies a learned filter specifically designed to fool anti-spoofing models. Hardest category for detectors.",
+  3: "Voice Conversion via disentanglement — separates and swaps speaker identity from speech content.",
+  4: "High-fidelity neural TTS (VITS / ZMM-TTS / XTTS) — end-to-end or externally-pretrained systems producing very natural-sounding speech.",
+  5: "Conformer-based neural TTS (IMS Toucan / BigVGAN variants) — transformer architecture known for strong prosody control.",
+  6: "Mixed neural TTS / Voice Conversion — general catch-all covering 13 systems across multiple TTS and VC architectures.",
+  7: "Externally-pretrained neural TTS (A28) — the single hardest system across all backbones; trained on external data.",
+};
+
 // ============================================================================
 // useCounter — animated count-up
 // ============================================================================
@@ -458,8 +468,9 @@ function PanelModal({ title, onClose, children }) {
 // ============================================================================
 // ConsoleScreen — the default expert dashboard.
 // ============================================================================
-function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll, onShowDetails, threatCount, verifyCount }) {
-  const [selectedProfile, setSelectedProfile] = useState(profiles[0]?.id);
+function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll, onShowDetails, threatCount, verifyCount, selectedProfileId, onSelectProfile }) {
+  const selectedProfile = selectedProfileId;
+  const setSelectedProfile = onSelectProfile ?? (() => {});
   const [hoverProfile, setHoverProfile] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [embeddingModelKey, setEmbeddingModelKey] = useState("redimnet_b5");
@@ -478,17 +489,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
   // Derive the live event feed from real /results polling (E-16).
   const { results, lastQuery } = useAppState();
   const activity = useMemo(() => results.slice(0, 50).map(resultToActivity), [results]);
-
-  // Keep the selected profile in sync with the live profiles list (E-15).
-  useEffect(() => {
-    if (profiles.length === 0) {
-      setSelectedProfile(undefined);
-      return;
-    }
-    if (!selectedProfile || !profiles.some((p) => p.id === selectedProfile)) {
-      setSelectedProfile(profiles[0].id);
-    }
-  }, [profiles, selectedProfile]);
 
   // V3 — real ReDimNet embeddings projected to 3-d for the constellation.
   const projection = useEmbeddingProjection(embeddingModelKey, profiles.length);
@@ -785,8 +785,20 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <Metric label="Centroid" value={r.centroidSimilarity.toFixed(3)} sub="vs profile" trend="flat"/>
         </div>
         {r.spoofCluster && r.decision === 'DEEPFAKE' && (
-          <div className="label-mono" style={{ fontSize: 11, color: 'var(--ink-soft)' }}>
-            Flagged as: {r.spoofCluster.label} (cluster {r.spoofCluster.clusterId})
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(255,85,119,0.08)', border: '1px solid rgba(255,85,119,0.2)',
+          }}>
+            <div className="label-mono" style={{ fontSize: 10, color: '#ff5577', marginBottom: 4 }}>
+              ATTACK FAMILY · CLUSTER {r.spoofCluster.clusterId}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{r.spoofCluster.label}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-soft)', lineHeight: 1.5, marginBottom: 6 }}>
+              {CLUSTER_DESCRIPTIONS[r.spoofCluster.clusterId] ?? 'Unknown cluster type.'}
+            </div>
+            <div className="label-mono" style={{ fontSize: 10, color: 'var(--ink-mute)' }}>
+              SYSTEMS: {r.spoofCluster.members?.join(', ')} · P(SPOOF) {r.spoofCluster.pSpoof?.toFixed(3)}
+            </div>
           </div>
         )}
         {scores.length > 0 && (
@@ -848,7 +860,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
           <div style={{ padding: '28px 22px', color: 'var(--ink-soft)', fontSize: 15, lineHeight: 1.6 }}>
             <div className="label-mono" style={{ fontSize: 11, color: 'var(--teal-2)', marginBottom: 8 }}>NO ACTIVITY YET</div>
             Verifications appear here as they happen.<br/>
-            Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enrol your first speaker.
+            Press <kbd style={kbdStyle}>3</kbd> to open Profiles and enroll your first speaker.
           </div>
         ) : (
           activity.map((a, i) => (
@@ -924,17 +936,6 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
             {profilesBody({ onExpand: () => setExpanded('profiles') })}
           </div>
 
-          <button className="btn btn-primary" onClick={() => onVerify(profiles.find(p => p.id === selectedProfile))}
-            style={{ width: '100%', justifyContent: 'center', padding: '18px', fontSize: 19 }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="3" fill="#04070d"/>
-              <circle cx="8" cy="8" r="6.5" stroke="#04070d" strokeWidth="1.4" opacity="0.4"/>
-            </svg>
-            Run verification &nbsp;·&nbsp; V
-          </button>
-          <button className="btn btn-ghost" onClick={onEnroll} style={{ width: '100%', justifyContent: 'center', padding: '14px' }}>
-            Enroll new profile · E
-          </button>
         </div>
 
         {/* ============ MIDDLE: Live signal ============ */}
@@ -954,7 +955,7 @@ function ConsoleScreen({ audio, micState, micStart, profiles, onVerify, onEnroll
 
         {/* ============ RIGHT: Activity ============ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0, minWidth: 0 }}>
-          <PanelTitle eyebrow="03 · EMBEDDING SPACE" title="Voice fingerprints · 192-D"/>
+          <PanelTitle eyebrow="03 · EMBEDDING SPACE" title="Voice fingerprints · multi-encoder"/>
 
           {/* Embedding Constellation — the showpiece; takes the lion's share */}
           <div className="panel outline-glow" style={{ flex: 2, minHeight: 240, display: 'flex', flexDirection: 'column', padding: '18px 18px 14px', position: 'relative', overflow: 'hidden' }}>

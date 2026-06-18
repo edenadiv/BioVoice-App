@@ -458,7 +458,7 @@ function PipelineFlow({ stages, activeIdx, complete = false }) {
                   {s.title}
                 </div>
                 <div style={{ fontSize: 14, color: 'var(--ink-soft)', marginTop: 2 }}>
-                  {s.sub}
+                  {s.subtitle ?? s.sub}
                 </div>
               </div>
             </div>

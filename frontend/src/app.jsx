@@ -14,25 +14,36 @@ import { AppStateProvider, useDerivedCounts, useProfiles } from "./lib/session";
 function AppShell() {
   const [page, setPage] = useState('console');
   const [overlayProfile, setOverlayProfile] = useState(null);
+  const [selectedProfileId, setSelectedProfileId] = useState(null);
 
   const profiles = useProfiles();
   const { verifyCount, threatCount } = useDerivedCounts();
 
+  // Keep selectedProfileId valid as profiles list changes.
+  useEffect(() => {
+    if (profiles.length === 0) { setSelectedProfileId(null); return; }
+    if (!selectedProfileId || !profiles.some(p => p.id === selectedProfileId)) {
+      setSelectedProfileId(profiles[0].id);
+    }
+  }, [profiles, selectedProfileId]);
+
   const mic = useMicrophone();
-  // Visualisations honestly show silence when the mic isn't recording —
-  // no synthesised faux-speech.
   const silent = useSilentAudio();
   const audio = mic.state === 'live' ? mic : silent;
   const startMic = useCallback(() => mic.start(), [mic]);
   useEffect(() => { startMic(); }, []);
 
-  // Keyboard shortcuts — number keys jump to a sidebar page.
+  // Keyboard shortcuts — V verifies the selected profile, E opens enrollment.
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
-      if (k === 'v' && profiles[0]) setOverlayProfile(profiles[0]);
-      else if (k === '1') setPage('console');
+      if (k === 'v') {
+        const p = profiles.find(p => p.id === selectedProfileId) ?? profiles[0];
+        if (p) setOverlayProfile(p);
+      } else if (k === 'e') {
+        setPage('profiles');
+      } else if (k === '1') setPage('console');
       else if (k === '2') setPage('identify');
       else if (k === '3') setPage('logs');
       else if (k === '4') setPage('lab');
@@ -42,7 +53,7 @@ function AppShell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [profiles]);
+  }, [profiles, selectedProfileId]);
 
   const runVerification = useCallback((profile) => setOverlayProfile(profile), []);
 
@@ -62,6 +73,8 @@ function AppShell() {
       body = <ConsoleScreen
         audio={audio} micState={mic.state} micStart={startMic}
         profiles={profiles} verifyCount={verifyCount} threatCount={threatCount}
+        selectedProfileId={selectedProfileId}
+        onSelectProfile={setSelectedProfileId}
         onVerify={runVerification}
         onEnroll={() => setPage('profiles')}
         onShowDetails={() => setPage('lab')}

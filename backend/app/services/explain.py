@@ -53,26 +53,6 @@ class _AdapterCtx:
     forward_target: Callable[[torch.Tensor], torch.Tensor]
 
 
-def _aasist_adapter(detector_model: torch.nn.Module) -> _AdapterCtx:
-    target_layer = detector_model.encoder[-1]
-
-    def prep(wav: torch.Tensor) -> torch.Tensor:
-        x = wav
-        if x.numel() > 64600:
-            x = x[:64600]
-        elif x.numel() < 64600:
-            x = F.pad(x, (0, 64600 - x.numel()))
-        peak = x.abs().max()
-        if peak > 1e-8:
-            x = x * (0.05 / peak)
-        return x.unsqueeze(0)
-
-    def forward(x: torch.Tensor) -> torch.Tensor:
-        _, logits = detector_model(x)
-        return logits[:, 0]
-
-    return _AdapterCtx(detector_model, target_layer, prep, forward)
-
 
 def _cosine_or_norm(emb: torch.Tensor, centroid: torch.Tensor | None) -> torch.Tensor:
     if centroid is None:
@@ -117,7 +97,6 @@ def _ecapa_adapter(encoder_model, centroid: torch.Tensor | None = None) -> _Adap
 
 
 _THRESHOLDS = {
-    "aasist": settings.cam_thr_aasist,
     "redimnet_b5": settings.cam_thr_redimnet,
     "ecapa_voxceleb": settings.cam_thr_ecapa,
 }
@@ -458,7 +437,6 @@ def resolve_redimnet_layer(encoder_model: torch.nn.Module, name: str | None) -> 
 
 
 def build_adapters(
-    detector_model: torch.nn.Module | None,
     redimnet_model: torch.nn.Module | None,
     ecapa_model: object | None,
     redimnet_centroid: list[float] | None = None,
@@ -466,8 +444,6 @@ def build_adapters(
     redimnet_layer: str | None = None,
 ) -> dict[ExplainModelKey, _AdapterCtx]:
     out: dict[ExplainModelKey, _AdapterCtx] = {}
-    if detector_model is not None:
-        out["aasist"] = _aasist_adapter(detector_model)
     if redimnet_model is not None:
         c = torch.tensor(redimnet_centroid, dtype=torch.float32) if redimnet_centroid else None
         layer = resolve_redimnet_layer(redimnet_model, redimnet_layer or settings.cam_redimnet_layer)

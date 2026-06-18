@@ -244,9 +244,9 @@ function EmbeddingConstellation({
       ctx.fillStyle = halo;
       ctx.fillRect(0, 0, width, height);
 
-      // grid sphere wireframe (soft)
-      ctx.strokeStyle = 'rgba(125,200,255,0.10)';
-      ctx.lineWidth = 0.6;
+      // grid sphere wireframe
+      ctx.strokeStyle = 'rgba(125,200,255,0.32)';
+      ctx.lineWidth = 0.8;
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI;
         ctx.beginPath();
@@ -639,8 +639,9 @@ function VerificationOverlay({ profile, onClose }) {
       background: 'radial-gradient(ellipse at center, rgba(7,17,30,0.96) 0%, rgba(4,7,13,0.98) 70%)',
       backdropFilter: 'blur(14px)',
       animation: 'fadeIn 380ms ease both',
-      display: 'grid',
-      gridTemplateRows: '1fr auto',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
     }}>
       {/* Scan line sweep */}
       <div style={{
@@ -651,8 +652,8 @@ function VerificationOverlay({ profile, onClose }) {
         opacity: phase < 3 ? 1 : 0.3,
       }}/>
 
-      <div className="biovoice-overlay-inner" style={{ display: 'grid', placeItems: 'center', padding: 80 }}>
-        <div className="biovoice-overlay-shell" style={{ width: 1100, textAlign: 'center', position: 'relative' }}>
+      <div className="biovoice-overlay-inner" style={{ flex: 1, overflowY: 'auto', display: 'flex', padding: '60px 80px' }}>
+        <div className="biovoice-overlay-shell" style={{ width: 1100, maxWidth: '100%', textAlign: 'center', position: 'relative', margin: 'auto' }}>
           <div className="label-mono" style={{ fontSize: 14, color: accent, letterSpacing: '0.32em' }}>
             VERIFYING · {profile?.id || 'UNKNOWN'}
           </div>
@@ -677,7 +678,7 @@ function VerificationOverlay({ profile, onClose }) {
 
           {/* Phase indicator dots */}
           <div className="biovoice-overlay-steps" style={{ display: 'flex', gap: 18, justifyContent: 'center', marginTop: 32 }}>
-            {['Capture', 'Embed · 192-d', 'Cosine match', 'Decision'].map((p, i) => {
+            {['Capture', 'Embed · encode', 'Cosine match', 'Decision'].map((p, i) => {
               const done = i < phase;
               const active = i === phase;
               return (
@@ -696,7 +697,7 @@ function VerificationOverlay({ profile, onClose }) {
           </div>
 
           {/* Phase-specific visualization */}
-          <div className="biovoice-overlay-visual" style={{ marginTop: 60, height: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
+          <div className="biovoice-overlay-visual" style={{ marginTop: 60, minHeight: 320, position: 'relative', display: 'grid', placeItems: 'center' }}>
             {phase === 0 && (
               <div className="biovoice-overlay-capture" style={{ width: 720, display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {/* Live waveform — flat unless recording */}
@@ -823,7 +824,7 @@ function VerificationOverlay({ profile, onClose }) {
             {phase === 1 && (
               <div style={{ position: 'relative', display: 'grid', placeItems: 'center', gap: 18 }}>
                 <EmbeddingCloud cols={24} rows={8} size={20} gap={6}/>
-                <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>192 DIMENSIONS · L2-NORMALIZED</div>
+                <div className="label-mono" style={{ fontSize: 13, color: 'var(--teal-2)' }}>HIGH-DIM · L2-NORMALIZED</div>
               </div>
             )}
             {phase === 2 && (
