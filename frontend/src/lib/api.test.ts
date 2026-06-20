@@ -256,7 +256,7 @@ describe("generateSpoofBatch — request body + snake→camel mapping", () => {
           voice_id: null, file_name: "c2.wav", audio_b64: null,
         },
       ],
-      model_provenance: { encoder: "redimnet_b5", detector: "aasist", acoustic_probe: "heuristic", is_degraded: false },
+      model_provenance: { encoder: "redimnet_b5", detector: "heuristic", acoustic_probe: "heuristic", is_degraded: false },
     }));
     const result = await generateSpoofBatch({
       targetUserId: "alice", texts: ["hello"], candidatesPerText: 2, engine: "xtts",

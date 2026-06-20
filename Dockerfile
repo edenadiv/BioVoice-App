@@ -1,9 +1,9 @@
 # P2 — single deployable image (v1.1.0+).
 #
-# Builds the React frontend in stage 1, installs the FastAPI backend
-# (with the [model] extras) in stage 2, and produces a slim runtime
-# image in stage 3 that serves both at port 8000. The bundled React UI
-# is mounted by `app.main` whenever `/app/frontend_dist` exists.
+# Builds the React frontend in stage 1, installs the FastAPI backend's
+# pinned deps (backend/requirements.txt) in stage 2, and produces a slim
+# runtime image in stage 3 that serves both at port 8000. The bundled
+# React UI is mounted by `app.main` whenever `/app/frontend_dist` exists.
 #
 # ML weights (aasist.pt + redimnet_b5.pt) are baked into the image
 # under /app/models — operators don't have to mount them separately.
@@ -32,11 +32,9 @@ COPY frontend/ ./
 RUN npm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2 — install Python deps + backend code.
+# Stage 2 — install Python deps from the team's pinned lockfile.
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS backend
-
-ARG INSTALL_EXTRAS=model
+FROM python:3.11-slim AS backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -45,34 +43,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY backend/pyproject.toml ./
-COPY backend/app ./app
-COPY backend/scripts ./scripts
+COPY backend/requirements.txt ./
 
 RUN pip install --upgrade pip setuptools wheel
 
-# Pre-install CPU-only torch wheels — the default x86_64 wheels bundle
-# CUDA libs (~2 GB). The kiosk runs on CPU only; CUDA support would
-# bloat the image to ~8 GB without ever being exercised.
+# Pre-install CPU-only torch/torchaudio/torchcodec wheels — the default
+# x86_64 wheels bundle CUDA libs (~2 GB) and, for torchcodec, dlopen
+# libnvrtc.so at import time, which doesn't exist in this CPU-only image
+# (OSError at runtime, surfaced as a 503 from any endpoint that decodes
+# audio through it). The kiosk runs on CPU only. Pinned to match
+# requirements.txt exactly so the next step treats them as already satisfied.
 RUN pip install --prefix=/install \
         --index-url https://download.pytorch.org/whl/cpu \
-        "torch>=2.2,<3" "torchaudio>=2.2,<3"
+        torch==2.12.1 torchaudio==2.11.0 torchcodec==0.14.0
 
-RUN PYTHONPATH=/install/lib/python3.12/site-packages \
-    pip install --prefix=/install --no-build-isolation -e ".[${INSTALL_EXTRAS}]"
+RUN PYTHONPATH=/install/lib/python3.11/site-packages \
+    pip install --prefix=/install -r requirements.txt
 
 # `packaging` gets pulled into the build env's DEFAULT site-packages by the
-# setuptools/wheel upgrade above, so the --prefix=/install editable install
-# treats it as already-satisfied and never copies it into /install — the only
-# tree the runtime stage keeps. speechbrain imports `packaging` at module load,
-# so ECAPA silently fails to enable without this. --ignore-installed forces a
+# setuptools/wheel upgrade above, so the --prefix=/install install treats it
+# as already-satisfied and never copies it into /install — the only tree the
+# runtime stage keeps. speechbrain imports `packaging` at module load, so
+# ECAPA silently fails to enable without this. --ignore-installed forces a
 # copy into /install regardless of the build env.
 RUN pip install --prefix=/install --ignore-installed "packaging>=23"
 
 # -----------------------------------------------------------------------------
 # Stage 3 — slim runtime image, frontend + backend served on one port.
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 # Non-root operator account — no ambient root at runtime.
 RUN groupadd --system biovoice --gid 10000 && \

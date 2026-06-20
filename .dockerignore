@@ -5,7 +5,11 @@
 node_modules/
 **/node_modules/
 **/.venv/
+**/.venv-*/
 **/__pycache__/
+
+# Vendored research toolkits — not imported by backend/app, large checkpoints
+third_party/
 **/*.pyc
 **/.pytest_cache/
 **/.mypy_cache/

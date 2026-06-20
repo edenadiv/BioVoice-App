@@ -1,16 +1,12 @@
 # F7.5 — multi-stage Dockerfile for the BioVoice backend.
 #
-# Stage 1 builds the Python wheel + installs the [model] extra against
-# Python 3.12 (TTS pin requirement — F1.4). Stage 2 copies the
-# resulting site-packages into a slim runtime image. Final image
-# weighs ~1.4 GB with the TTS extras included; ~700 MB without.
+# Stage 1 installs the pinned deps from requirements.txt against
+# Python 3.11 (matches backend/pyproject.toml's requires-python and
+# backend/install.ps1's dev venv). Stage 2 copies the resulting
+# site-packages into a slim runtime image.
 #
 # Build:
 #   docker build -f Dockerfile -t biovoice-backend:latest backend
-#
-# Build with the spoof / TTS extras:
-#   docker build --build-arg INSTALL_EXTRAS=model,spoof \
-#       -f Dockerfile -t biovoice-backend:latest backend
 #
 # Model weights (aasist.pt, redimnet_b5.pt) MUST be mounted at runtime
 # under /app/backend/models — see docs/deployment.md for the procedure.
@@ -18,9 +14,7 @@
 # -----------------------------------------------------------------------------
 # Build stage — install deps + compile.
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS build
-
-ARG INSTALL_EXTRAS=model
+FROM python:3.11-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -29,17 +23,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY pyproject.toml ./
+COPY requirements.txt ./
 COPY app ./app
 COPY scripts ./scripts
 
 RUN pip install --upgrade pip && \
-    pip install --prefix=/install --no-build-isolation -e ".[${INSTALL_EXTRAS}]"
+    pip install --prefix=/install \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.12.1 torchaudio==2.11.0 torchcodec==0.14.0 && \
+    PYTHONPATH=/install/lib/python3.11/site-packages \
+    pip install --prefix=/install -r requirements.txt
 
 # -----------------------------------------------------------------------------
 # Runtime stage — slim image, app + deps, no compilers.
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 # Non-root operator account. The kiosk never needs root at runtime.
 RUN groupadd --system biovoice --gid 10000 && \
