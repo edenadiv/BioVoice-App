@@ -57,6 +57,7 @@ class _AdapterCtx:
 def _cosine_or_norm(emb: torch.Tensor, centroid: torch.Tensor | None) -> torch.Tensor:
     if centroid is None:
         return emb.norm(dim=-1)
+    centroid = centroid.to(emb.device)
     e = emb / (emb.norm(dim=-1, keepdim=True) + 1e-8)
     c = centroid / (centroid.norm() + 1e-8)
     return (e * c).sum(dim=-1)
@@ -122,8 +123,13 @@ def _compute_cam(ctx: _AdapterCtx, waveform: list[float]) -> torch.Tensor:
     finally:
         h.remove()
 
-    act = act.detach()
-    grad = grad.detach()
+    # The hooked layer may live on a different device than the rest of this
+    # module if the encoder was auto-placed on GPU (e.g. SpeechBrain's ECAPA
+    # picks CUDA when available) — bring CAM math back to CPU here so every
+    # downstream tensor (mask, pooled saliency, splice indices) matches the
+    # always-CPU waveform tensor.
+    act = act.detach().cpu()
+    grad = grad.detach().cpu()
 
     weights = grad.mean(dim=tuple(range(2, grad.ndim)), keepdim=True)
     cam = (weights * act).sum(dim=1)
