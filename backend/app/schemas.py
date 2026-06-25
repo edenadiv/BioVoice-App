@@ -14,7 +14,7 @@ EncoderProvenance = Literal[
     "wespeaker_resnet293_lm",
     "heuristic_placeholder",
 ]
-DetectorProvenance = Literal["ensemble", "heuristic", "ecapa_cluster_ensemble"]
+DetectorProvenance = Literal["ensemble", "heuristic", "ecapa_cluster_ensemble", "ecapa_cluster_ensemble_xgb"]
 ProbeProvenance = Literal["heuristic", "trained_heads"]
 SpeakerModelKey = Literal["redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm"]
 ExplainModelKey = Literal["redimnet_b5", "ecapa_voxceleb"]
@@ -477,6 +477,10 @@ class ConfigResponse(BaseModel):
     identify_top_n: int = Field(ge=1, le=20)
     enable_ecapa_comparison: bool
     enable_wespeaker_comparison: bool
+    # Deepfake detector backend: XGBoost cluster ensemble when true, else
+    # logistic regression. xgb_available gates whether the toggle is usable.
+    use_xgb_clusters: bool = False
+    xgb_available: bool = False
     # Read-only context for the Settings tab.
     sample_rate: int
     models: list[ConfigModelInfo] = Field(default_factory=list)
@@ -496,3 +500,4 @@ class ConfigPatch(BaseModel):
     identify_top_n: int | None = Field(default=None, ge=1, le=20)
     enable_ecapa_comparison: bool | None = None
     enable_wespeaker_comparison: bool | None = None
+    use_xgb_clusters: bool | None = None

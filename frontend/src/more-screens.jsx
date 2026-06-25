@@ -1465,8 +1465,12 @@ function UserSettingsPage() {
               <SectionCard id="sec-0" infoKey="settings.thresholds" title="Detection thresholds" desc="When does the system call something a match — or a fake? These gate ACCEPT / REJECT / DEEPFAKE.">
                 <SliderRow label="Voice match threshold" value={cfg.similarityThreshold} min={0.5} max={0.95} step={0.01}
                   onChange={(v) => setLocal({ similarityThreshold: v })} onCommit={(v) => apply({ similarityThreshold: v })} hint={matchHint}/>
-                <SliderRow label="Anti-spoof threshold" value={cfg.deepfakeThreshold} min={0.3} max={0.8} step={0.01}
-                  onChange={(v) => setLocal({ deepfakeThreshold: v })} onCommit={(v) => apply({ deepfakeThreshold: v })} hint="Below = audio considered synthetic (DEEPFAKE)"/>
+                <SliderRow label="Anti-spoof threshold" value={cfg.deepfakeThreshold} min={0} max={0.8} step={0.01}
+                  onChange={(v) => setLocal({ deepfakeThreshold: v })} onCommit={(v) => apply({ deepfakeThreshold: v })} hint="Below = audio considered synthetic (DEEPFAKE). Lower = fewer real voices flagged."/>
+                <ToggleRow
+                  label="XGBoost detector" sub={cfg.xgbAvailable ? 'Gradient-boosted cluster ensemble (vs logistic regression)' : 'XGBoost models not on this server'}
+                  value={cfg.useXgbClusters} disabled={!cfg.xgbAvailable}
+                  onChange={(v) => apply({ useXgbClusters: v })}/>
                 <NumberRow label="Identify · top-N matches" value={cfg.identifyTopN} min={1} max={20} step={1}
                   onChange={(v) => apply({ identifyTopN: v })}/>
                 <NumberRow label="Min enrollment samples" value={cfg.minEnrollmentSamples} min={1} max={10} step={1}
@@ -1498,7 +1502,8 @@ function UserSettingsPage() {
                 <KV k="Active speaker models" v={cfg.models.filter((m) => m.participating).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
                 <KV k="Loaded encoders" v={cfg.models.filter((m) => m.loaded).map((m) => MODEL_FULL[m.key] ?? m.key).join(' · ') || '—'}/>
                 <KV k="Detector" v={
-                  cfg.provenance?.detector === 'ecapa_cluster_ensemble' ? 'ECAPA Cluster Ensemble (7 clusters)'
+                  cfg.provenance?.detector === 'ecapa_cluster_ensemble' ? 'ECAPA Cluster Ensemble · LR (7 clusters)'
+                  : cfg.provenance?.detector === 'ecapa_cluster_ensemble_xgb' ? 'ECAPA Cluster Ensemble · XGBoost (7 clusters)'
                   : cfg.provenance?.detector === 'ensemble' ? 'Ensemble (A01–A16)'
                   : (cfg.provenance?.detector ?? '—')
                 }/>
