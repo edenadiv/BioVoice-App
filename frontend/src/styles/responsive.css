@@ -34,6 +34,14 @@ body {
   min-width: 0;
 }
 
+/* Every page wrapper gets a scroll container — without this, pages that
+ * stack to a single column on narrow viewports have nowhere for the extra
+ * vertical content to go (the app shell is a fixed-height, no-scroll kiosk
+ * canvas). No-op for pages that already set this inline. */
+.biovoice-page-content {
+  overflow-y: auto !important;
+}
+
 .biovoice-overlay-shell,
 .biovoice-overlay-capture,
 .biovoice-overlay-progress,
@@ -183,6 +191,31 @@ body {
   .biovoice-console-grid,
   .biovoice-split-grid {
     grid-template-columns: minmax(0, 1fr) !important;
+    /* Collapsing to one column turns 2-3 side-by-side sections into 2-3
+     * implicit grid rows. With no row-height override, a definite-height
+     * grid splits that height equally across rows (align-content: stretch)
+     * instead of sizing each row to its now-much-taller stacked content,
+     * which makes sections overlap. Flex stacking has no such quirk —
+     * each section just takes the height its content needs. */
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* The desktop column sections (and their internal flex:1/2 panels) were
+   * authored assuming a definite, viewport-filling row height, so they
+   * use minHeight:0 to let flex-shrink squeeze them to fit exactly. Once
+   * stacked into a column, the grid/flex container is still pinned to a
+   * definite height (position:absolute;inset:0) — without this override
+   * the shrink algorithm still squeezes each section far below its real
+   * content height (e.g. below a 280px-tall mic panel), which then
+   * visibly overflows into the next section. Stopping shrink at the
+   * top-level section gives each one its natural content height, so
+   * there's nothing left above it to squeeze the inner flex:1/2 panels
+   * either — they just render at their own content size. */
+  .biovoice-console-grid > div,
+  .biovoice-split-grid > div {
+    flex-shrink: 0 !important;
+    min-height: auto !important;
   }
 
   .biovoice-console-counters,
@@ -210,6 +243,17 @@ body {
     flex-wrap: wrap;
   }
 
+  /* Identify's capture/recording/analyzing stages vertically center their
+   * content — fine on a tall desktop screen with room to spare, but once
+   * the stacked content (eyebrow + hero + copy + controls) is taller than
+   * the available height, centering overflows symmetrically in both
+   * directions, pushing content up past the page's own top edge and
+   * behind the fixed header. Anchor to the top instead so any overflow
+   * only goes down, where the page's scroll can reach it. */
+  .biovoice-identify-center {
+    justify-content: flex-start !important;
+  }
+
   .biovoice-overlay-device-row > *,
   .biovoice-overlay-actions > *,
   .biovoice-overlay-submit > *,
@@ -225,6 +269,15 @@ body {
     flex-basis: 180px;
   }
 
+  /* The status footer (pill + screen name + node id + clock) is
+   * absolutely positioned at the bottom of the viewport, same as the
+   * sidebar once it becomes a fixed bottom tab bar below — they'd
+   * otherwise stack on top of each other. The tab bar owns the bottom
+   * of the screen on phone/tablet. */
+  .chrome-bottom {
+    display: none !important;
+  }
+
   .biovoice-sidebar {
     position: fixed !important;
     inset: auto 16px 16px 16px !important;
@@ -237,6 +290,7 @@ body {
     align-items: stretch !important;
     gap: 10px !important;
     padding: 10px !important;
+    padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
     border-radius: 20px !important;
   }
 
@@ -311,7 +365,34 @@ body {
   }
 
   .biovoice-page-content {
-    padding: 176px 16px 104px !important;
+    /* Header shrank to ~110px once it lost the subtitle/partner crest
+     * and got tighter padding above — match the top padding to that. */
+    padding: 130px 16px 104px !important;
+  }
+
+  /* Wordmark subtitle + partner crest push the clock/status pill past
+   * 390px even after wrapping — drop the decorative pieces so what's
+   * left (brand, status pill, clock) actually fits two wrapped rows. */
+  .wordmark .sub,
+  .biovoice-chrome-top-right .partner {
+    display: none !important;
+  }
+
+  /* .chrome-top itself never wrapped (only its right-hand cluster did),
+   * so the wordmark and the pill/clock cluster were still forced onto
+   * one row together and the desktop 28px/44px padding ate further into
+   * it — the cluster got squeezed into ~126px and the clock text/right
+   * edge of the cluster clipped past the viewport. Shrink the wordmark
+   * text and let the row wrap so the cluster can drop to its own line
+   * at full width instead. */
+  .chrome-top {
+    padding: 16px 16px !important;
+    flex-wrap: wrap !important;
+    row-gap: 8px !important;
+  }
+
+  .wordmark .name {
+    font-size: 20px !important;
   }
 
   .biovoice-console-metrics,
