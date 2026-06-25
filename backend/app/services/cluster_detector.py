@@ -39,8 +39,9 @@ class _ClusterMeta(NamedTuple):
 
 class _ClusterSystem(NamedTuple):
     cluster_id: int
-    scaler: object
-    clf: object
+    scaler: object       # LR StandardScaler
+    clf: object          # LR LogisticRegression
+    xgb: object | None   # XGBClassifier on raw embeddings, or None if unavailable
     meta: _ClusterMeta
 
 
@@ -53,11 +54,14 @@ class TopClusterInfo(NamedTuple):
 
 class ClusterEnsembleDetectorService:
     def __init__(self, models_path: Path | str, ecapa_savedir: Path | str | None = None,
-                 ecapa_source: str = "speechbrain/spkrec-ecapa-voxceleb", device: str | None = None):
+                 ecapa_source: str = "speechbrain/spkrec-ecapa-voxceleb", device: str | None = None,
+                 use_xgb: bool = False):
         self.models_path = Path(models_path)
         self.ecapa_savedir = Path(ecapa_savedir) if ecapa_savedir else None
         self.ecapa_source = ecapa_source
         self.device = device or "cpu"
+        self.use_xgb = bool(use_xgb)   # runtime-switchable: prefer XGB when available
+        self._xgb_available = False     # set in load(): True iff every cluster has an XGB model
         self._encoder = None        # speechbrain EncoderClassifier
         self._torch = None
         self._clusters: list[_ClusterSystem] = []
@@ -69,7 +73,20 @@ class ClusterEnsembleDetectorService:
     @property
     def provenance(self) -> str:
         self.load()
-        return "ecapa_cluster_ensemble" if self._clusters else "heuristic"
+        if not self._clusters:
+            return "heuristic"
+        return "ecapa_cluster_ensemble_xgb" if self._xgb_active else "ecapa_cluster_ensemble"
+
+    @property
+    def xgb_available(self) -> bool:
+        """True when every loaded cluster has an XGB model (so the toggle is usable)."""
+        self.load()
+        return self._xgb_available
+
+    @property
+    def _xgb_active(self) -> bool:
+        """Effective backend: XGB only when requested AND fully available."""
+        return bool(self.use_xgb and self._xgb_available)
 
     def load(self) -> None:
         if self._loaded:
@@ -100,25 +117,55 @@ class ClusterEnsembleDetectorService:
             self._encoder = None
             return
 
+        # XGBClassifier is optional — only needed if xgboost.json files exist.
+        xgb_cls = None
+        try:
+            from xgboost import XGBClassifier
+            xgb_cls = XGBClassifier
+        except ImportError:
+            logger.info("xgboost not installed; cluster detector runs LR-only")
+
         clusters: list[_ClusterSystem] = []
+        xgb_count = 0
         for cid, meta in cluster_meta.items():
             cdir = self.models_path / f"cluster_{cid}"
             scaler_path = cdir / "scaler.pkl"
             clf_path = cdir / "logistic_regression.pkl"
+            xgb_path = cdir / "xgboost.json"
+
+            # LR is the baseline and is required.
             if not scaler_path.exists() or not clf_path.exists():
-                logger.warning("Skipping cluster_%d: pkl files missing", cid)
+                logger.warning("Skipping cluster_%d: LR pkl files missing", cid)
                 continue
             try:
                 with scaler_path.open("rb") as f:
                     scaler = pickle.load(f)
                 with clf_path.open("rb") as f:
                     clf = pickle.load(f)
-                clusters.append(_ClusterSystem(cid, scaler, clf, meta))
             except Exception as exc:
-                logger.warning("Could not load cluster_%d: %s", cid, exc)
+                logger.warning("Could not load LR cluster_%d: %s", cid, exc)
+                continue
+
+            # XGB is optional and loaded alongside LR so the backend can be
+            # switched at runtime (scored on raw embeddings, no scaler).
+            xgb = None
+            if xgb_cls is not None and xgb_path.exists():
+                try:
+                    xgb = xgb_cls()
+                    xgb.load_model(str(xgb_path))
+                    xgb_count += 1
+                except Exception as exc:
+                    logger.warning("Could not load XGB cluster_%d (%s); LR only for it", cid, exc)
+                    xgb = None
+
+            clusters.append(_ClusterSystem(cid, scaler, clf, xgb, meta))
 
         self._clusters = clusters
-        logger.info("Cluster ensemble detector ready: %d clusters loaded", len(clusters))
+        self._xgb_available = bool(clusters) and xgb_count == len(clusters)
+        logger.info(
+            "Cluster ensemble detector ready: %d clusters loaded (XGB available: %s, active backend: %s)",
+            len(clusters), self._xgb_available, "XGB" if self._xgb_active else "LR",
+        )
 
     def _load_cluster_metadata(self) -> dict[int, _ClusterMeta]:
         """Parse cluster_semantic_labels.csv (backbone==ECAPA rows) for
@@ -202,9 +249,13 @@ class ClusterEnsembleDetectorService:
     def _run_clusters(self, emb) -> list[tuple[_ClusterSystem, float]]:
         emb_2d = emb.reshape(1, -1)
 
+        use_xgb = self._xgb_active
+
         def _score(system: _ClusterSystem) -> tuple[_ClusterSystem, float]:
-            scaled = system.scaler.transform(emb_2d)
-            p_spoof = float(system.clf.predict_proba(scaled)[0, 1])
+            if use_xgb and system.xgb is not None:
+                p_spoof = float(system.xgb.predict_proba(emb_2d)[0, 1])  # raw embeddings
+            else:
+                p_spoof = float(system.clf.predict_proba(system.scaler.transform(emb_2d))[0, 1])
             return system, p_spoof
 
         results: list[tuple[_ClusterSystem, float]] = []

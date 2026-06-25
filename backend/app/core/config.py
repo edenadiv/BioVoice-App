@@ -102,10 +102,17 @@ class Settings:
     # Lower → more false accepts (security risk); higher → more false
     # rejects (operator unusability). 0.75 is the SDD default.
     similarity_threshold: float = 0.75
-    # deepfake_threshold: AASIST score cutoff for "GENUINE" decisions.
-    # Lower → more synthetic audio passes through; higher → more real
-    # voices flagged as DEEPFAKE. 0.50 is the SDD default.
-    deepfake_threshold: float = 0.50
+    # deepfake_threshold: cutoff on the cluster detector's authenticity
+    # score = 1 - max(p_spoof) over the 7 ECAPA cluster models. A clip is
+    # GENUINE when score >= threshold, i.e. flagged DEEPFAKE when
+    # max(p_spoof) > (1 - threshold). Lower → fewer real voices wrongly
+    # flagged (the max-of-7 rule false-alarms easily); higher → more.
+    # 0.50 (the old SDD default) flags fake at p_spoof>0.50 and false-alarmed
+    # ~25% of bonafide on ASVspoof5 held-out. 0.03 flags fake at p_spoof>=0.97
+    # (~2-5% false-alarm) — see docs/thresholds.md. 0.1 (flags at p_spoof>=0.90)
+    # is the current operating point, a stricter middle ground pending a
+    # proper FAR/FRR curve for the cluster ensemble. Override via env to retune.
+    deepfake_threshold: float = field(default_factory=lambda: _float_from_env("DEEPFAKE_THRESHOLD", 0.1))
     redimnet_similarity_threshold: float = field(default_factory=lambda: _float_from_env("REDIMNET_SIMILARITY_THRESHOLD", 0.75))
     ecapa_similarity_threshold: float = field(default_factory=lambda: _float_from_env("ECAPA_SIMILARITY_THRESHOLD", 0.75))
     wespeaker_similarity_threshold: float = field(default_factory=lambda: _float_from_env("WESPEAKER_SIMILARITY_THRESHOLD", 0.75))
@@ -139,6 +146,12 @@ class Settings:
     # logistic_regression.pkl + members.json, plus
     # cluster_semantic_labels.csv for human-readable labels.
     cluster_models_path: Path = _BACKEND_DIR / "models" / "ecapa_grouped_clusters_32_systems"
+    # When true, the cluster detector loads xgboost.json per cluster (scored
+    # on raw embeddings, no scaler) instead of logistic_regression.pkl.
+    # Default off preserves the production LR behavior; each cluster_N/ must
+    # contain xgboost.json for the flag to take effect (else it falls back to
+    # LR per cluster). Set USE_XGB_CLUSTERS=1 to enable.
+    use_xgb_clusters: bool = field(default_factory=lambda: _bool_from_env("USE_XGB_CLUSTERS", False))
     redimnet_weights_path: Path = _BACKEND_DIR / "models" / "redimnet_b5.pt"
     ecapa_savedir: Path = _BACKEND_DIR / "models" / "ecapa_voxceleb"
     wespeaker_resnet293_dir: Path = _BACKEND_DIR / "models" / "wespeaker_resnet293_lm"

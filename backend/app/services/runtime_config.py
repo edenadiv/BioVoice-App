@@ -49,6 +49,7 @@ def editable_overrides(container: "AppContainer") -> dict:
         "identify_top_n": vs.identify_top_n,
         "enable_ecapa_comparison": "ecapa_voxceleb" in vs.comparison_encoders,
         "enable_wespeaker_comparison": "wespeaker_resnet293_lm" in vs.comparison_encoders,
+        "use_xgb_clusters": bool(getattr(container.detector, "use_xgb", False)),
     }
 
 
@@ -72,6 +73,7 @@ def effective_config(container: "AppContainer") -> ConfigResponse:
     values = editable_overrides(container)
     return ConfigResponse(
         **values,
+        xgb_available=bool(getattr(container.detector, "xgb_available", False)),
         sample_rate=vs.sample_rate,
         models=[_model_info(container, key) for key in ("redimnet_b5", "ecapa_voxceleb", "wespeaker_resnet293_lm")],
         provenance=vs._collect_provenance(),
@@ -118,6 +120,11 @@ def apply_patch(container: "AppContainer", patch: dict) -> ConfigResponse:
         _set_participation(container, "ecapa_voxceleb", bool(patch["enable_ecapa_comparison"]))
     if "enable_wespeaker_comparison" in patch:
         _set_participation(container, "wespeaker_resnet293_lm", bool(patch["enable_wespeaker_comparison"]))
+    if "use_xgb_clusters" in patch:
+        want = bool(patch["use_xgb_clusters"])
+        if want and not getattr(container.detector, "xgb_available", False):
+            raise ValueError("XGBoost cluster models are not available on this server.")
+        container.detector.use_xgb = want
 
     container.store.set_config_overrides(editable_overrides(container))
     return effective_config(container)

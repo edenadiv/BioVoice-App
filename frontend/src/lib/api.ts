@@ -900,6 +900,8 @@ type ConfigResponse = {
   identify_top_n: number;
   enable_ecapa_comparison: boolean;
   enable_wespeaker_comparison: boolean;
+  use_xgb_clusters?: boolean;
+  xgb_available?: boolean;
   sample_rate: number;
   models: ConfigModelInfoResponse[];
   model_provenance?: ModelProvenanceResponse | null;
@@ -917,6 +919,8 @@ function toAppConfig(c: ConfigResponse): AppConfig {
     identifyTopN: c.identify_top_n,
     enableEcapaComparison: c.enable_ecapa_comparison,
     enableWespeakerComparison: c.enable_wespeaker_comparison,
+    useXgbClusters: c.use_xgb_clusters ?? false,
+    xgbAvailable: c.xgb_available ?? false,
     sampleRate: c.sample_rate,
     models: c.models.map((m): ConfigModelInfo => ({
       key: m.key,
@@ -939,6 +943,7 @@ const CONFIG_PATCH_KEYS: Record<keyof ConfigPatch, string> = {
   identifyTopN: "identify_top_n",
   enableEcapaComparison: "enable_ecapa_comparison",
   enableWespeakerComparison: "enable_wespeaker_comparison",
+  useXgbClusters: "use_xgb_clusters",
 };
 
 export async function getConfig(): Promise<AppConfig> {

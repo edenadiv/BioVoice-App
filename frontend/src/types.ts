@@ -282,6 +282,8 @@ export type AppConfig = {
   identifyTopN: number;
   enableEcapaComparison: boolean;
   enableWespeakerComparison: boolean;
+  useXgbClusters: boolean;
+  xgbAvailable: boolean;
   sampleRate: number;
   models: ConfigModelInfo[];
   provenance: ModelProvenance | null;
@@ -297,4 +299,5 @@ export type ConfigPatch = Partial<{
   identifyTopN: number;
   enableEcapaComparison: boolean;
   enableWespeakerComparison: boolean;
+  useXgbClusters: boolean;
 }>;

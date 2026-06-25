@@ -78,6 +78,7 @@ def build_container(settings: Settings) -> AppContainer:
     detector = ClusterEnsembleDetectorService(
         models_path=settings.cluster_models_path,
         ecapa_savedir=settings.ecapa_savedir,
+        use_xgb=bool(ov("use_xgb_clusters", settings.use_xgb_clusters)),
     )
     speaker_encoder = RedimNetSpeakerEncoder(weights_path=settings.redimnet_weights_path)
 
